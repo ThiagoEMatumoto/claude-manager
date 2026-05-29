@@ -6,6 +6,7 @@ import type {
   Repo,
   CreateProjectInput,
   CreateRepoInput,
+  LinkKind,
 } from '../../../shared/types/ipc'
 
 interface ProjectRow {
@@ -13,6 +14,7 @@ interface ProjectRow {
   name: string
   color: string | null
   icon: string | null
+  vault_path: string | null
   created_at: number
   updated_at: number
 }
@@ -23,6 +25,8 @@ interface RepoRow {
   label: string
   path: string
   role: string | null
+  link_kind: string
+  source: string | null
   position: number
   created_at: number
 }
@@ -32,6 +36,7 @@ const toProject = (row: ProjectRow): Project => ({
   name: row.name,
   color: row.color,
   icon: row.icon,
+  vaultPath: row.vault_path,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -42,6 +47,8 @@ const toRepo = (row: RepoRow): Repo => ({
   label: row.label,
   path: row.path,
   role: row.role,
+  linkKind: row.link_kind as LinkKind,
+  source: row.source,
   position: row.position,
   createdAt: row.created_at,
 })
@@ -61,6 +68,7 @@ export function registerProjectIpc(): void {
       name: input.name,
       color: input.color ?? null,
       icon: input.icon ?? null,
+      vault_path: null,
       created_at: now,
       updated_at: now,
     }
@@ -96,6 +104,8 @@ export function registerProjectIpc(): void {
       label: input.label,
       path: input.path,
       role: input.role ?? null,
+      link_kind: 'external',
+      source: null,
       position: maxPos.max + 1,
       created_at: Date.now(),
     }

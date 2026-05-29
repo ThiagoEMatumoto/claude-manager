@@ -1,11 +1,14 @@
 // Tipos compartilhados main ↔ renderer via contextBridge.
 // Toda feature nova adiciona seus tipos aqui e estende `Api` no preload.
 
+export type LinkKind = 'inside' | 'symlink' | 'external'
+
 export interface Project {
   id: string
   name: string
   color: string | null
   icon: string | null
+  vaultPath: string | null
   createdAt: number
   updatedAt: number
 }
@@ -16,6 +19,8 @@ export interface Repo {
   label: string
   path: string
   role: string | null
+  linkKind: LinkKind
+  source: string | null
   position: number
   createdAt: number
 }
@@ -35,6 +40,7 @@ export interface CreateProjectInput {
   name: string
   color?: string | null
   icon?: string | null
+  vaultPath?: string | null
 }
 
 export interface CreateRepoInput {
@@ -42,6 +48,8 @@ export interface CreateRepoInput {
   label: string
   path: string
   role?: string | null
+  linkKind?: LinkKind
+  source?: string | null
 }
 
 export interface SpawnSessionInput {

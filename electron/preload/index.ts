@@ -32,6 +32,7 @@ const api: Api = {
   },
   sessions: {
     spawn: (input: SpawnSessionInput) => invoke('sessions:spawn', input),
+    getBacklog: (sessionId) => invoke('sessions:get-backlog', sessionId),
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
     resize: (sessionId, cols, rows) => invoke('sessions:resize', sessionId, cols, rows),
     kill: (sessionId) => invoke('sessions:kill', sessionId),

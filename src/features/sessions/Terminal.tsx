@@ -8,10 +8,10 @@ import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
 import { useSession } from './useSession'
-import type { SessionActivity } from '../../../shared/types/ipc'
+import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
 interface Props {
-  repoId: string
+  session: Session
   repoLabel: string
   repoPath: string
   projectName: string
@@ -56,15 +56,14 @@ function formatRelative(ms: number): string {
 }
 
 export function Terminal({
-  repoId,
+  session,
   repoLabel,
   repoPath,
   projectName,
   projectIcon,
   onClose,
 }: Props) {
-  const { session, exited, exitCode, error, start, write, kill, resize, setDataHandler } =
-    useSession(repoId)
+  const { exited, exitCode, error, write, kill, resize, setDataHandler } = useSession(session.id)
   const hostRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -77,11 +76,11 @@ export function Terminal({
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    setTitle(session?.title ?? null)
-  }, [session?.title])
+    setTitle(session.title ?? null)
+  }, [session.title])
 
   // O ccSessionId é o próprio session.id (ver sessions:spawn no main).
-  const ccSessionId = session?.ccSessionId ?? null
+  const ccSessionId = session.ccSessionId ?? null
 
   useEffect(() => {
     if (!ccSessionId || exited) return
@@ -120,7 +119,7 @@ export function Terminal({
   function commitRename() {
     setEditing(false)
     const next = draft.trim()
-    if (!session || next === (title ?? '')) return
+    if (next === (title ?? '')) return
     setTitle(next.length > 0 ? next : null)
     void sessionsApi.rename(session.id, next)
   }
@@ -161,10 +160,28 @@ export function Terminal({
     xtermRef.current = term
     fitRef.current = fit
 
-    // Registrar o sink antes do spawn garante que os primeiros bytes do claude
-    // sejam escritos no xterm sem perda.
-    setDataHandler((data) => term.write(data))
+    // O processo já foi spawnado no clique, então pode já ter emitido bytes.
+    // Para o replay: acumulamos a saída live num buffer (`liveTotal`) e buscamos
+    // o backlog (snapshot do histórico no main). O backlog é prefixo do que vimos
+    // até agora; escrevemos o backlog inteiro, depois só a cauda do live que ele
+    // ainda não cobria. Assim não duplicamos os bytes que entraram em `liveTotal`
+    // enquanto o IPC do backlog estava em voo. Idempotente em remounts (StrictMode)
+    // porque o term é novo e zerado a cada mount.
+    let flushed = false
+    let liveTotal = ''
+    setDataHandler((data) => {
+      if (flushed) term.write(data)
+      else liveTotal += data
+    })
     term.onData((d) => write(d))
+
+    void sessionsApi.getBacklog(session.id).then((backlog) => {
+      if (xtermRef.current !== term) return
+      term.write(backlog)
+      if (liveTotal.length > backlog.length) term.write(liveTotal.slice(backlog.length))
+      liveTotal = ''
+      flushed = true
+    })
 
     // Copy-on-select: copiar automaticamente o que for selecionado.
     term.onSelectionChange(() => {
@@ -200,7 +217,7 @@ export function Terminal({
       return true
     })
 
-    void start(term.cols, term.rows)
+    resize(term.cols, term.rows)
 
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
@@ -215,17 +232,18 @@ export function Terminal({
     })
     observer.observe(host)
 
+    // O cleanup NÃO mata a sessão — só desfaz o xterm e os listeners. A sessão
+    // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
       host.removeEventListener('contextmenu', onContextMenu)
       observer.disconnect()
       setDataHandler(null)
-      kill()
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoId])
+  }, [session.id])
 
   return (
     <div className="flex h-full flex-col">
@@ -269,7 +287,7 @@ export function Terminal({
           <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
         </div>
         <div className="flex items-center gap-3 text-[var(--color-text-dim)]">
-          {session && !exited && (
+          {!exited && (
             <div className="flex min-w-0 items-center gap-2">
               {statusView ? (
                 <span className={statusView.className}>{statusView.label}</span>
@@ -289,7 +307,7 @@ export function Terminal({
           <button
             type="button"
             onClick={kill}
-            disabled={!session || exited}
+            disabled={exited}
             title="Encerrar o processo (claude) nesta sessão"
             className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] disabled:opacity-40"
           >

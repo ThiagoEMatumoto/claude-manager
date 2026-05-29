@@ -142,6 +142,10 @@ export function registerSessionIpc(): void {
     return toSession(row)
   })
 
+  ipcMain.handle('sessions:get-backlog', (_e, sessionId: string) => {
+    return ptyManager.getBacklog(sessionId)
+  })
+
   ipcMain.handle('sessions:write', (_e, sessionId: string, data: string) => {
     ptyManager.write(sessionId, data)
   })

@@ -3,11 +3,12 @@ import { Sidebar } from '@/features/projects/Sidebar'
 import { Terminal } from '@/features/sessions/Terminal'
 import { useProjects } from '@/features/projects/useProjects'
 import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
-import { projectsApi, vaultApi, workspaceApi } from '@/lib/ipc'
-import type { Repo } from '../../shared/types/ipc'
+import { projectsApi, sessionsApi, vaultApi, workspaceApi } from '@/lib/ipc'
+import type { Repo, Session } from '../../shared/types/ipc'
 
 interface ActiveSession {
   paneId: string
+  session: Session
   repo: Repo
   projectName: string
   projectIcon: string | null
@@ -54,10 +55,14 @@ export default function App() {
     const repo = repos.find((r) => r.id === repoId)
     if (!repo) return
     const project = projects.find((p) => p.id === projectId)
+    // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
+    // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
+    const session = await sessionsApi.spawn({ repoId })
     setActiveSessions((prev) => [
       ...prev,
       {
         paneId: `pane-${Date.now()}`,
+        session,
         repo,
         projectName: project?.name ?? '',
         projectIcon: project?.icon ?? null,
@@ -66,7 +71,11 @@ export default function App() {
   }
 
   function closePane(paneId: string) {
-    setActiveSessions((prev) => prev.filter((p) => p.paneId !== paneId))
+    setActiveSessions((prev) => {
+      const pane = prev.find((p) => p.paneId === paneId)
+      if (pane) void sessionsApi.kill(pane.session.id)
+      return prev.filter((p) => p.paneId !== paneId)
+    })
   }
 
   if (vaultConfigured === false) {
@@ -92,7 +101,7 @@ export default function App() {
             {activeSessions.map((s) => (
               <div key={s.paneId} className="flex flex-col bg-[var(--color-bg)]">
                 <Terminal
-                  repoId={s.repo.id}
+                  session={s.session}
                   repoLabel={s.repo.label}
                   repoPath={s.repo.path}
                   projectName={s.projectName}

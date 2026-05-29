@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { RoleSelect } from '@/components/ui/RoleSelect'
 import { dialogApi, repoApi, vaultApi } from '@/lib/ipc'
 import { LinkChoiceModal } from './LinkChoiceModal'
 import type { CreateRepoInput, Project } from '../../../shared/types/ipc'
@@ -30,7 +31,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
   const [target, setTarget] = useState<string | null>(null)
   const [url, setUrl] = useState('')
   const [label, setLabel] = useState('')
-  const [role, setRole] = useState('')
+  const [role, setRole] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkChoice, setLinkChoice] = useState<{ source: string; label: string } | null>(null)
@@ -41,7 +42,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
     setTarget(null)
     setUrl('')
     setLabel('')
-    setRole('')
+    setRole(null)
     setError(null)
     setLinkChoice(null)
   }, [open])
@@ -54,10 +55,9 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
   }
 
   const finalLabel = label.trim() || (origin === 'clone' ? repoNameFromUrl(url) : '')
-  const roleValue = role.trim() || null
 
   async function done(input: Omit<CreateRepoInput, 'projectId'>) {
-    await onCreate({ ...input, role: roleValue })
+    await onCreate({ ...input, role })
     onClose()
   }
 
@@ -188,12 +188,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
           placeholder={origin === 'clone' ? repoNameFromUrl(url) || 'nome' : 'nome'}
           className="mb-3"
         />
-        <Input
-          label="Role (opcional)"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          placeholder="ex: front, api"
-        />
+        <RoleSelect value={role} onChange={setRole} />
 
         {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
       </Dialog>

@@ -65,6 +65,48 @@ export async function readPlugins(): Promise<PluginInfo[]> {
   }
 }
 
+export interface PluginCatalogEntry {
+  category: string | null
+  description: string | null
+  author: string | null
+}
+
+// Varre ~/.claude/plugins/marketplaces/*/.claude-plugin/marketplace.json e monta
+// um mapa nome-do-plugin -> { category, description, author }. O nome NÃO carrega
+// o @marketplace; o cruzamento com os plugins instalados é feito pelo `name`.
+export async function readMarketplaceCatalog(): Promise<Map<string, PluginCatalogEntry>> {
+  const out = new Map<string, PluginCatalogEntry>()
+  try {
+    const root = join(CLAUDE_DIR, 'plugins', 'marketplaces')
+    const dirs = await readdir(root, { withFileTypes: true })
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue
+      const manifest = await readJson(
+        join(root, dir.name, '.claude-plugin', 'marketplace.json'),
+      )
+      if (!isRecord(manifest) || !Array.isArray(manifest.plugins)) continue
+      for (const p of manifest.plugins) {
+        if (!isRecord(p) || typeof p.name !== 'string') continue
+        if (out.has(p.name)) continue
+        const author =
+          isRecord(p.author) && typeof p.author.name === 'string'
+            ? p.author.name
+            : typeof p.author === 'string'
+              ? p.author
+              : null
+        out.set(p.name, {
+          category: typeof p.category === 'string' ? p.category : null,
+          description: typeof p.description === 'string' ? p.description : null,
+          author,
+        })
+      }
+    }
+  } catch {
+    // sem diretório de marketplaces
+  }
+  return out
+}
+
 interface InstalledPlugin {
   id: string
   installPath: string

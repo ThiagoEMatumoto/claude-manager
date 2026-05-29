@@ -4,6 +4,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { runClaude, runClaudeJson } from '../services/claude-cli'
+import {
+  readMarketplaceCatalog,
+  type PluginCatalogEntry,
+} from '../services/claude-config-reader'
+import { readPluginComponents } from '../services/plugin-components'
 import type {
   AvailablePlugin,
   ManagedPluginInfo,
@@ -47,11 +52,19 @@ interface RawInstalled {
   scope?: unknown
   enabled?: unknown
   installedAt?: unknown
+  installPath?: unknown
 }
 
-function mapInstalled(item: RawInstalled, maintainers: Record<string, string>): ManagedPluginInfo {
+const EMPTY_CATALOG: PluginCatalogEntry = { category: null, description: null, author: null }
+
+function mapInstalled(
+  item: RawInstalled,
+  maintainers: Record<string, string>,
+  catalog: Map<string, PluginCatalogEntry>,
+): ManagedPluginInfo {
   const id = typeof item.id === 'string' ? item.id : ''
   const { name, marketplace } = splitId(id)
+  const meta = catalog.get(name) ?? EMPTY_CATALOG
   return {
     id,
     name,
@@ -61,16 +74,20 @@ function mapInstalled(item: RawInstalled, maintainers: Record<string, string>): 
     enabled: item.enabled === true,
     installedAt: typeof item.installedAt === 'string' ? item.installedAt : null,
     maintainer: maintainers[marketplace] ?? null,
+    category: meta.category,
+    description: meta.description,
+    author: meta.author,
   }
 }
 
 async function listInstalled(): Promise<ManagedPluginInfo[]> {
-  const [{ data }, maintainers] = await Promise.all([
+  const [{ data }, maintainers, catalog] = await Promise.all([
     runClaudeJson<RawInstalled[]>(['plugin', 'list', '--json'], { timeoutMs: 20_000 }),
     readMaintainers(),
+    readMarketplaceCatalog(),
   ])
   if (!Array.isArray(data)) return []
-  return data.map((item) => mapInstalled(item, maintainers))
+  return data.map((item) => mapInstalled(item, maintainers, catalog))
 }
 
 // `--available` retorna um objeto { installed: [...], available: [...] } onde cada
@@ -86,11 +103,12 @@ interface AvailableEnvelope {
 }
 
 async function listAvailable(): Promise<AvailablePlugin[]> {
-  const [{ data }, maintainers] = await Promise.all([
+  const [{ data }, maintainers, catalog] = await Promise.all([
     runClaudeJson<AvailableEnvelope>(['plugin', 'list', '--json', '--available'], {
       timeoutMs: 30_000,
     }),
     readMaintainers(),
+    readMarketplaceCatalog(),
   ])
   if (!isRecord(data)) return []
 
@@ -107,12 +125,16 @@ async function listAvailable(): Promise<AvailablePlugin[]> {
     const id = typeof item.pluginId === 'string' ? item.pluginId : ''
     if (!id || installedIds.has(id)) continue
     const { name, marketplace } = splitId(id)
+    const meta = catalog.get(name) ?? EMPTY_CATALOG
+    const cliDescription = typeof item.description === 'string' ? item.description : undefined
     out.push({
       id,
       name: typeof item.name === 'string' ? item.name : name,
       marketplace,
       maintainer: maintainers[marketplace] ?? null,
-      description: typeof item.description === 'string' ? item.description : undefined,
+      description: cliDescription ?? meta.description ?? undefined,
+      category: meta.category,
+      author: meta.author,
     })
   }
   return out
@@ -174,6 +196,24 @@ function parseDetails(stdout: string, fallbackName: string): PluginDetails {
   return details
 }
 
+// Resolve o installPath de um plugin pelo nome (parte antes do @). Usa o JSON do
+// `plugin list`, que carrega installPath de cada plugin instalado.
+async function resolveInstallPath(name: string): Promise<string | null> {
+  const { data } = await runClaudeJson<RawInstalled[]>(['plugin', 'list', '--json'], {
+    timeoutMs: 20_000,
+  })
+  if (!Array.isArray(data)) return null
+  for (const item of data) {
+    const id = typeof item.id === 'string' ? item.id : ''
+    if (!id) continue
+    const { name: pluginName } = splitId(id)
+    if ((pluginName === name || id === name) && typeof item.installPath === 'string') {
+      return item.installPath
+    }
+  }
+  return null
+}
+
 const actionSchema = z.object({
   action: z.enum(['enable', 'disable', 'uninstall', 'update', 'install']),
   name: z.string().min(1),
@@ -200,7 +240,13 @@ export function registerClaudePluginsIpc(): void {
 
   ipcMain.handle('cc:plugins:details', async (_e, payload: unknown): Promise<PluginDetails> => {
     const { name } = detailsSchema.parse(payload)
-    const result = await runClaude(['plugin', 'details', name], { timeoutMs: 20_000 })
+    const [result, installPath] = await Promise.all([
+      runClaude(['plugin', 'details', name], { timeoutMs: 20_000 }),
+      resolveInstallPath(name),
+    ])
+    const componentRefs = installPath
+      ? await readPluginComponents(installPath)
+      : undefined
     if (result.code !== 0) {
       return {
         name,
@@ -208,9 +254,12 @@ export function registerClaudePluginsIpc(): void {
         source: '',
         components: { skills: 0, agents: 0, hooks: 0, mcpServers: 0, lspServers: 0 },
         raw: result.stderr || result.stdout,
+        componentRefs,
       }
     }
-    return parseDetails(result.stdout, name)
+    const details = parseDetails(result.stdout, name)
+    if (componentRefs) details.componentRefs = componentRefs
+    return details
   })
 
   ipcMain.handle('cc:plugins:action', async (_e, payload: unknown): Promise<PluginActionResult> => {

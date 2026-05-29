@@ -171,6 +171,9 @@ export interface ManagedPluginInfo {
   enabled: boolean
   installedAt: string | null
   maintainer: string | null
+  category: string | null
+  description: string | null
+  author: string | null
 }
 
 export interface AvailablePlugin {
@@ -179,6 +182,8 @@ export interface AvailablePlugin {
   marketplace: string
   maintainer: string | null
   description?: string
+  category: string | null
+  author: string | null
 }
 
 export interface PluginDetails {
@@ -194,6 +199,8 @@ export interface PluginDetails {
   }
   alwaysOnTokens?: number
   raw?: string
+  // Componentes nomeados lidos do installPath (complementa as contagens acima).
+  componentRefs?: PluginComponents
 }
 
 export type PluginAction = 'enable' | 'disable' | 'uninstall' | 'update' | 'install'

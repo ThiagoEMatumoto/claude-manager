@@ -82,19 +82,12 @@ export default function App() {
         ) : (
           <div className="grid h-full auto-rows-fr gap-px bg-[var(--color-border)]" style={{ gridTemplateColumns: `repeat(${Math.min(activeSessions.length, 3)}, minmax(0, 1fr))` }}>
             {activeSessions.map((s) => (
-              <div key={s.paneId} className="relative flex flex-col bg-[var(--color-bg)]">
-                <button
-                  type="button"
-                  onClick={() => closePane(s.paneId)}
-                  className="absolute right-2 top-2 z-10 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-xs text-[var(--color-text-dim)] hover:text-red-400"
-                  title="Fechar pane"
-                >
-                  ×
-                </button>
+              <div key={s.paneId} className="flex flex-col bg-[var(--color-bg)]">
                 <Terminal
                   repoId={s.repo.id}
                   repoLabel={s.repo.label}
                   repoPath={s.repo.path}
+                  onClose={() => closePane(s.paneId)}
                 />
               </div>
             ))}

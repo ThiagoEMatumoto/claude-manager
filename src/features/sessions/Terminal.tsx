@@ -13,6 +13,7 @@ interface Props {
   repoId: string
   repoLabel: string
   repoPath: string
+  onClose: () => void
 }
 
 const THEME = {
@@ -25,7 +26,7 @@ const THEME = {
   brightBlack: '#9c9cae',
 }
 
-export function Terminal({ repoId, repoLabel, repoPath }: Props) {
+export function Terminal({ repoId, repoLabel, repoPath, onClose }: Props) {
   const { session, exited, exitCode, error, start, write, kill, resize, setDataHandler } =
     useSession(repoId)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -137,9 +138,19 @@ export function Terminal({ repoId, repoLabel, repoPath }: Props) {
             type="button"
             onClick={kill}
             disabled={!session || exited}
+            title="Encerrar o processo (claude) nesta sessão"
             className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] disabled:opacity-40"
           >
             kill
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Fechar a pane"
+            aria-label="Fechar a pane"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 leading-none hover:bg-[var(--color-surface-2)] hover:text-red-400"
+          >
+            ✕
           </button>
         </div>
       </div>

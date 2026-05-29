@@ -90,4 +90,7 @@ export interface Api {
   shell: {
     openPath(path: string): Promise<void>
   }
+  dialog: {
+    openDirectory(): Promise<string | null>
+  }
 }

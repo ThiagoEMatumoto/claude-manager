@@ -6,6 +6,7 @@ import { ptyManager } from './services/pty-manager'
 import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
+import { registerDialogIpc } from './ipc/dialog'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -49,6 +50,7 @@ app.whenReady().then(() => {
   registerProjectIpc()
   registerSessionIpc()
   registerShellIpc()
+  registerDialogIpc()
 
   createMainWindow()
 

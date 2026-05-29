@@ -41,6 +41,9 @@ const api: Api = {
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),
   },
+  dialog: {
+    openDirectory: () => invoke('dialog:open-directory'),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

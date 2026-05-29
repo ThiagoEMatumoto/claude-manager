@@ -78,6 +78,9 @@ const api: Api = {
     bumpRestoreAttempts: () => invoke('workspace:bump-restore-attempts'),
     resetRestoreAttempts: () => invoke('workspace:reset-restore-attempts'),
   },
+  ccConfigs: {
+    read: () => invoke('cc:read-configs'),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

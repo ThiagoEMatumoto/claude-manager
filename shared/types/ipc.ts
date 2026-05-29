@@ -108,6 +108,34 @@ export interface SessionActivity {
   tokens?: { output: number; context: number }
 }
 
+export interface PluginInfo {
+  name: string
+  marketplace: string
+  enabled: boolean
+}
+
+export interface AgentInfo {
+  name: string
+  description: string
+}
+
+export interface SkillInfo {
+  name: string
+  description: string
+}
+
+export interface McpInfo {
+  name: string
+  kind: string
+}
+
+export interface ClaudeConfigs {
+  plugins: PluginInfo[]
+  agents: AgentInfo[]
+  skills: SkillInfo[]
+  mcps: McpInfo[]
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -158,5 +186,8 @@ export interface Api {
     getBootState(): Promise<WorkspaceBootState>
     bumpRestoreAttempts(): Promise<void>
     resetRestoreAttempts(): Promise<void>
+  }
+  ccConfigs: {
+    read(): Promise<ClaudeConfigs>
   }
 }

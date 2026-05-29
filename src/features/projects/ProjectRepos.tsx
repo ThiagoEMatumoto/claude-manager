@@ -3,12 +3,11 @@ import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { sessionsApi } from '@/lib/ipc'
 import { relativeTime } from '@/lib/time'
+import { useAppStore } from '@/store/appStore'
 import type { LinkKind, Project, Repo, SessionSummary } from '../../../shared/types/ipc'
 
 interface Props {
   project: Project
-  onSpawnSession: (repoId: string) => Promise<void>
-  onResumeSession: (repoId: string, ccSessionId: string) => Promise<void>
 }
 
 const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
@@ -24,7 +23,7 @@ const STATUS_DOT: Record<SessionSummary['status'], string> = {
   ended: 'bg-[var(--color-text-dim)]',
 }
 
-export function ProjectRepos({ project, onSpawnSession, onResumeSession }: Props) {
+export function ProjectRepos({ project }: Props) {
   const { repos, create, remove } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
 
@@ -32,13 +31,7 @@ export function ProjectRepos({ project, onSpawnSession, onResumeSession }: Props
     <div className="border-l border-[var(--color-border)]/50 bg-[var(--color-bg)]/40 pl-4">
       <ul className="flex flex-col gap-px py-1">
         {repos.map((r) => (
-          <RepoRow
-            key={r.id}
-            repo={r}
-            onSpawnSession={onSpawnSession}
-            onResumeSession={onResumeSession}
-            onRemove={remove}
-          />
+          <RepoRow key={r.id} repo={r} project={project} onRemove={remove} />
         ))}
       </ul>
 
@@ -62,14 +55,15 @@ export function ProjectRepos({ project, onSpawnSession, onResumeSession }: Props
 
 interface RepoRowProps {
   repo: Repo
-  onSpawnSession: (repoId: string) => Promise<void>
-  onResumeSession: (repoId: string, ccSessionId: string) => Promise<void>
+  project: Project
   onRemove: (id: string) => Promise<void>
 }
 
-function RepoRow({ repo, onSpawnSession, onResumeSession, onRemove }: RepoRowProps) {
+function RepoRow({ repo, project, onRemove }: RepoRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
+  const openSession = useAppStore((s) => s.openSession)
+  const resumeSession = useAppStore((s) => s.resumeSession)
 
   const refetch = useCallback(() => {
     void sessionsApi.listByRepo(repo.id).then(setSessions)
@@ -93,7 +87,7 @@ function RepoRow({ repo, onSpawnSession, onResumeSession, onRemove }: RepoRowPro
           </button>
           <button
             type="button"
-            onClick={() => onSpawnSession(repo.id)}
+            onClick={() => void openSession(repo, project.name, project.icon)}
             className="flex flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
             title={repo.path}
           >
@@ -129,7 +123,7 @@ function RepoRow({ repo, onSpawnSession, onResumeSession, onRemove }: RepoRowPro
             >
               <button
                 type="button"
-                onClick={() => void onResumeSession(repo.id, s.ccSessionId)}
+                onClick={() => void resumeSession(repo, project.name, project.icon, s.ccSessionId)}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                 title="Retomar sessão"
               >

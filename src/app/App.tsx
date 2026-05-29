@@ -70,6 +70,29 @@ export default function App() {
     ])
   }
 
+  async function handleResume(repoId: string, ccSessionId: string) {
+    // Já há uma pane com essa sessão aberta? Não duplicar — o usuário deve focar a
+    // existente (panes vivem lado a lado, então só evitamos o spawn redundante).
+    if (activeSessions.some((s) => s.session.ccSessionId === ccSessionId)) return
+    const projectId = activeProjectId
+    if (!projectId) return
+    const repos = await projectsApi.listRepos(projectId)
+    const repo = repos.find((r) => r.id === repoId)
+    if (!repo) return
+    const project = projects.find((p) => p.id === projectId)
+    const session = await sessionsApi.resume({ repoId, ccSessionId })
+    setActiveSessions((prev) => [
+      ...prev,
+      {
+        paneId: `pane-${Date.now()}`,
+        session,
+        repo,
+        projectName: project?.name ?? '',
+        projectIcon: project?.icon ?? null,
+      },
+    ])
+  }
+
   function closePane(paneId: string) {
     setActiveSessions((prev) => {
       const pane = prev.find((p) => p.paneId === paneId)
@@ -91,6 +114,7 @@ export default function App() {
         onCreateProject={create}
         onDeleteProject={remove}
         onSpawnSession={handleSpawn}
+        onResumeSession={handleResume}
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">

@@ -11,6 +11,7 @@ interface Props {
   onCreateProject: (input: CreateProjectInput) => Promise<void>
   onDeleteProject: (id: string) => Promise<void>
   onSpawnSession: (repoId: string) => Promise<void>
+  onResumeSession: (repoId: string, ccSessionId: string) => Promise<void>
 }
 
 export function Sidebar({
@@ -20,6 +21,7 @@ export function Sidebar({
   onCreateProject,
   onDeleteProject,
   onSpawnSession,
+  onResumeSession,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -91,7 +93,11 @@ export function Sidebar({
                 </button>
 
                 {active && (
-                  <ProjectRepos project={p} onSpawnSession={onSpawnSession} />
+                  <ProjectRepos
+                    project={p}
+                    onSpawnSession={onSpawnSession}
+                    onResumeSession={onResumeSession}
+                  />
                 )}
               </li>
             )

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
 import type { PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
-export type Area = 'projects'
+export type Area = 'projects' | 'cc-configs'
 
 export interface ActivePane {
   paneId: string

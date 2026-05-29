@@ -10,6 +10,7 @@ import {
 } from 'dockview'
 import { IconRail } from './IconRail'
 import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
+import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { useAppStore, type ActivePane } from '@/store/appStore'
@@ -179,9 +180,13 @@ export function AppShell() {
     <div className="flex h-full w-full overflow-hidden">
       <IconRail onOpenSettings={() => setSettingsOpen(true)} />
 
+      {area === 'cc-configs' && <CcConfigsArea />}
+
+      {/* O bloco de projetos fica sempre montado (dockview/xterm vivo), apenas
+          escondido quando outra área está ativa. */}
       {area === 'projects' && <ProjectsSidebar />}
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className={`flex flex-1 flex-col overflow-hidden ${area === 'projects' ? '' : 'hidden'}`}>
         {restoreBlocked && (
           <div
             className="flex items-center justify-between gap-3 border-b px-4 py-2 text-sm"

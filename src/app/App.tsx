@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Sidebar } from '@/features/projects/Sidebar'
 import { Terminal } from '@/features/sessions/Terminal'
 import { useProjects } from '@/features/projects/useProjects'
-import { projectsApi, workspaceApi } from '@/lib/ipc'
+import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
+import { projectsApi, vaultApi, workspaceApi } from '@/lib/ipc'
 import type { Repo } from '../../shared/types/ipc'
 
 interface ActiveSession {
@@ -15,6 +16,11 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([])
+  const [vaultConfigured, setVaultConfigured] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    void vaultApi.isConfigured().then(setVaultConfigured)
+  }, [])
 
   useEffect(() => {
     void workspaceApi.getActive().then((id) => {
@@ -53,6 +59,10 @@ export default function App() {
 
   function closePane(paneId: string) {
     setActiveSessions((prev) => prev.filter((p) => p.paneId !== paneId))
+  }
+
+  if (vaultConfigured === false) {
+    return <WelcomeDialog onDone={() => setVaultConfigured(true)} />
   }
 
   return (

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CreateProjectInput, Project } from '../../../shared/types/ipc'
 import { NewProjectDialog } from './NewProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
+import { SettingsDialog } from '@/features/settings/SettingsDialog'
 
 interface Props {
   projects: Project[]
@@ -21,6 +22,7 @@ export function Sidebar({
   onSpawnSession,
 }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -97,6 +99,18 @@ export function Sidebar({
         </ul>
       </div>
 
+      <div className="border-t border-[var(--color-border)] px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="flex items-center gap-2 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+          title="Configurações"
+        >
+          <span className="leading-none">⚙</span>
+          Configurações
+        </button>
+      </div>
+
       <NewProjectDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
@@ -105,6 +119,8 @@ export function Sidebar({
           setDialogOpen(false)
         }}
       />
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </aside>
   )
 }

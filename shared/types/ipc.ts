@@ -128,19 +128,29 @@ export interface PluginComponents {
   mcps: ComponentRef[]
 }
 
+// origin = 'user' (config user-level) ou o pluginId (`name@marketplace`).
 export interface AgentInfo {
   name: string
   description: string
+  origin: string
 }
 
 export interface SkillInfo {
   name: string
   description: string
+  origin: string
 }
 
 export interface McpInfo {
   name: string
   kind: string
+  origin: string
+}
+
+export interface HookInfo {
+  event: string
+  origin: string
+  summary: string
 }
 
 export interface ClaudeConfigs {
@@ -148,6 +158,7 @@ export interface ClaudeConfigs {
   agents: AgentInfo[]
   skills: SkillInfo[]
   mcps: McpInfo[]
+  hooks: HookInfo[]
 }
 
 // Plugin gerenciado via CLI do claude (`claude plugin ...`).

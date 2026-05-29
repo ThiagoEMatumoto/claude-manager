@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ccConfigsApi } from '@/lib/ipc'
 import type { ClaudeConfigs } from '../../../shared/types/ipc'
 
-const EMPTY: ClaudeConfigs = { plugins: [], agents: [], skills: [], mcps: [] }
+const EMPTY: ClaudeConfigs = { plugins: [], agents: [], skills: [], mcps: [], hooks: [] }
 
 export function useCcConfigs() {
   const [configs, setConfigs] = useState<ClaudeConfigs>(EMPTY)

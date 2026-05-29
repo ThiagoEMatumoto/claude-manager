@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { projectsApi } from '@/lib/ipc'
-import type { CreateProjectInput, Project, Repo } from '../../../shared/types/ipc'
+import type { CreateProjectInput, CreateRepoInput, Project, Repo } from '../../../shared/types/ipc'
 
 export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -53,9 +53,9 @@ export function useRepos(projectId: string | null) {
   }, [refresh])
 
   const create = useCallback(
-    async (label: string, path: string, role: string | null = null) => {
+    async (input: Omit<CreateRepoInput, 'projectId'>) => {
       if (!projectId) return
-      await projectsApi.createRepo({ projectId, label, path, role })
+      await projectsApi.createRepo({ projectId, ...input })
       await refresh()
     },
     [projectId, refresh],

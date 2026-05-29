@@ -77,7 +77,7 @@ export function Sidebar({
                 </button>
 
                 {active && (
-                  <ProjectRepos projectId={p.id} onSpawnSession={onSpawnSession} />
+                  <ProjectRepos project={p} onSpawnSession={onSpawnSession} />
                 )}
               </li>
             )

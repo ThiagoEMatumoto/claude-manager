@@ -1,4 +1,7 @@
-export type CcTab = 'plugins' | 'marketplace' | 'agents' | 'skills' | 'mcps'
+export type CcTab = 'plugins' | 'marketplace' | 'agents' | 'skills' | 'mcps' | 'hooks'
+
+// Abas que renderizam componentes agregados de ccConfigs.read().
+export type ComponentTab = 'agents' | 'skills' | 'mcps' | 'hooks'
 
 interface TabDef {
   id: CcTab
@@ -11,6 +14,7 @@ const TABS: TabDef[] = [
   { id: 'agents', label: 'Agents' },
   { id: 'skills', label: 'Skills' },
   { id: 'mcps', label: 'MCPs' },
+  { id: 'hooks', label: 'Hooks' },
 ]
 
 interface Props {

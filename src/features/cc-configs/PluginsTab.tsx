@@ -5,8 +5,10 @@ import { ccPluginsApi } from '@/lib/ipc'
 import type {
   ManagedPluginInfo,
   PluginActionResult,
+  PluginComponents,
   PluginDetails,
 } from '../../../shared/types/ipc'
+import { COMPONENT_TAB_BY_KIND, type FocusedItem } from './navigation'
 import { Badge, Card, CenterMessage } from './ui'
 
 interface Props {
@@ -17,9 +19,10 @@ interface Props {
     action: 'enable' | 'disable' | 'uninstall' | 'update',
     name: string,
   ) => Promise<PluginActionResult>
+  onNavigate: (target: FocusedItem) => void
 }
 
-export function PluginsTab({ installed, loading, error, runAction }: Props) {
+export function PluginsTab({ installed, loading, error, runAction, onNavigate }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export function PluginsTab({ installed, loading, error, runAction }: Props) {
           plugin={selectedPlugin}
           onClose={() => setSelected(null)}
           runAction={runAction}
+          onNavigate={onNavigate}
         />
       )}
     </div>
@@ -107,10 +111,12 @@ function PluginDrawer({
   plugin,
   onClose,
   runAction,
+  onNavigate,
 }: {
   plugin: ManagedPluginInfo
   onClose: () => void
   runAction: Props['runAction']
+  onNavigate: Props['onNavigate']
 }) {
   const [details, setDetails] = useState<PluginDetails | null>(null)
   const [detailsError, setDetailsError] = useState<string | null>(null)
@@ -196,7 +202,15 @@ function PluginDrawer({
               </p>
             )}
 
-            <Components components={details.components} />
+            {details.componentRefs ? (
+              <ComponentRefs
+                refs={details.componentRefs}
+                pluginId={plugin.id}
+                onNavigate={onNavigate}
+              />
+            ) : (
+              <Components components={details.components} />
+            )}
 
             {typeof details.alwaysOnTokens === 'number' && (
               <div className="flex items-center justify-between rounded-md bg-[var(--color-surface-2)]/60 px-3 py-2 text-xs">
@@ -307,6 +321,74 @@ function PluginDrawer({
         </p>
       </Dialog>
     </aside>
+  )
+}
+
+const REF_SECTIONS: { key: keyof PluginComponents; label: string }[] = [
+  { key: 'skills', label: 'Skills' },
+  { key: 'agents', label: 'Agents' },
+  { key: 'commands', label: 'Commands' },
+  { key: 'hooks', label: 'Hooks' },
+  { key: 'mcps', label: 'MCPs' },
+]
+
+function ComponentRefs({
+  refs,
+  pluginId,
+  onNavigate,
+}: {
+  refs: PluginComponents
+  pluginId: string
+  onNavigate: Props['onNavigate']
+}) {
+  const sections = REF_SECTIONS.filter(({ key }) => refs[key].length > 0)
+  if (sections.length === 0) return null
+  return (
+    <div className="flex flex-col gap-3">
+      {sections.map(({ key, label }) => {
+        const targetTab = COMPONENT_TAB_BY_KIND[key]
+        return (
+          <div key={key}>
+            <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-dim)]">
+              <span>{label}</span>
+              <span>{refs[key].length}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              {refs[key].map((ref) => {
+                const clickable = targetTab != null
+                return (
+                  <button
+                    key={ref.name}
+                    type="button"
+                    disabled={!clickable}
+                    onClick={
+                      targetTab
+                        ? () =>
+                            onNavigate({ tab: targetTab, name: ref.name, origin: pluginId })
+                        : undefined
+                    }
+                    className={`rounded-md px-2.5 py-1.5 text-left transition ${
+                      clickable
+                        ? 'cursor-pointer bg-[var(--color-surface-2)]/60 hover:bg-[var(--color-surface-2)]'
+                        : 'bg-[var(--color-surface-2)]/30'
+                    }`}
+                  >
+                    <div className="truncate text-xs font-medium text-[var(--color-text)]">
+                      {ref.name}
+                    </div>
+                    {ref.description && (
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+                        {ref.description}
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

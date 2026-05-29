@@ -17,7 +17,17 @@ interface SessionRow {
 
 interface RepoPathRow {
   path: string
+  label: string
 }
+
+// O name é input do usuário e entra na linha de `zsh -c '<innerCmd>'`.
+// Aspas simples POSIX impedem qualquer interpretação pelo shell; o único caractere
+// perigoso dentro de '...' é a própria aspa simples, fechada com '\'' e reaberta.
+function shquote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'"
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const toSession = (row: SessionRow): Session => ({
   id: row.id,
@@ -42,12 +52,12 @@ function resolveClaudeCommand(): string {
 // O claude vive em ~/.local/bin e o env do Electron GUI não herda o PATH do rc.
 // Subimos o shell de login+interativo (-l -i carrega .zprofile/.zshrc) e damos
 // `exec claude` para que o PTY encerre quando o claude sair.
-function loginShellSpawn(claudeCmd: string): { command: string; args: string[] } {
+function loginShellSpawn(innerCmd: string): { command: string; args: string[] } {
   if (process.platform === 'win32') {
-    return { command: 'powershell.exe', args: ['-NoLogo', '-Command', claudeCmd] }
+    return { command: 'powershell.exe', args: ['-NoLogo', '-Command', innerCmd] }
   }
   const shell = process.env.SHELL || '/usr/bin/zsh'
-  return { command: shell, args: ['-l', '-i', '-c', `exec ${claudeCmd}`] }
+  return { command: shell, args: ['-l', '-i', '-c', `exec ${innerCmd}`] }
 }
 
 function broadcast(channel: string, payload: unknown): void {
@@ -75,14 +85,17 @@ export function registerSessionIpc(): void {
   ipcMain.handle('sessions:spawn', (_e, input: SpawnSessionInput) => {
     const db = getDb()
     const repo = db
-      .prepare('SELECT path FROM repos WHERE id = ?')
+      .prepare('SELECT path, label FROM repos WHERE id = ?')
       .get(input.repoId) as RepoPathRow | undefined
     if (!repo) throw new Error(`repo not found: ${input.repoId}`)
 
+    const sessionId = randomUUID()
+    const name = input.name?.trim() || repo.label
+
     const row: SessionRow = {
-      id: randomUUID(),
+      id: sessionId,
       repo_id: input.repoId,
-      cc_session_id: null,
+      cc_session_id: sessionId,
       title: null,
       pane_id: null,
       status: 'running',
@@ -105,7 +118,10 @@ export function registerSessionIpc(): void {
     )
 
     try {
-      const { command, args } = loginShellSpawn(resolveClaudeCommand())
+      if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
+      const claudeCmd = resolveClaudeCommand()
+      const innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
+      const { command, args } = loginShellSpawn(innerCmd)
       ptyManager.spawn({
         sessionId: row.id,
         command,

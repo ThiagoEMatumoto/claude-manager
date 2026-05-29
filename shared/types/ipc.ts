@@ -54,6 +54,7 @@ export interface CreateRepoInput {
 
 export interface SpawnSessionInput {
   repoId: string
+  name?: string
   cols?: number
   rows?: number
 }

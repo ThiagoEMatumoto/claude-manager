@@ -81,6 +81,12 @@ const api: Api = {
   ccConfigs: {
     read: () => invoke('cc:read-configs'),
   },
+  ccPlugins: {
+    list: () => invoke('cc:plugins:list'),
+    available: () => invoke('cc:plugins:available'),
+    details: (name: string) => invoke('cc:plugins:details', { name }),
+    action: (action, name) => invoke('cc:plugins:action', { action, name }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

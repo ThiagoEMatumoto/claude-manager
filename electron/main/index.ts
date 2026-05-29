@@ -10,6 +10,7 @@ import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc } from './ipc/git'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
+import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import {
   registerWorkspaceIpc,
   markWorkspaceRunning,
@@ -65,6 +66,7 @@ app.whenReady().then(() => {
   registerGitIpc()
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
+  registerClaudePluginsIpc()
 
   createMainWindow()
 

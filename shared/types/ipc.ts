@@ -136,6 +136,49 @@ export interface ClaudeConfigs {
   mcps: McpInfo[]
 }
 
+// Plugin gerenciado via CLI do claude (`claude plugin ...`).
+export interface ManagedPluginInfo {
+  id: string
+  name: string
+  marketplace: string
+  version: string
+  scope: string
+  enabled: boolean
+  installedAt: string | null
+  maintainer: string | null
+}
+
+export interface AvailablePlugin {
+  id: string
+  name: string
+  marketplace: string
+  maintainer: string | null
+  description?: string
+}
+
+export interface PluginDetails {
+  name: string
+  description: string
+  source: string
+  components: {
+    skills: number
+    agents: number
+    hooks: number
+    mcpServers: number
+    lspServers: number
+  }
+  alwaysOnTokens?: number
+  raw?: string
+}
+
+export type PluginAction = 'enable' | 'disable' | 'uninstall' | 'update' | 'install'
+
+export interface PluginActionResult {
+  ok: boolean
+  message: string
+  restartRequired: boolean
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -189,5 +232,11 @@ export interface Api {
   }
   ccConfigs: {
     read(): Promise<ClaudeConfigs>
+  }
+  ccPlugins: {
+    list(): Promise<ManagedPluginInfo[]>
+    available(): Promise<AvailablePlugin[]>
+    details(name: string): Promise<PluginDetails>
+    action(action: PluginAction, name: string): Promise<PluginActionResult>
   }
 }

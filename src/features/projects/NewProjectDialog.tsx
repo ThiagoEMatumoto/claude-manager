@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { EmojiPicker } from '@/components/ui/EmojiPicker'
 import { dialogApi, vaultApi } from '@/lib/ipc'
 import type { CreateProjectInput } from '../../../shared/types/ipc'
 
@@ -94,15 +95,9 @@ export function NewProjectDialog({ open, onClose, onCreate }: Props) {
       }
     >
       <div className="flex items-end gap-2">
-        <div className="w-16">
-          <Input
-            label="Ícone"
-            value={icon}
-            onChange={(e) => setIcon(e.target.value)}
-            placeholder="🚀"
-            maxLength={2}
-            className="text-center"
-          />
+        <div>
+          <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Ícone</label>
+          <EmojiPicker value={icon} onChange={setIcon} />
         </div>
         <Input
           ref={inputRef}

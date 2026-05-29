@@ -108,6 +108,109 @@ export interface SessionActivity {
   tokens?: { output: number; context: number }
 }
 
+export interface PluginInfo {
+  name: string
+  marketplace: string
+  enabled: boolean
+}
+
+// Referência a um componente individual de um plugin (skill, agent, etc).
+export interface ComponentRef {
+  name: string
+  description?: string
+}
+
+export interface PluginComponents {
+  skills: ComponentRef[]
+  agents: ComponentRef[]
+  commands: ComponentRef[]
+  hooks: ComponentRef[]
+  mcps: ComponentRef[]
+}
+
+// origin = 'user' (config user-level) ou o pluginId (`name@marketplace`).
+export interface AgentInfo {
+  name: string
+  description: string
+  origin: string
+}
+
+export interface SkillInfo {
+  name: string
+  description: string
+  origin: string
+}
+
+export interface McpInfo {
+  name: string
+  kind: string
+  origin: string
+}
+
+export interface HookInfo {
+  event: string
+  origin: string
+  summary: string
+}
+
+export interface ClaudeConfigs {
+  plugins: PluginInfo[]
+  agents: AgentInfo[]
+  skills: SkillInfo[]
+  mcps: McpInfo[]
+  hooks: HookInfo[]
+}
+
+// Plugin gerenciado via CLI do claude (`claude plugin ...`).
+export interface ManagedPluginInfo {
+  id: string
+  name: string
+  marketplace: string
+  version: string
+  scope: string
+  enabled: boolean
+  installedAt: string | null
+  maintainer: string | null
+  category: string | null
+  description: string | null
+  author: string | null
+}
+
+export interface AvailablePlugin {
+  id: string
+  name: string
+  marketplace: string
+  maintainer: string | null
+  description?: string
+  category: string | null
+  author: string | null
+}
+
+export interface PluginDetails {
+  name: string
+  description: string
+  source: string
+  components: {
+    skills: number
+    agents: number
+    hooks: number
+    mcpServers: number
+    lspServers: number
+  }
+  alwaysOnTokens?: number
+  raw?: string
+  // Componentes nomeados lidos do installPath (complementa as contagens acima).
+  componentRefs?: PluginComponents
+}
+
+export type PluginAction = 'enable' | 'disable' | 'uninstall' | 'update' | 'install'
+
+export interface PluginActionResult {
+  ok: boolean
+  message: string
+  restartRequired: boolean
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -158,5 +261,14 @@ export interface Api {
     getBootState(): Promise<WorkspaceBootState>
     bumpRestoreAttempts(): Promise<void>
     resetRestoreAttempts(): Promise<void>
+  }
+  ccConfigs: {
+    read(): Promise<ClaudeConfigs>
+  }
+  ccPlugins: {
+    list(): Promise<ManagedPluginInfo[]>
+    available(): Promise<AvailablePlugin[]>
+    details(name: string): Promise<PluginDetails>
+    action(action: PluginAction, name: string): Promise<PluginActionResult>
   }
 }

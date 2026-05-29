@@ -7,7 +7,10 @@ interface AreaDef {
   label: string
 }
 
-const AREAS: AreaDef[] = [{ id: 'projects', icon: '🗂', label: 'Projetos' }]
+const AREAS: AreaDef[] = [
+  { id: 'projects', icon: '🗂', label: 'Projetos' },
+  { id: 'cc-configs', icon: '🧩', label: 'Configs do CC' },
+]
 
 interface Props {
   onOpenSettings: () => void

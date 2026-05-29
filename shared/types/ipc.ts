@@ -114,6 +114,20 @@ export interface PluginInfo {
   enabled: boolean
 }
 
+// Referência a um componente individual de um plugin (skill, agent, etc).
+export interface ComponentRef {
+  name: string
+  description?: string
+}
+
+export interface PluginComponents {
+  skills: ComponentRef[]
+  agents: ComponentRef[]
+  commands: ComponentRef[]
+  hooks: ComponentRef[]
+  mcps: ComponentRef[]
+}
+
 export interface AgentInfo {
   name: string
   description: string

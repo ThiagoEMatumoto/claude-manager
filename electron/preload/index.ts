@@ -46,6 +46,7 @@ const api: Api = {
   },
   vault: {
     getRoot: () => invoke('vault:get-root'),
+    isConfigured: () => invoke('vault:is-configured'),
     setRoot: (root: string) => invoke('vault:set-root', { root }),
     ensureDir: (path: string) => invoke('vault:ensure-dir', { path }),
     isInside: (vaultPath: string, target: string) =>

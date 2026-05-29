@@ -10,7 +10,7 @@ import { getDb } from '../services/db'
 const VAULT_ROOT_KEY = 'vault_root'
 
 function defaultVaultRoot(): string {
-  return path.join(homedir(), 'Projetos')
+  return path.join(homedir(), 'ClaudeManager')
 }
 
 export function isInsideVault(vaultPath: string, target: string): boolean {
@@ -40,6 +40,13 @@ export function registerGitIpc(): void {
       .prepare('SELECT value FROM app_prefs WHERE key = ?')
       .get(VAULT_ROOT_KEY) as { value: string } | undefined
     return row?.value ?? defaultVaultRoot()
+  })
+
+  ipcMain.handle('vault:is-configured', () => {
+    const row = getDb()
+      .prepare('SELECT value FROM app_prefs WHERE key = ?')
+      .get(VAULT_ROOT_KEY) as { value: string } | undefined
+    return row !== undefined
   })
 
   ipcMain.handle('vault:set-root', (_e, payload: unknown) => {

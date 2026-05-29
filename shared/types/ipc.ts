@@ -95,6 +95,7 @@ export interface Api {
   }
   vault: {
     getRoot(): Promise<string>
+    isConfigured(): Promise<boolean>
     setRoot(root: string): Promise<void>
     ensureDir(path: string): Promise<{ created: boolean; wasEmpty: boolean }>
     isInside(vaultPath: string, target: string): Promise<boolean>

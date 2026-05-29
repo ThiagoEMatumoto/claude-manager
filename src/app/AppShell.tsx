@@ -29,8 +29,16 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       projectName={pane.projectName}
       projectIcon={pane.projectIcon}
       onClose={() => closePane(pane.paneId)}
+      onTitleChange={(t) => props.api.setTitle(t)}
     />
   )
+}
+
+// Título inicial legível pra aba (nunca o paneId). O Terminal sobrescreve ao vivo
+// via onTitleChange assim que o nome do CC chega.
+function paneTabTitle(pane: ActivePane): string {
+  if (!pane.projectName) return pane.repo.label
+  return `${pane.projectIcon ?? ''} ${pane.repo.label}`.trim()
 }
 
 const components = { terminal: TerminalPanel }
@@ -107,6 +115,7 @@ export function AppShell() {
       api.addPanel<PaneParams>({
         id: pane.paneId,
         component: 'terminal',
+        title: paneTabTitle(pane),
         params: { pane },
         position,
       })

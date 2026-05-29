@@ -40,25 +40,27 @@ export function ProjectsSidebar() {
             return (
               <li key={p.id}>
                 <div
-                  className={`group flex items-center justify-between px-4 py-2 text-sm transition ${
+                  className={`group flex items-center justify-between border-l-2 px-4 py-2 text-sm transition ${
                     active
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
-                      : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+                      : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                   }`}
+                  style={
+                    active
+                      ? { borderLeftColor: p.color ?? 'var(--color-accent)' }
+                      : undefined
+                  }
                 >
                   <button
                     type="button"
                     onClick={() => setActiveProject(p.id)}
                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                   >
-                    {p.icon ? (
-                      <span className="text-sm leading-none">{p.icon}</span>
-                    ) : (
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: p.color ?? '#5c5c70' }}
-                      />
-                    )}
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: p.color ?? '#5c5c70' }}
+                    />
+                    {p.icon && <span className="text-sm leading-none">{p.icon}</span>}
                     <span className="truncate">{p.name}</span>
                     {!p.vaultPath && (
                       <span

@@ -104,4 +104,8 @@ export interface Api {
     symlinkIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
   }
+  workspace: {
+    getActive(): Promise<string | null>
+    setActive(projectId: string | null): Promise<void>
+  }
 }

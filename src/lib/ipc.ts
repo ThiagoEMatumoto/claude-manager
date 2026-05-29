@@ -10,5 +10,6 @@ export const shellApi = api.shell
 export const dialogApi = api.dialog
 export const vaultApi = api.vault
 export const repoApi = api.repo
+export const workspaceApi = api.workspace
 
 export { api }

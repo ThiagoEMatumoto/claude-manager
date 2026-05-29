@@ -59,6 +59,10 @@ const api: Api = {
     cloneUrl: (url: string, vaultPath: string) =>
       invoke('repo:clone-url', { url, vaultPath }),
   },
+  workspace: {
+    getActive: () => invoke('workspace:get-active'),
+    setActive: (projectId: string | null) => invoke('workspace:set-active', { projectId }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

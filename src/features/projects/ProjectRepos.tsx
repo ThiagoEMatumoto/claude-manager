@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
-import type { Project } from '../../../shared/types/ipc'
+import type { LinkKind, Project } from '../../../shared/types/ipc'
 
 interface Props {
   project: Project
   onSpawnSession: (repoId: string) => Promise<void>
+}
+
+const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
+  inside: { icon: '📁', title: 'Dentro do vault' },
+  symlink: { icon: '🔗', title: 'Symlink para fora do vault' },
+  external: { icon: '↗', title: 'Referência externa' },
 }
 
 export function ProjectRepos({ project, onSpawnSession }: Props) {
@@ -23,10 +29,13 @@ export function ProjectRepos({ project, onSpawnSession }: Props) {
             <button
               type="button"
               onClick={() => onSpawnSession(r.id)}
-              className="flex-1 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+              className="flex flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
               title={r.path}
             >
-              ▸ {r.label}
+              <span className="text-[10px]" title={LINK_BADGE[r.linkKind].title}>
+                {LINK_BADGE[r.linkKind].icon}
+              </span>
+              <span>{r.label}</span>
             </button>
             <button
               type="button"

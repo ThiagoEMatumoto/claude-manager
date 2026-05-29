@@ -57,11 +57,23 @@ export function Sidebar({
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ background: p.color ?? '#5c5c70' }}
-                    />
+                    {p.icon ? (
+                      <span className="text-sm leading-none">{p.icon}</span>
+                    ) : (
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: p.color ?? '#5c5c70' }}
+                      />
+                    )}
                     {p.name}
+                    {!p.vaultPath && (
+                      <span
+                        className="text-[10px] text-[var(--color-text-dim)] opacity-60"
+                        title="Este projeto não tem um vault definido"
+                      >
+                        sem vault
+                      </span>
+                    )}
                   </span>
                   <span
                     role="button"

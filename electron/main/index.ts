@@ -67,6 +67,9 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   ptyManager.killAll()
   sessionActivityService.closeAll()
+  getDb()
+    .prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'")
+    .run(Date.now())
   closeDb()
 })
 

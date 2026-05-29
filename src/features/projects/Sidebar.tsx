@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Project } from '../../../shared/types/ipc'
+import type { CreateProjectInput, Project } from '../../../shared/types/ipc'
 import { NewProjectDialog } from './NewProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
 
@@ -7,7 +7,7 @@ interface Props {
   projects: Project[]
   activeProjectId: string | null
   onSelectProject: (id: string) => void
-  onCreateProject: (name: string, color: string | null) => Promise<void>
+  onCreateProject: (input: CreateProjectInput) => Promise<void>
   onDeleteProject: (id: string) => Promise<void>
   onSpawnSession: (repoId: string) => Promise<void>
 }
@@ -88,8 +88,8 @@ export function Sidebar({
       <NewProjectDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onCreate={async (name, color) => {
-          await onCreateProject(name, color)
+        onCreate={async (input) => {
+          await onCreateProject(input)
           setDialogOpen(false)
         }}
       />

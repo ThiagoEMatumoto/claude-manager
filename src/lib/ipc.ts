@@ -7,5 +7,8 @@ const api = window.api
 export const projectsApi = api.projects
 export const sessionsApi = api.sessions
 export const shellApi = api.shell
+export const dialogApi = api.dialog
+export const vaultApi = api.vault
+export const repoApi = api.repo
 
 export { api }

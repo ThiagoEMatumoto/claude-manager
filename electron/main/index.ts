@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
 import { ptyManager } from './services/pty-manager'
+import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
@@ -65,6 +66,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   ptyManager.killAll()
+  sessionActivityService.closeAll()
   closeDb()
 })
 

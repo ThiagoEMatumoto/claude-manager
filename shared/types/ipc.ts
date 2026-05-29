@@ -70,6 +70,15 @@ export interface PtyExitEvent {
   signal: number | null
 }
 
+export interface SessionActivity {
+  ccSessionId: string
+  status: 'starting' | 'working' | 'waiting' | 'idle'
+  title: string | null
+  lastText: string | null
+  lastActivityAt: number | null
+  tokens?: { output: number; context: number }
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -88,6 +97,9 @@ export interface Api {
     list(): Promise<Session[]>
     onData(handler: (event: PtyDataEvent) => void): () => void
     onExit(handler: (event: PtyExitEvent) => void): () => void
+    watchActivity(ccSessionId: string): Promise<void>
+    unwatchActivity(ccSessionId: string): Promise<void>
+    onActivity(handler: (event: SessionActivity) => void): () => void
   }
   shell: {
     openPath(path: string): Promise<void>

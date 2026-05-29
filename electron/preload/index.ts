@@ -6,6 +6,7 @@ import type {
   SpawnSessionInput,
   PtyDataEvent,
   PtyExitEvent,
+  SessionActivity,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -38,6 +39,9 @@ const api: Api = {
     list: () => invoke('sessions:list'),
     onData: (handler) => subscribe<PtyDataEvent>('pty:data', handler),
     onExit: (handler) => subscribe<PtyExitEvent>('pty:exit', handler),
+    watchActivity: (ccSessionId) => invoke('session:activity:watch', ccSessionId),
+    unwatchActivity: (ccSessionId) => invoke('session:activity:unwatch', ccSessionId),
+    onActivity: (handler) => subscribe<SessionActivity>('session:activity', handler),
   },
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),

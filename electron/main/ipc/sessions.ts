@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
+import { sessionActivityService } from '../services/session-activity'
 import type { Session, SpawnSessionInput } from '../../../shared/types/ipc'
 
 interface SessionRow {
@@ -170,5 +171,13 @@ export function registerSessionIpc(): void {
       .prepare('SELECT * FROM sessions ORDER BY started_at DESC')
       .all() as SessionRow[]
     return rows.map(toSession)
+  })
+
+  ipcMain.handle('session:activity:watch', (_e, ccSessionId: string) => {
+    sessionActivityService.watch(ccSessionId)
+  })
+
+  ipcMain.handle('session:activity:unwatch', (_e, ccSessionId: string) => {
+    sessionActivityService.unwatch(ccSessionId)
   })
 }

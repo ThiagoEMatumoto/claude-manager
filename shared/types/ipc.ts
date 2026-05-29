@@ -54,8 +54,37 @@ export interface CreateRepoInput {
 
 export interface SpawnSessionInput {
   repoId: string
+  name?: string
   cols?: number
   rows?: number
+}
+
+export interface ResumeSessionInput {
+  repoId: string
+  ccSessionId: string
+  cols?: number
+  rows?: number
+}
+
+export interface SessionSummary {
+  ccSessionId: string
+  name: string | null
+  status: 'working' | 'waiting' | 'idle' | 'ended'
+  lastActivityAt: number | null
+  isLive: boolean
+}
+
+export interface PaneSnapshot {
+  ccSessionId: string
+  repo: Repo
+  projectName: string
+  projectIcon: string | null
+}
+
+export interface WorkspaceBootState {
+  openPanes: PaneSnapshot[]
+  cleanShutdown: boolean
+  restoreAttempts: number
 }
 
 export interface PtyDataEvent {
@@ -69,6 +98,16 @@ export interface PtyExitEvent {
   signal: number | null
 }
 
+export interface SessionActivity {
+  ccSessionId: string
+  status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
+  name: string | null
+  title: string | null
+  lastText: string | null
+  lastActivityAt: number | null
+  tokens?: { output: number; context: number }
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -80,12 +119,19 @@ export interface Api {
   }
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>
+    resume(input: ResumeSessionInput): Promise<Session>
+    listByRepo(repoId: string): Promise<SessionSummary[]>
+    getBacklog(sessionId: string): Promise<string>
     write(sessionId: string, data: string): Promise<void>
     resize(sessionId: string, cols: number, rows: number): Promise<void>
     kill(sessionId: string): Promise<void>
+    rename(sessionId: string, title: string): Promise<void>
     list(): Promise<Session[]>
     onData(handler: (event: PtyDataEvent) => void): () => void
     onExit(handler: (event: PtyExitEvent) => void): () => void
+    watchActivity(ccSessionId: string): Promise<void>
+    unwatchActivity(ccSessionId: string): Promise<void>
+    onActivity(handler: (event: SessionActivity) => void): () => void
   }
   shell: {
     openPath(path: string): Promise<void>
@@ -108,5 +154,9 @@ export interface Api {
   workspace: {
     getActive(): Promise<string | null>
     setActive(projectId: string | null): Promise<void>
+    savePanes(panes: PaneSnapshot[]): Promise<void>
+    getBootState(): Promise<WorkspaceBootState>
+    bumpRestoreAttempts(): Promise<void>
+    resetRestoreAttempts(): Promise<void>
   }
 }

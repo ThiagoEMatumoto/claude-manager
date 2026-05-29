@@ -1,28 +1,14 @@
 import { useState } from 'react'
-import type { CreateProjectInput, Project } from '../../../shared/types/ipc'
+import { useProjects } from './useProjects'
 import { NewProjectDialog } from './NewProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
-import { SettingsDialog } from '@/features/settings/SettingsDialog'
+import { useAppStore } from '@/store/appStore'
 
-interface Props {
-  projects: Project[]
-  activeProjectId: string | null
-  onSelectProject: (id: string) => void
-  onCreateProject: (input: CreateProjectInput) => Promise<void>
-  onDeleteProject: (id: string) => Promise<void>
-  onSpawnSession: (repoId: string) => Promise<void>
-}
-
-export function Sidebar({
-  projects,
-  activeProjectId,
-  onSelectProject,
-  onCreateProject,
-  onDeleteProject,
-  onSpawnSession,
-}: Props) {
+export function ProjectsSidebar() {
+  const { projects, create, remove } = useProjects()
+  const activeProjectId = useAppStore((s) => s.activeProjectId)
+  const setActiveProject = useAppStore((s) => s.setActiveProject)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -51,7 +37,7 @@ export function Sidebar({
               <li key={p.id}>
                 <button
                   type="button"
-                  onClick={() => onSelectProject(p.id)}
+                  onClick={() => setActiveProject(p.id)}
                   className={`group flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
                     active
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
@@ -82,7 +68,7 @@ export function Sidebar({
                     tabIndex={0}
                     onClick={(e) => {
                       e.stopPropagation()
-                      if (confirm(`Apagar projeto "${p.name}"?`)) void onDeleteProject(p.id)
+                      if (confirm(`Apagar projeto "${p.name}"?`)) void remove(p.id)
                     }}
                     className="hidden text-xs text-[var(--color-text-dim)] hover:text-red-400 group-hover:inline"
                   >
@@ -90,37 +76,21 @@ export function Sidebar({
                   </span>
                 </button>
 
-                {active && (
-                  <ProjectRepos project={p} onSpawnSession={onSpawnSession} />
-                )}
+                {active && <ProjectRepos project={p} />}
               </li>
             )
           })}
         </ul>
       </div>
 
-      <div className="border-t border-[var(--color-border)] px-4 py-2">
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="flex items-center gap-2 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
-          title="Configurações"
-        >
-          <span className="leading-none">⚙</span>
-          Configurações
-        </button>
-      </div>
-
       <NewProjectDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onCreate={async (input) => {
-          await onCreateProject(input)
+          await create(input)
           setDialogOpen(false)
         }}
       />
-
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </aside>
   )
 }

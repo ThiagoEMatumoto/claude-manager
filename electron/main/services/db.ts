@@ -20,6 +20,12 @@ export function getDb(): Database.Database {
 
   runMigrations(db)
 
+  // Sessões marcadas 'running' de um boot anterior são órfãs: o processo claude
+  // morre junto com o app, então nenhuma está realmente viva ao iniciar.
+  db.prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'").run(
+    Date.now(),
+  )
+
   dbInstance = db
   return db
 }

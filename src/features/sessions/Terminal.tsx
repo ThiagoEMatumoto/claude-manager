@@ -45,12 +45,23 @@ export function Terminal({
   const [title, setTitle] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
 
   useEffect(() => {
     setTitle(session?.title ?? null)
   }, [session?.title])
 
   const displayTitle = title ?? repoLabel
+
+  function copySelection() {
+    const sel = xtermRef.current?.getSelection()
+    if (sel) void navigator.clipboard.writeText(sel)
+  }
+
+  async function paste() {
+    const text = await navigator.clipboard.readText()
+    if (text) write(text)
+  }
 
   function commitRename() {
     setEditing(false)
@@ -59,6 +70,20 @@ export function Terminal({
     setTitle(next.length > 0 ? next : null)
     void sessionsApi.rename(session.id, next)
   }
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenu(null)
+    }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
 
   useEffect(() => {
     const host = hostRef.current
@@ -87,7 +112,47 @@ export function Terminal({
     setDataHandler((data) => term.write(data))
     term.onData((d) => write(d))
 
+    // Copy-on-select: copiar automaticamente o que for selecionado.
+    term.onSelectionChange(() => {
+      const sel = term.getSelection()
+      if (sel) void navigator.clipboard.writeText(sel)
+    })
+
+    const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)
+
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+
+      // Copiar: Ctrl+Shift+C (todas plataformas), ou Cmd+C no mac só se houver seleção.
+      if ((e.ctrlKey && e.shiftKey && e.key === 'C') || (e.shiftKey && e.key === 'C' && e.metaKey)) {
+        const sel = term.getSelection()
+        if (sel) void navigator.clipboard.writeText(sel)
+        return false
+      }
+      if (isMac && e.metaKey && !e.shiftKey && e.key === 'c') {
+        const sel = term.getSelection()
+        if (!sel) return true // sem seleção, deixa o Cmd+C passar
+        void navigator.clipboard.writeText(sel)
+        return false
+      }
+
+      // Colar: Ctrl+Shift+V (todas plataformas) ou Cmd+V no mac.
+      if ((e.ctrlKey && e.shiftKey && e.key === 'V') || (isMac && e.metaKey && e.key === 'v')) {
+        void paste()
+        return false
+      }
+
+      // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
+      return true
+    })
+
     void start(term.cols, term.rows)
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      setMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() })
+    }
+    host.addEventListener('contextmenu', onContextMenu)
 
     const observer = new ResizeObserver(() => {
       if (!xtermRef.current || !fitRef.current) return
@@ -97,6 +162,7 @@ export function Terminal({
     observer.observe(host)
 
     return () => {
+      host.removeEventListener('contextmenu', onContextMenu)
       observer.disconnect()
       setDataHandler(null)
       kill()
@@ -174,6 +240,37 @@ export function Terminal({
       </div>
 
       <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--color-bg)] p-2" />
+
+      {menu && (
+        <div
+          className="fixed z-50 min-w-28 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] py-1 text-xs shadow-lg"
+          style={{ top: menu.y, left: menu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {menu.hasSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                copySelection()
+                setMenu(null)
+              }}
+              className="block w-full px-3 py-1 text-left hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+            >
+              Copiar
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void paste()
+              setMenu(null)
+            }}
+            className="block w-full px-3 py-1 text-left hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+          >
+            Colar
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -30,9 +30,25 @@ const toSession = (row: SessionRow): Session => ({
   endedAt: row.ended_at,
 })
 
-// Comando rodado no PTY. Em D0 usamos `bash` pra validar o pipeline.
-// D1 troca para `claude` (configurável via app_prefs).
-const DEFAULT_COMMAND = process.platform === 'win32' ? 'powershell.exe' : 'bash'
+const CLAUDE_COMMAND_KEY = 'claude_command'
+
+function resolveClaudeCommand(): string {
+  const row = getDb()
+    .prepare('SELECT value FROM app_prefs WHERE key = ?')
+    .get(CLAUDE_COMMAND_KEY) as { value: string } | undefined
+  return row?.value?.trim() || 'claude'
+}
+
+// O claude vive em ~/.local/bin e o env do Electron GUI não herda o PATH do rc.
+// Subimos o shell de login+interativo (-l -i carrega .zprofile/.zshrc) e damos
+// `exec claude` para que o PTY encerre quando o claude sair.
+function loginShellSpawn(claudeCmd: string): { command: string; args: string[] } {
+  if (process.platform === 'win32') {
+    return { command: 'powershell.exe', args: ['-NoLogo', '-Command', claudeCmd] }
+  }
+  const shell = process.env.SHELL || '/usr/bin/zsh'
+  return { command: shell, args: ['-l', '-i', '-c', `exec ${claudeCmd}`] }
+}
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -89,9 +105,11 @@ export function registerSessionIpc(): void {
     )
 
     try {
+      const { command, args } = loginShellSpawn(resolveClaudeCommand())
       ptyManager.spawn({
         sessionId: row.id,
-        command: DEFAULT_COMMAND,
+        command,
+        args,
         cwd: repo.path,
         cols: input.cols,
         rows: input.rows,

@@ -39,6 +39,7 @@ export function AppShell() {
   const area = useAppStore((s) => s.area)
   const panes = useAppStore((s) => s.panes)
   const closePane = useAppStore((s) => s.closePane)
+  const openSession = useAppStore((s) => s.openSession)
   const restoreBlocked = useAppStore((s) => s.restoreBlocked)
   const retryRestore = useAppStore((s) => s.retryRestore)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -48,6 +49,8 @@ export function AppShell() {
   // paneIds que o store já removeu — usado pra suprimir o eco do onDidRemovePanel
   // (quando nós mesmos chamamos api.removePanel, ele dispara o evento de volta).
   const removingFromStore = useRef(new Set<string>())
+  // Direção do próximo painel novo (atalhos de split). Consumido pelo reconcile.
+  const nextDirection = useRef<'right' | 'below'>('right')
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -94,10 +97,64 @@ export function AppShell() {
         id: pane.paneId,
         component: 'terminal',
         params: { pane },
-        position: active ? { referencePanel: active.id, direction: 'right' } : undefined,
+        position: active
+          ? { referencePanel: active.id, direction: nextDirection.current }
+          : undefined,
       })
+      nextDirection.current = 'right'
     }
   }, [panes, ready])
+
+  // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
+  // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes
+  // combos nunca colidem com o que o claude precisa receber. preventDefault evita
+  // o default do Electron (ex: Ctrl+W fecharia a janela).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.metaKey || e.altKey) return
+      const api = apiRef.current
+
+      // Ctrl+W: fecha o painel ativo.
+      if (e.key === 'w' && !e.shiftKey) {
+        const id = api?.activePanel?.id
+        if (id) {
+          e.preventDefault()
+          closePane(id)
+        }
+        return
+      }
+
+      // Ctrl+\ (vertical) / Ctrl+Shift+\ (horizontal): split do ativo com nova
+      // sessão no mesmo repo. Vertical = painéis lado a lado (direction right);
+      // horizontal = empilhados (direction below).
+      if (e.key === '\\') {
+        const active = api?.activePanel
+        const pane = active
+          ? useAppStore.getState().panes.find((p) => p.paneId === active.id)
+          : undefined
+        if (pane) {
+          e.preventDefault()
+          nextDirection.current = e.shiftKey ? 'below' : 'right'
+          void openSession(pane.repo, pane.projectName, pane.projectIcon)
+        }
+        return
+      }
+
+      // Ctrl+T: nova sessão no mesmo repo da pane ativa.
+      if (e.key === 't' && !e.shiftKey) {
+        const active = api?.activePanel
+        const pane = active
+          ? useAppStore.getState().panes.find((p) => p.paneId === active.id)
+          : undefined
+        if (pane) {
+          e.preventDefault()
+          void openSession(pane.repo, pane.projectName, pane.projectIcon)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [closePane, openSession])
 
   return (
     <div className="flex h-full w-full overflow-hidden">

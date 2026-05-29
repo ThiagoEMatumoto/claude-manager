@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
+import { EditRepoDialog } from './EditRepoDialog'
 import { Menu } from '@/components/ui/Menu'
 import { SessionsModal } from '@/features/sessions/SessionsModal'
 import { useAppStore } from '@/store/appStore'
-import type { LinkKind, Project, Repo } from '../../../shared/types/ipc'
+import type { LinkKind, Project, Repo, UpdateRepoInput } from '../../../shared/types/ipc'
 
 interface Props {
   project: Project
@@ -17,14 +18,14 @@ const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
 }
 
 export function ProjectRepos({ project }: Props) {
-  const { repos, create, remove } = useRepos(project.id)
+  const { repos, create, update, remove } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
 
   return (
     <div className="border-l border-[var(--color-border)]/50 bg-[var(--color-bg)]/40 pl-4">
       <ul className="flex flex-col gap-px py-1">
         {repos.map((r) => (
-          <RepoRow key={r.id} repo={r} project={project} onRemove={remove} />
+          <RepoRow key={r.id} repo={r} project={project} onUpdate={update} onRemove={remove} />
         ))}
       </ul>
 
@@ -49,12 +50,14 @@ export function ProjectRepos({ project }: Props) {
 interface RepoRowProps {
   repo: Repo
   project: Project
+  onUpdate: (input: UpdateRepoInput) => Promise<void>
   onRemove: (id: string) => Promise<void>
 }
 
-function RepoRow({ repo, project, onRemove }: RepoRowProps) {
+function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
 
   return (
@@ -81,6 +84,7 @@ function RepoRow({ repo, project, onRemove }: RepoRowProps) {
               onClick: () => void openSession(repo, project.name, project.icon),
             },
             { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
+            { label: 'Editar', onClick: () => setEditOpen(true) },
             {
               label: 'Remover repo',
               danger: true,
@@ -108,6 +112,18 @@ function RepoRow({ repo, project, onRemove }: RepoRowProps) {
         open={sessionsOpen}
         onClose={() => setSessionsOpen(false)}
       />
+
+      {editOpen && (
+        <EditRepoDialog
+          open
+          repo={repo}
+          onClose={() => setEditOpen(false)}
+          onSave={async (input) => {
+            await onUpdate(input)
+            setEditOpen(false)
+          }}
+        />
+      )}
     </li>
   )
 }

@@ -1,6 +1,6 @@
 import type { AgentInfo, ClaudeConfigs, McpInfo, SkillInfo } from '../../../shared/types/ipc'
 import type { CcTab } from './CcConfigsSidebar'
-import { CenterMessage } from './ui'
+import { Badge, Card, CenterMessage } from './ui'
 
 interface Props {
   tab: Exclude<CcTab, 'plugins' | 'marketplace'>
@@ -23,44 +23,50 @@ export function CcConfigsView({ tab, configs, loading }: Props) {
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4">
-      <ul className="flex flex-col gap-px">
-        {tab === 'agents' && configs.agents.map((a) => <AgentRow key={a.name} agent={a} />)}
-        {tab === 'skills' && configs.skills.map((s) => <SkillRow key={s.name} skill={s} />)}
-        {tab === 'mcps' && configs.mcps.map((m) => <McpRow key={m.name} mcp={m} />)}
-      </ul>
+      <div className="mb-3 text-xs text-[var(--color-text-dim)]">{items.length} itens</div>
+      <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+        {tab === 'agents' && configs.agents.map((a) => <AgentCard key={a.name} agent={a} />)}
+        {tab === 'skills' && configs.skills.map((s) => <SkillCard key={s.name} skill={s} />)}
+        {tab === 'mcps' && configs.mcps.map((m) => <McpCard key={m.name} mcp={m} />)}
+      </div>
     </div>
   )
 }
 
-function RowShell({ name, meta, badge }: { name: string; meta?: string; badge?: React.ReactNode }) {
+function EntityCard({
+  name,
+  badge,
+  description,
+}: {
+  name: string
+  badge: string
+  description?: string
+}) {
   return (
-    <li className="rounded-md px-3 py-2 transition hover:bg-[var(--color-surface-2)]/50">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-[var(--color-text)]">{name}</span>
-        {badge}
-      </div>
-      {meta && <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">{meta}</div>}
-    </li>
-  )
-}
-
-function AgentRow({ agent }: { agent: AgentInfo }) {
-  return <RowShell name={agent.name} meta={agent.description || undefined} />
-}
-
-function SkillRow({ skill }: { skill: SkillInfo }) {
-  return <RowShell name={skill.name} meta={skill.description || undefined} />
-}
-
-function McpRow({ mcp }: { mcp: McpInfo }) {
-  return (
-    <RowShell
-      name={mcp.name}
-      badge={
-        <span className="rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-dim)]">
-          {mcp.kind}
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">
+          {name}
         </span>
-      }
-    />
+        <Badge>{badge}</Badge>
+      </div>
+      {description && (
+        <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
+          {description}
+        </p>
+      )}
+    </Card>
   )
+}
+
+function AgentCard({ agent }: { agent: AgentInfo }) {
+  return <EntityCard name={agent.name} badge="agent" description={agent.description || undefined} />
+}
+
+function SkillCard({ skill }: { skill: SkillInfo }) {
+  return <EntityCard name={skill.name} badge="skill" description={skill.description || undefined} />
+}
+
+function McpCard({ mcp }: { mcp: McpInfo }) {
+  return <EntityCard name={mcp.name} badge={mcp.kind} />
 }

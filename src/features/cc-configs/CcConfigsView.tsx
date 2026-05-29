@@ -25,6 +25,10 @@ const EMPTY_LABEL: Record<ComponentTab, string> = {
   hooks: 'Nenhum hook encontrado.',
 }
 
+function originLabel(origin: string): string {
+  return origin === 'user' ? 'user' : origin
+}
+
 function isFocused(focus: FocusedItem | null, tab: ComponentTab, name: string, origin: string) {
   if (!focus || focus.tab !== tab || focus.name !== name) return false
   return focus.origin == null || focus.origin === origin
@@ -123,19 +127,25 @@ function FocusableCard({
 function EntityCard({
   name,
   badge,
+  origin,
   description,
 }: {
   name: string
   badge: string
+  origin: string
   description?: string
 }) {
+  const fromUser = origin === 'user'
   return (
     <Card>
       <div className="flex items-start justify-between gap-3">
         <span className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">
           {name}
         </span>
-        <Badge>{badge}</Badge>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Badge tone={fromUser ? 'neutral' : 'on'}>{originLabel(origin)}</Badge>
+          <Badge>{badge}</Badge>
+        </div>
       </div>
       {description && (
         <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-[var(--color-text-dim)]">
@@ -157,7 +167,12 @@ function AgentCard({
 }) {
   return (
     <FocusableCard focused={focused} onClearFocus={onClearFocus}>
-      <EntityCard name={agent.name} badge="agent" description={agent.description || undefined} />
+      <EntityCard
+        name={agent.name}
+        badge="agent"
+        origin={agent.origin}
+        description={agent.description || undefined}
+      />
     </FocusableCard>
   )
 }
@@ -173,7 +188,12 @@ function SkillCard({
 }) {
   return (
     <FocusableCard focused={focused} onClearFocus={onClearFocus}>
-      <EntityCard name={skill.name} badge="skill" description={skill.description || undefined} />
+      <EntityCard
+        name={skill.name}
+        badge="skill"
+        origin={skill.origin}
+        description={skill.description || undefined}
+      />
     </FocusableCard>
   )
 }
@@ -189,7 +209,7 @@ function McpCard({
 }) {
   return (
     <FocusableCard focused={focused} onClearFocus={onClearFocus}>
-      <EntityCard name={mcp.name} badge={mcp.kind} />
+      <EntityCard name={mcp.name} badge={mcp.kind} origin={mcp.origin} />
     </FocusableCard>
   )
 }
@@ -205,7 +225,12 @@ function HookCard({
 }) {
   return (
     <FocusableCard focused={focused} onClearFocus={onClearFocus}>
-      <EntityCard name={hook.event} badge="hook" description={hook.summary || undefined} />
+      <EntityCard
+        name={hook.event}
+        badge="hook"
+        origin={hook.origin}
+        description={hook.summary || undefined}
+      />
     </FocusableCard>
   )
 }

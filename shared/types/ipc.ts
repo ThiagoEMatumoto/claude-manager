@@ -72,7 +72,8 @@ export interface PtyExitEvent {
 
 export interface SessionActivity {
   ccSessionId: string
-  status: 'starting' | 'working' | 'waiting' | 'idle'
+  status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
+  name: string | null
   title: string | null
   lastText: string | null
   lastActivityAt: number | null

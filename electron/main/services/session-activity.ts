@@ -1,16 +1,69 @@
 import { BrowserWindow } from 'electron'
 import { EventEmitter } from 'node:events'
-import { existsSync, readdirSync, open as openCb, fstat as fstatCb, read as readCb, close as closeCb } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  open as openCb,
+  fstat as fstatCb,
+  read as readCb,
+  close as closeCb,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import type { SessionActivity } from '../../../shared/types/ipc'
 
 const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
+const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
 const TAIL_BYTES = 64 * 1024
-const DEBOUNCE_MS = 400
-const IDLE_AFTER_MS = 3 * 60 * 1000
+const DEBOUNCE_MS = 250
 const MAX_TEXT = 200
+
+// Fonte primária de status/name/updatedAt: ~/.claude/sessions/<pid>.json (um por
+// processo, atualizado ao vivo pelo Claude Code). É leve (~300B) e preciso.
+interface CcSessionFile {
+  pid?: number
+  sessionId?: string
+  cwd?: string
+  status?: 'busy' | 'idle' | 'waiting' | 'shell' | null
+  name?: string | null
+  updatedAt?: number
+}
+
+interface IndexEntry {
+  pid: number
+  status: CcSessionFile['status']
+  name: string | null
+  cwd: string | null
+  updatedAt: number | null
+}
+
+// kill(pid, 0) não envia sinal — só testa se o processo existe e é acessível.
+// ESRCH = morto; EPERM = vivo mas sem permissão (raro aqui, mesmo usuário).
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+function mapStatus(cc: CcSessionFile['status']): SessionActivity['status'] {
+  switch (cc) {
+    case 'busy':
+    case 'shell':
+      return 'working'
+    case 'waiting':
+      return 'waiting'
+    case 'idle':
+      return 'idle'
+    default:
+      // null ou ausente → sessão iniciando, ainda sem status reportado.
+      return 'starting'
+  }
+}
 
 // O JSONL nasce em ~/.claude/projects/<cwd-encoded>/<ccSessionId>.jsonl. Em vez de
 // reproduzir o encoding do cwd, varremos os subdirs procurando o arquivo pelo id.
@@ -71,11 +124,9 @@ interface ContentItem {
 interface TranscriptLine {
   type?: string
   aiTitle?: string
-  timestamp?: string
   message?: {
     role?: string
     content?: ContentItem[]
-    stop_reason?: string
     usage?: {
       input_tokens?: number
       output_tokens?: number
@@ -84,7 +135,15 @@ interface TranscriptLine {
   }
 }
 
-function deriveActivity(ccSessionId: string, tail: string): SessionActivity {
+interface TranscriptEnrichment {
+  title: string | null
+  lastText: string | null
+  tokens: SessionActivity['tokens']
+}
+
+// Enriquecimento secundário: lastText, tokens e aiTitle (fallback do name).
+// Status e updatedAt vêm da fonte primária (sessions/<pid>.json).
+function deriveEnrichment(tail: string): TranscriptEnrichment {
   const lines = tail.split('\n')
   const parsed: TranscriptLine[] = []
   for (const line of lines) {
@@ -99,24 +158,13 @@ function deriveActivity(ccSessionId: string, tail: string): SessionActivity {
 
   let title: string | null = null
   let lastText: string | null = null
-  let lastActivityAt: number | null = null
   let tokens: SessionActivity['tokens']
-
-  // Últimas linhas de conteúdo user/assistant, usadas pela heurística de status.
-  const contentLines = parsed.filter(
-    (l) => l.type === 'user' || l.type === 'assistant',
-  )
-  const lastContent = contentLines[contentLines.length - 1]
-  const lastAssistant = [...contentLines].reverse().find((l) => l.type === 'assistant')
 
   for (const l of parsed) {
     if (l.type === 'ai-title' && l.aiTitle) title = l.aiTitle
-    if (l.timestamp) {
-      const t = Date.parse(l.timestamp)
-      if (!Number.isNaN(t)) lastActivityAt = t
-    }
   }
 
+  const lastAssistant = [...parsed].reverse().find((l) => l.type === 'assistant')
   if (lastAssistant?.message?.content) {
     const textItem = [...lastAssistant.message.content]
       .reverse()
@@ -131,100 +179,138 @@ function deriveActivity(ccSessionId: string, tail: string): SessionActivity {
     }
   }
 
-  let status: SessionActivity['status'] = 'waiting'
-  if (parsed.length === 0) {
-    status = 'starting'
-  } else {
-    const lastIsToolResult =
-      lastContent?.type === 'user' &&
-      lastContent.message?.content?.some((c) => c.type === 'tool_result')
-    const assistantWantsTool = lastContent?.type === 'assistant' && lastContent.message?.stop_reason === 'tool_use'
-    if (assistantWantsTool || lastIsToolResult) {
-      status = 'working'
-    } else if (lastContent?.type === 'assistant' && lastContent.message?.stop_reason === 'end_turn') {
-      status = 'waiting'
-    }
-    if (status === 'waiting' && lastActivityAt && Date.now() - lastActivityAt > IDLE_AFTER_MS) {
-      status = 'idle'
-    }
-  }
-
-  return { ccSessionId, status, title, lastText, lastActivityAt, tokens }
+  return { title, lastText, tokens }
 }
 
 interface WatchEntry {
-  watcher: FSWatcher
-  timer: NodeJS.Timeout | null
-  path: string | null
+  transcriptPath: string | null
+  enrichment: TranscriptEnrichment
 }
 
 class SessionActivityService extends EventEmitter {
-  private watchers = new Map<string, WatchEntry>()
+  // ccSessionId -> sessões assinadas pelo renderer.
+  private watched = new Map<string, WatchEntry>()
+  // sessionId -> dados do sessions/<pid>.json (índice por PID, lido dos arquivos).
+  private index = new Map<string, IndexEntry>()
+  private dirWatcher: FSWatcher | null = null
+  private timer: NodeJS.Timeout | null = null
 
   watch(ccSessionId: string): void {
-    if (this.watchers.has(ccSessionId)) return
-
-    const initialPath = findTranscriptPath(ccSessionId)
-    // Se o arquivo ainda não existe, observamos o diretório-raiz pra detectar o
-    // nascimento do JSONL (a sessão acabou de iniciar, antes da 1ª interação).
-    const watchTarget = initialPath ?? PROJECTS_ROOT
-    const watcher = chokidar.watch(watchTarget, {
-      ignoreInitial: false,
-      depth: initialPath ? 0 : 2,
-      awaitWriteFinish: false,
+    if (this.watched.has(ccSessionId)) return
+    this.watched.set(ccSessionId, {
+      transcriptPath: findTranscriptPath(ccSessionId),
+      enrichment: { title: null, lastText: null, tokens: undefined },
     })
-
-    const entry: WatchEntry = { watcher, timer: null, path: initialPath }
-    this.watchers.set(ccSessionId, entry)
-
-    const schedule = () => {
-      if (entry.timer) clearTimeout(entry.timer)
-      entry.timer = setTimeout(() => void this.process(ccSessionId), DEBOUNCE_MS)
-    }
-
-    watcher.on('add', (p) => {
-      if (p.endsWith(`${ccSessionId}.jsonl`)) {
-        entry.path = p
-        schedule()
-      }
-    })
-    watcher.on('change', (p) => {
-      if (entry.path && p === entry.path) schedule()
-    })
-
-    // Emite o estado inicial (starting se o arquivo ainda não nasceu).
-    schedule()
+    this.ensureDirWatcher()
+    // Estado inicial imediato (índice já pode estar populado).
+    this.rebuildIndex()
+    void this.emitFor(ccSessionId)
   }
 
   unwatch(ccSessionId: string): void {
-    const entry = this.watchers.get(ccSessionId)
-    if (!entry) return
-    if (entry.timer) clearTimeout(entry.timer)
-    void entry.watcher.close()
-    this.watchers.delete(ccSessionId)
+    this.watched.delete(ccSessionId)
+    if (this.watched.size === 0 && this.dirWatcher) {
+      void this.dirWatcher.close()
+      this.dirWatcher = null
+      if (this.timer) {
+        clearTimeout(this.timer)
+        this.timer = null
+      }
+    }
   }
 
   closeAll(): void {
-    for (const id of [...this.watchers.keys()]) this.unwatch(id)
+    for (const id of [...this.watched.keys()]) this.unwatch(id)
   }
 
-  private async process(ccSessionId: string): Promise<void> {
-    const entry = this.watchers.get(ccSessionId)
-    if (!entry) return
-    if (!entry.path) entry.path = findTranscriptPath(ccSessionId)
+  private ensureDirWatcher(): void {
+    if (this.dirWatcher) return
+    this.dirWatcher = chokidar.watch(SESSIONS_ROOT, {
+      ignoreInitial: false,
+      depth: 0,
+      awaitWriteFinish: false,
+    })
+    const schedule = () => {
+      if (this.timer) clearTimeout(this.timer)
+      this.timer = setTimeout(() => this.onIndexChanged(), DEBOUNCE_MS)
+    }
+    this.dirWatcher.on('add', schedule)
+    this.dirWatcher.on('change', schedule)
+    this.dirWatcher.on('unlink', schedule)
+  }
 
-    let activity: SessionActivity
-    if (!entry.path) {
-      activity = {
-        ccSessionId,
-        status: 'starting',
-        title: null,
-        lastText: null,
-        lastActivityAt: null,
+  // Relê todos os sessions/<pid>.json e reconstrói o índice sessionId -> entry.
+  private rebuildIndex(): void {
+    const next = new Map<string, IndexEntry>()
+    let files: string[]
+    try {
+      files = readdirSync(SESSIONS_ROOT).filter((f) => f.endsWith('.json'))
+    } catch {
+      this.index = next
+      return
+    }
+    for (const file of files) {
+      let data: CcSessionFile
+      try {
+        data = JSON.parse(readFileSync(join(SESSIONS_ROOT, file), 'utf8')) as CcSessionFile
+      } catch {
+        continue // arquivo inválido ou em escrita parcial.
       }
+      if (!data.sessionId || typeof data.pid !== 'number') continue
+      next.set(data.sessionId, {
+        pid: data.pid,
+        status: data.status ?? null,
+        name: data.name ?? null,
+        cwd: data.cwd ?? null,
+        updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
+      })
+    }
+    this.index = next
+  }
+
+  private onIndexChanged(): void {
+    this.rebuildIndex()
+    for (const id of this.watched.keys()) void this.emitFor(id)
+  }
+
+  private async emitFor(ccSessionId: string): Promise<void> {
+    const entry = this.watched.get(ccSessionId)
+    if (!entry) return
+    const indexed = this.index.get(ccSessionId)
+
+    let status: SessionActivity['status']
+    let name: string | null = null
+    let lastActivityAt: number | null = null
+
+    if (!indexed) {
+      // Sem arquivo: ou a sessão ainda não nasceu (starting) ou já encerrou.
+      // Se já vimos o JSONL antes (transcriptPath), tratamos como encerrada.
+      status = entry.transcriptPath ? 'ended' : 'starting'
+    } else if (!isPidAlive(indexed.pid)) {
+      status = 'ended'
+      name = indexed.name
+      lastActivityAt = indexed.updatedAt
     } else {
-      const tail = await readTail(entry.path)
-      activity = deriveActivity(ccSessionId, tail)
+      status = mapStatus(indexed.status)
+      name = indexed.name
+      lastActivityAt = indexed.updatedAt
+    }
+
+    // Enriquecimento secundário do JSONL (lastText/tokens/title) sob demanda.
+    if (!entry.transcriptPath) entry.transcriptPath = findTranscriptPath(ccSessionId)
+    if (entry.transcriptPath) {
+      const tail = await readTail(entry.transcriptPath)
+      if (tail) entry.enrichment = deriveEnrichment(tail)
+    }
+
+    const activity: SessionActivity = {
+      ccSessionId,
+      status,
+      name,
+      title: entry.enrichment.title,
+      lastText: entry.enrichment.lastText,
+      lastActivityAt,
+      tokens: entry.enrichment.tokens,
     }
     broadcast('session:activity', activity)
   }

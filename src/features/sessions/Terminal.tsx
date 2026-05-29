@@ -102,8 +102,12 @@ export function Terminal({
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
 
-  // Precedência do nome em destaque: rename do usuário > name do CC (live) > label do repo.
-  const displayTitle = title ?? activity?.name ?? repoLabel
+  // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
+  const displayTitle = activity?.name ?? title ?? repoLabel
+
+  // Só dá pra injetar /rename quando o claude está no prompt; em 'working' ele
+  // está ocupado e a injeção concatenaria no meio de um comando/output.
+  const canRename = !activity || activity.status !== 'working'
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
@@ -120,10 +124,13 @@ export function Terminal({
 
   function commitRename() {
     setEditing(false)
-    const next = draft.trim()
-    if (next === (title ?? '')) return
-    setTitle(next.length > 0 ? next : null)
+    const next = draft.replace(/[\r\n]+/g, ' ').trim()
+    if (next.length === 0) return
+    // Cache no nosso DB (Fase 4/listagem). A exibição prioriza activity.name.
     void sessionsApi.rename(session.id, next)
+    // Fonte de verdade do nome é o claude: injeta /rename. \x15 (Ctrl+U) limpa a
+    // linha atual do prompt pra não concatenar com algo que o usuário digitou.
+    if (canRename) write('\x15/rename ' + next + '\r')
   }
 
   useEffect(() => {
@@ -275,12 +282,13 @@ export function Terminal({
             ) : (
               <button
                 type="button"
+                disabled={!canRename}
                 onClick={() => {
-                  setDraft(title ?? activity?.name ?? '')
+                  setDraft(activity?.name ?? title ?? '')
                   setEditing(true)
                 }}
-                className="font-medium hover:text-[var(--color-accent)]"
-                title="Renomear sessão"
+                className="font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
+                title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
               >
                 {displayTitle}
               </button>

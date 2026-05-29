@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
-import { sessionsApi } from '@/lib/ipc'
-import { relativeTime } from '@/lib/time'
+import { Menu } from '@/components/ui/Menu'
 import { useAppStore } from '@/store/appStore'
-import type { LinkKind, Project, Repo, SessionSummary } from '../../../shared/types/ipc'
+import type { LinkKind, Project, Repo } from '../../../shared/types/ipc'
 
 interface Props {
   project: Project
@@ -14,13 +13,6 @@ const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
   inside: { icon: '📁', title: 'Dentro do vault' },
   symlink: { icon: '🔗', title: 'Symlink para fora do vault' },
   external: { icon: '↗', title: 'Referência externa' },
-}
-
-const STATUS_DOT: Record<SessionSummary['status'], string> = {
-  working: 'bg-green-400',
-  waiting: 'bg-yellow-400',
-  idle: 'bg-[var(--color-accent)]',
-  ended: 'bg-[var(--color-text-dim)]',
 }
 
 export function ProjectRepos({ project }: Props) {
@@ -60,89 +52,51 @@ interface RepoRowProps {
 }
 
 function RepoRow({ repo, project, onRemove }: RepoRowProps) {
-  const [expanded, setExpanded] = useState(false)
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
-  const resumeSession = useAppStore((s) => s.resumeSession)
-
-  const refetch = useCallback(() => {
-    void sessionsApi.listByRepo(repo.id).then(setSessions)
-  }, [repo.id])
-
-  useEffect(() => {
-    if (expanded) refetch()
-  }, [expanded, refetch])
 
   return (
     <li className="text-xs">
-      <div className="group flex items-center justify-between px-1 py-1.5">
-        <div className="flex flex-1 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="w-4 shrink-0 text-[10px] text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-            title={expanded ? 'Recolher sessões' : 'Ver sessões'}
-          >
-            {expanded ? '▾' : '▸'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void openSession(repo, project.name, project.icon)}
-            className="flex flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-            title={repo.path}
-          >
-            <span className="text-[10px]" title={LINK_BADGE[repo.linkKind].title}>
-              {LINK_BADGE[repo.linkKind].icon}
-            </span>
-            <span>{repo.label}</span>
-          </button>
-        </div>
+      <div className="group flex items-center justify-between gap-1 px-1 py-1.5">
         <button
           type="button"
-          onClick={() => {
-            if (confirm(`Apagar repo "${repo.label}"?`)) void onRemove(repo.id)
-          }}
-          className="hidden text-[var(--color-text-dim)] hover:text-red-400 group-hover:inline"
+          onClick={() => void openSession(repo, project.name, project.icon)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+          title={`Nova sessão · ${repo.path}`}
         >
-          ×
+          <span className="text-[10px]" title={LINK_BADGE[repo.linkKind].title}>
+            {LINK_BADGE[repo.linkKind].icon}
+          </span>
+          <span className="truncate">{repo.label}</span>
         </button>
-      </div>
 
-      {expanded && (
-        <ul className="flex flex-col gap-px pb-1 pl-5">
-          {sessions === null && (
-            <li className="px-2 py-1 text-[10px] text-[var(--color-text-dim)]">carregando…</li>
-          )}
-          {sessions !== null && sessions.length === 0 && (
-            <li className="px-2 py-1 text-[10px] text-[var(--color-text-dim)]">sem sessões</li>
-          )}
-          {sessions?.map((s) => (
-            <li
-              key={s.ccSessionId}
-              className="group/sess flex items-center justify-between gap-2 px-2 py-1"
-            >
-              <button
-                type="button"
-                onClick={() => void resumeSession(repo, project.name, project.icon, s.ccSessionId)}
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                title="Retomar sessão"
-              >
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[s.status]} ${
-                    s.isLive ? '' : 'opacity-50'
-                  }`}
-                />
-                <span className="truncate text-[var(--color-text-dim)] group-hover/sess:text-[var(--color-text)]">
-                  {s.name || '(sem nome)'}
-                </span>
-              </button>
-              <span className="shrink-0 text-[10px] text-[var(--color-text-dim)] opacity-70">
-                {s.isLive ? 'ao vivo' : relativeTime(s.lastActivityAt)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+        <Menu
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          items={[
+            {
+              label: 'Nova sessão',
+              onClick: () => void openSession(repo, project.name, project.icon),
+            },
+            {
+              label: 'Remover repo',
+              danger: true,
+              onClick: () => {
+                if (confirm(`Apagar repo "${repo.label}"?`)) void onRemove(repo.id)
+              },
+            },
+          ]}
+        >
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="shrink-0 rounded px-1 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
+            title="Ações do repo"
+          >
+            ⋯
+          </button>
+        </Menu>
+      </div>
     </li>
   )
 }

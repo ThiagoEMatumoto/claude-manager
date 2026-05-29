@@ -65,7 +65,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
       <div className="group flex items-center justify-between gap-1 px-1 py-1.5">
         <button
           type="button"
-          onClick={() => void openSession(repo, project.name, project.icon)}
+          onClick={() => void openSession(repo, project.name, project.icon, project.color)}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
           title={`Nova sessão · ${repo.path}`}
         >
@@ -81,7 +81,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
           items={[
             {
               label: 'Nova sessão',
-              onClick: () => void openSession(repo, project.name, project.icon),
+              onClick: () => void openSession(repo, project.name, project.icon, project.color),
             },
             { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
             { label: 'Editar', onClick: () => setEditOpen(true) },
@@ -109,6 +109,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
         repo={repo}
         projectName={project.name}
         projectIcon={project.icon}
+        projectColor={project.color}
         open={sessionsOpen}
         onClose={() => setSessionsOpen(false)}
       />

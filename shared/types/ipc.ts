@@ -93,6 +93,8 @@ export interface PaneSnapshot {
   repo: Repo
   projectName: string
   projectIcon: string | null
+  // Opcional: snapshots gravados antes desta feature não têm a cor (fallback null).
+  projectColor?: string | null
 }
 
 export interface WorkspaceBootState {

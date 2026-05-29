@@ -154,7 +154,7 @@ export function AppShell() {
         if (pane) {
           e.preventDefault()
           nextPosition.current = e.shiftKey ? 'below' : 'right'
-          void openSession(pane.repo, pane.projectName, pane.projectIcon)
+          void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
         }
         return
       }
@@ -168,7 +168,7 @@ export function AppShell() {
         if (pane) {
           e.preventDefault()
           nextPosition.current = 'tab'
-          void openSession(pane.repo, pane.projectName, pane.projectIcon)
+          void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
         }
       }
     }

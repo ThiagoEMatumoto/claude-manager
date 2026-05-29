@@ -4,6 +4,7 @@ import type {
   CreateProjectInput,
   CreateRepoInput,
   SpawnSessionInput,
+  ResumeSessionInput,
   PtyDataEvent,
   PtyExitEvent,
   SessionActivity,
@@ -32,6 +33,8 @@ const api: Api = {
   },
   sessions: {
     spawn: (input: SpawnSessionInput) => invoke('sessions:spawn', input),
+    resume: (input: ResumeSessionInput) => invoke('sessions:resume', input),
+    listByRepo: (repoId) => invoke('sessions:list-by-repo', repoId),
     getBacklog: (sessionId) => invoke('sessions:get-backlog', sessionId),
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
     resize: (sessionId, cols, rows) => invoke('sessions:resize', sessionId, cols, rows),

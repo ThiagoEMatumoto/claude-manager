@@ -31,7 +31,7 @@ interface CcSessionFile {
   updatedAt?: number
 }
 
-interface IndexEntry {
+export interface IndexEntry {
   pid: number
   status: CcSessionFile['status']
   name: string | null
@@ -39,9 +39,38 @@ interface IndexEntry {
   updatedAt: number | null
 }
 
+// Lê todos os ~/.claude/sessions/<pid>.json e indexa por sessionId. Compartilhado
+// entre o watcher ao vivo e o list-by-repo (ambos precisam do estado dos PIDs).
+export function buildSessionsFileIndex(): Map<string, IndexEntry> {
+  const next = new Map<string, IndexEntry>()
+  let files: string[]
+  try {
+    files = readdirSync(SESSIONS_ROOT).filter((f) => f.endsWith('.json'))
+  } catch {
+    return next
+  }
+  for (const file of files) {
+    let data: CcSessionFile
+    try {
+      data = JSON.parse(readFileSync(join(SESSIONS_ROOT, file), 'utf8')) as CcSessionFile
+    } catch {
+      continue // arquivo inválido ou em escrita parcial.
+    }
+    if (!data.sessionId || typeof data.pid !== 'number') continue
+    next.set(data.sessionId, {
+      pid: data.pid,
+      status: data.status ?? null,
+      name: data.name ?? null,
+      cwd: data.cwd ?? null,
+      updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
+    })
+  }
+  return next
+}
+
 // kill(pid, 0) não envia sinal — só testa se o processo existe e é acessível.
 // ESRCH = morto; EPERM = vivo mas sem permissão (raro aqui, mesmo usuário).
-function isPidAlive(pid: number): boolean {
+export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
     return true
@@ -50,7 +79,7 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function mapStatus(cc: CcSessionFile['status']): SessionActivity['status'] {
+export function mapStatus(cc: CcSessionFile['status']): SessionActivity['status'] {
   switch (cc) {
     case 'busy':
     case 'shell':
@@ -67,7 +96,7 @@ function mapStatus(cc: CcSessionFile['status']): SessionActivity['status'] {
 
 // O JSONL nasce em ~/.claude/projects/<cwd-encoded>/<ccSessionId>.jsonl. Em vez de
 // reproduzir o encoding do cwd, varremos os subdirs procurando o arquivo pelo id.
-function findTranscriptPath(ccSessionId: string): string | null {
+export function findTranscriptPath(ccSessionId: string): string | null {
   if (!existsSync(PROJECTS_ROOT)) return null
   const target = `${ccSessionId}.jsonl`
   let dirs: string[]
@@ -114,6 +143,32 @@ function readTail(path: string): Promise<string> {
       })
     })
   })
+}
+
+// Título persistido no JSONL: custom-title (definido pelo usuário) tem prioridade
+// sobre ai-title (gerado). Lê o arquivo inteiro porque esses eventos podem estar em
+// qualquer posição; usado só no list-by-repo (poucas sessões por vez).
+export function readTranscriptTitle(path: string): string | null {
+  let content: string
+  try {
+    content = readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+  let aiTitle: string | null = null
+  let customTitle: string | null = null
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const obj = JSON.parse(trimmed) as { type?: string; aiTitle?: string; customTitle?: string }
+      if (obj.type === 'custom-title' && obj.customTitle) customTitle = obj.customTitle
+      else if (obj.type === 'ai-title' && obj.aiTitle) aiTitle = obj.aiTitle
+    } catch {
+      // linha inválida — ignorar.
+    }
+  }
+  return customTitle ?? aiTitle
 }
 
 interface ContentItem {
@@ -241,31 +296,7 @@ class SessionActivityService extends EventEmitter {
 
   // Relê todos os sessions/<pid>.json e reconstrói o índice sessionId -> entry.
   private rebuildIndex(): void {
-    const next = new Map<string, IndexEntry>()
-    let files: string[]
-    try {
-      files = readdirSync(SESSIONS_ROOT).filter((f) => f.endsWith('.json'))
-    } catch {
-      this.index = next
-      return
-    }
-    for (const file of files) {
-      let data: CcSessionFile
-      try {
-        data = JSON.parse(readFileSync(join(SESSIONS_ROOT, file), 'utf8')) as CcSessionFile
-      } catch {
-        continue // arquivo inválido ou em escrita parcial.
-      }
-      if (!data.sessionId || typeof data.pid !== 'number') continue
-      next.set(data.sessionId, {
-        pid: data.pid,
-        status: data.status ?? null,
-        name: data.name ?? null,
-        cwd: data.cwd ?? null,
-        updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : null,
-      })
-    }
-    this.index = next
+    this.index = buildSessionsFileIndex()
   }
 
   private onIndexChanged(): void {

@@ -1,9 +1,22 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
-import { sessionActivityService } from '../services/session-activity'
-import type { Session, SpawnSessionInput } from '../../../shared/types/ipc'
+import {
+  sessionActivityService,
+  findTranscriptPath,
+  buildSessionsFileIndex,
+  readTranscriptTitle,
+  isPidAlive,
+  mapStatus,
+} from '../services/session-activity'
+import type {
+  Session,
+  SpawnSessionInput,
+  ResumeSessionInput,
+  SessionSummary,
+} from '../../../shared/types/ipc'
 
 interface SessionRow {
   id: string
@@ -67,6 +80,64 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
+// Cria o registro em `sessions`, dispara o PTY com o innerCmd dado e devolve o Session.
+// Spawn novo e resume diferem só no innerCmd (--session-id <novo> vs --resume <existente>).
+function startSession(opts: {
+  ccSessionId: string
+  repoId: string
+  cwd: string
+  innerCmd: string
+  cols?: number
+  rows?: number
+}): Session {
+  const db = getDb()
+  const id = randomUUID()
+  const row: SessionRow = {
+    id,
+    repo_id: opts.repoId,
+    cc_session_id: opts.ccSessionId,
+    title: null,
+    pane_id: null,
+    status: 'running',
+    started_at: Date.now(),
+    ended_at: null,
+  }
+  db.prepare(
+    `INSERT INTO sessions
+     (id, repo_id, cc_session_id, title, pane_id, status, started_at, ended_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.id,
+    row.repo_id,
+    row.cc_session_id,
+    row.title,
+    row.pane_id,
+    row.status,
+    row.started_at,
+    row.ended_at,
+  )
+
+  try {
+    const { command, args } = loginShellSpawn(opts.innerCmd)
+    ptyManager.spawn({
+      sessionId: row.id,
+      command,
+      args,
+      cwd: opts.cwd,
+      cols: opts.cols,
+      rows: opts.rows,
+    })
+  } catch (err) {
+    db.prepare("UPDATE sessions SET status = 'crashed', ended_at = ? WHERE id = ?").run(
+      Date.now(),
+      row.id,
+    )
+    throw err
+  }
+
+  return toSession(row)
+}
+
 let listenersAttached = false
 
 export function registerSessionIpc(): void {
@@ -93,53 +164,90 @@ export function registerSessionIpc(): void {
     const sessionId = randomUUID()
     const name = input.name?.trim() || repo.label
 
-    const row: SessionRow = {
-      id: sessionId,
-      repo_id: input.repoId,
-      cc_session_id: sessionId,
-      title: null,
-      pane_id: null,
-      status: 'running',
-      started_at: Date.now(),
-      ended_at: null,
-    }
-    db.prepare(
-      `INSERT INTO sessions
-       (id, repo_id, cc_session_id, title, pane_id, status, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      row.id,
-      row.repo_id,
-      row.cc_session_id,
-      row.title,
-      row.pane_id,
-      row.status,
-      row.started_at,
-      row.ended_at,
-    )
+    if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
+    const claudeCmd = resolveClaudeCommand()
+    const innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
 
-    try {
-      if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
-      const claudeCmd = resolveClaudeCommand()
-      const innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
-      const { command, args } = loginShellSpawn(innerCmd)
-      ptyManager.spawn({
-        sessionId: row.id,
-        command,
-        args,
-        cwd: repo.path,
-        cols: input.cols,
-        rows: input.rows,
-      })
-    } catch (err) {
-      db.prepare("UPDATE sessions SET status = 'crashed', ended_at = ? WHERE id = ?").run(
-        Date.now(),
-        row.id,
+    return startSession({
+      ccSessionId: sessionId,
+      repoId: input.repoId,
+      cwd: repo.path,
+      innerCmd,
+      cols: input.cols,
+      rows: input.rows,
+    })
+  })
+
+  ipcMain.handle('sessions:resume', (_e, input: ResumeSessionInput) => {
+    const db = getDb()
+    const repo = db
+      .prepare('SELECT path, label FROM repos WHERE id = ?')
+      .get(input.repoId) as RepoPathRow | undefined
+    if (!repo) throw new Error(`repo not found: ${input.repoId}`)
+    if (!UUID_RE.test(input.ccSessionId)) {
+      throw new Error(`invalid cc session id: ${input.ccSessionId}`)
+    }
+
+    // Nome preferido: o já gravado no JSONL (custom/ai-title), senão o label do repo.
+    const transcript = findTranscriptPath(input.ccSessionId)
+    const name = (transcript ? readTranscriptTitle(transcript) : null) || repo.label
+
+    const claudeCmd = resolveClaudeCommand()
+    const innerCmd = `${claudeCmd} --resume ${input.ccSessionId} -n ${shquote(name)}`
+
+    return startSession({
+      ccSessionId: input.ccSessionId,
+      repoId: input.repoId,
+      cwd: repo.path,
+      innerCmd,
+      cols: input.cols,
+      rows: input.rows,
+    })
+  })
+
+  ipcMain.handle('sessions:list-by-repo', (_e, repoId: string): SessionSummary[] => {
+    const db = getDb()
+    const rows = db
+      .prepare(
+        'SELECT DISTINCT cc_session_id, title FROM sessions WHERE repo_id = ? AND cc_session_id IS NOT NULL',
       )
-      throw err
+      .all(repoId) as { cc_session_id: string; title: string | null }[]
+
+    const liveIndex = buildSessionsFileIndex()
+    const summaries: SessionSummary[] = []
+
+    for (const row of rows) {
+      const ccSessionId = row.cc_session_id
+      const transcript = findTranscriptPath(ccSessionId)
+      if (!transcript) continue // sem transcript real — spawn vazio, descarta.
+
+      const indexed = liveIndex.get(ccSessionId)
+      const isLive = !!indexed && isPidAlive(indexed.pid)
+
+      let name: string | null
+      let lastActivityAt: number | null
+      let status: SessionSummary['status']
+
+      if (isLive) {
+        name = indexed.name ?? readTranscriptTitle(transcript) ?? row.title
+        lastActivityAt = indexed.updatedAt
+        const mapped = mapStatus(indexed.status)
+        status = mapped === 'starting' || mapped === 'ended' ? 'idle' : mapped
+      } else {
+        name = readTranscriptTitle(transcript) ?? row.title
+        try {
+          lastActivityAt = statSync(transcript).mtimeMs
+        } catch {
+          lastActivityAt = null
+        }
+        status = 'ended'
+      }
+
+      summaries.push({ ccSessionId, name, status, lastActivityAt, isLive })
     }
 
-    return toSession(row)
+    summaries.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+    return summaries
   })
 
   ipcMain.handle('sessions:get-backlog', (_e, sessionId: string) => {

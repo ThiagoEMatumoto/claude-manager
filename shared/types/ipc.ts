@@ -59,6 +59,21 @@ export interface SpawnSessionInput {
   rows?: number
 }
 
+export interface ResumeSessionInput {
+  repoId: string
+  ccSessionId: string
+  cols?: number
+  rows?: number
+}
+
+export interface SessionSummary {
+  ccSessionId: string
+  name: string | null
+  status: 'working' | 'waiting' | 'idle' | 'ended'
+  lastActivityAt: number | null
+  isLive: boolean
+}
+
 export interface PtyDataEvent {
   sessionId: string
   data: string
@@ -91,6 +106,8 @@ export interface Api {
   }
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>
+    resume(input: ResumeSessionInput): Promise<Session>
+    listByRepo(repoId: string): Promise<SessionSummary[]>
     getBacklog(sessionId: string): Promise<string>
     write(sessionId: string, data: string): Promise<void>
     resize(sessionId: string, cols: number, rows: number): Promise<void>

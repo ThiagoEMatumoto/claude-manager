@@ -9,6 +9,8 @@ import type { Repo } from '../../shared/types/ipc'
 interface ActiveSession {
   paneId: string
   repo: Repo
+  projectName: string
+  projectIcon: string | null
 }
 
 export default function App() {
@@ -51,9 +53,15 @@ export default function App() {
     const repos = await projectsApi.listRepos(projectId)
     const repo = repos.find((r) => r.id === repoId)
     if (!repo) return
+    const project = projects.find((p) => p.id === projectId)
     setActiveSessions((prev) => [
       ...prev,
-      { paneId: `pane-${Date.now()}`, repo },
+      {
+        paneId: `pane-${Date.now()}`,
+        repo,
+        projectName: project?.name ?? '',
+        projectIcon: project?.icon ?? null,
+      },
     ])
   }
 
@@ -87,6 +95,8 @@ export default function App() {
                   repoId={s.repo.id}
                   repoLabel={s.repo.label}
                   repoPath={s.repo.path}
+                  projectName={s.projectName}
+                  projectIcon={s.projectIcon}
                   onClose={() => closePane(s.paneId)}
                 />
               </div>

@@ -13,6 +13,8 @@ interface Props {
   repoId: string
   repoLabel: string
   repoPath: string
+  projectName: string
+  projectIcon?: string | null
   onClose: () => void
 }
 
@@ -26,7 +28,14 @@ const THEME = {
   brightBlack: '#9c9cae',
 }
 
-export function Terminal({ repoId, repoLabel, repoPath, onClose }: Props) {
+export function Terminal({
+  repoId,
+  repoLabel,
+  repoPath,
+  projectName,
+  projectIcon,
+  onClose,
+}: Props) {
   const { session, exited, exitCode, error, start, write, kill, resize, setDataHandler } =
     useSession(repoId)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -100,35 +109,44 @@ export function Terminal({ repoId, repoLabel, repoPath, onClose }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2 text-xs">
-        <div className="flex items-center gap-2">
-          {editing ? (
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename()
-                if (e.key === 'Escape') setEditing(false)
-              }}
-              placeholder={repoLabel}
-              className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setDraft(title ?? '')
-                setEditing(true)
-              }}
-              className="font-medium hover:text-[var(--color-accent)]"
-              title="Renomear sessão"
-            >
-              {displayTitle}
-            </button>
-          )}
-          <span className="text-[var(--color-text-dim)]">{repoPath}</span>
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2 text-xs">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-1.5">
+            {projectName && (
+              <span className="flex items-center gap-1 text-[var(--color-text-dim)]">
+                {projectIcon && <span>{projectIcon}</span>}
+                <span>{projectName}</span>
+                <span className="text-[var(--color-border)]">›</span>
+              </span>
+            )}
+            {editing ? (
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename()
+                  if (e.key === 'Escape') setEditing(false)
+                }}
+                placeholder={repoLabel}
+                className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(title ?? '')
+                  setEditing(true)
+                }}
+                className="font-medium hover:text-[var(--color-accent)]"
+                title="Renomear sessão"
+              >
+                {displayTitle}
+              </button>
+            )}
+          </div>
+          <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
         </div>
         <div className="flex items-center gap-3 text-[var(--color-text-dim)]">
           {session && !exited && <span className="text-emerald-400">● running</span>}

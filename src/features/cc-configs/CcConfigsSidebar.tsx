@@ -1,4 +1,4 @@
-export type CcTab = 'plugins' | 'agents' | 'skills' | 'mcps'
+export type CcTab = 'plugins' | 'marketplace' | 'agents' | 'skills' | 'mcps'
 
 interface TabDef {
   id: CcTab
@@ -7,6 +7,7 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'plugins', label: 'Plugins' },
+  { id: 'marketplace', label: 'Marketplace' },
   { id: 'agents', label: 'Agents' },
   { id: 'skills', label: 'Skills' },
   { id: 'mcps', label: 'MCPs' },

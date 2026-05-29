@@ -3,7 +3,7 @@ import type { CcTab } from './CcConfigsSidebar'
 import { CenterMessage } from './ui'
 
 interface Props {
-  tab: Exclude<CcTab, 'plugins'>
+  tab: Exclude<CcTab, 'plugins' | 'marketplace'>
   configs: ClaudeConfigs
   loading: boolean
 }

@@ -14,6 +14,12 @@ export interface ActivePane {
 
 let savePanesTimer: ReturnType<typeof setTimeout> | null = null
 
+// Guarda o auto-restore contra a dupla montagem do StrictMode (rodaria 2x).
+let restoreStarted = false
+// Reserva síncrona de ccSessionIds em resume — fecha a corrida entre o check de
+// duplicata e o `await` do spawn (duas chamadas concorrentes passariam o check).
+const resuming = new Set<string>()
+
 // Persiste um snapshot enxuto (suficiente pra resume sem lookups), com debounce
 // pra não gravar a cada teclada de spawn/close em sequência.
 function schedulePersist(panes: ActivePane[]): void {
@@ -94,6 +100,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   restoreWorkspace: async () => {
+    if (restoreStarted) return
+    restoreStarted = true
     const { openPanes, cleanShutdown, restoreAttempts } = await workspaceApi.getBootState()
     if (openPanes.length === 0) return
 
@@ -137,17 +145,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   resumeSession: async (repo, projectName, projectIcon, ccSessionId) => {
-    // Já há uma pane com essa sessão aberta? Não duplicar — o usuário deve focar a
-    // existente (panes vivem lado a lado, então só evitamos o spawn redundante).
-    if (get().panes.some((p) => p.session.ccSessionId === ccSessionId)) return
-    const session = await sessionsApi.resume({ repoId: repo.id, ccSessionId })
-    set((s) => ({
-      panes: [
-        ...s.panes,
-        { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
-      ],
-    }))
-    schedulePersist(get().panes)
+    // Já há uma pane com essa sessão aberta (ou um resume em voo)? Não duplicar.
+    // `resuming` é reservado de forma síncrona antes do await pra fechar a corrida.
+    if (get().panes.some((p) => p.session.ccSessionId === ccSessionId) || resuming.has(ccSessionId))
+      return
+    resuming.add(ccSessionId)
+    try {
+      const session = await sessionsApi.resume({ repoId: repo.id, ccSessionId })
+      set((s) => ({
+        panes: [
+          ...s.panes,
+          { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
+        ],
+      }))
+      schedulePersist(get().panes)
+    } finally {
+      resuming.delete(ccSessionId)
+    }
   },
 
   closePane: (paneId) => {

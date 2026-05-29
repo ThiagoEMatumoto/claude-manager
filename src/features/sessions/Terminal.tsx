@@ -41,6 +41,7 @@ function activityStatusView(
       return { label: '☾ ocioso', className: 'text-[var(--color-text-dim)]' }
     case 'starting':
       return { label: '… iniciando', className: 'text-[var(--color-text-dim)]' }
+    case 'ended':
     default:
       return null
   }
@@ -101,7 +102,8 @@ export function Terminal({
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
 
-  const displayTitle = title ?? repoLabel
+  // Precedência do nome em destaque: rename do usuário > name do CC (live) > label do repo.
+  const displayTitle = title ?? activity?.name ?? repoLabel
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
@@ -274,7 +276,7 @@ export function Terminal({
               <button
                 type="button"
                 onClick={() => {
-                  setDraft(title ?? '')
+                  setDraft(title ?? activity?.name ?? '')
                   setEditing(true)
                 }}
                 className="font-medium hover:text-[var(--color-accent)]"
@@ -291,6 +293,8 @@ export function Terminal({
             <div className="flex min-w-0 items-center gap-2">
               {statusView ? (
                 <span className={statusView.className}>{statusView.label}</span>
+              ) : activity?.status === 'ended' ? (
+                <span className="text-[var(--color-text-dim)]">encerrada</span>
               ) : (
                 <span className="text-emerald-400">● running</span>
               )}

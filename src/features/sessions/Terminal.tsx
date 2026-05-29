@@ -17,6 +17,7 @@ interface Props {
   projectName: string
   projectIcon?: string | null
   onClose: () => void
+  onTitleChange?: (title: string) => void
 }
 
 const THEME = {
@@ -63,6 +64,7 @@ export function Terminal({
   projectName,
   projectIcon,
   onClose,
+  onTitleChange,
 }: Props) {
   const { exited, exitCode, error, write, kill, resize, setDataHandler } = useSession(session.id)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -104,6 +106,14 @@ export function Terminal({
 
   // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
   const displayTitle = activity?.name ?? title ?? repoLabel
+
+  // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
+  // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
+  const onTitleChangeRef = useRef(onTitleChange)
+  onTitleChangeRef.current = onTitleChange
+  useEffect(() => {
+    onTitleChangeRef.current?.(displayTitle)
+  }, [displayTitle])
 
   // Só dá pra injetar /rename quando o claude está no prompt; em 'working' ele
   // está ocupado e a injeção concatenaria no meio de um comando/output.

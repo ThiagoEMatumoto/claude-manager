@@ -8,6 +8,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   SessionActivity,
+  PaneSnapshot,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -72,6 +73,10 @@ const api: Api = {
   workspace: {
     getActive: () => invoke('workspace:get-active'),
     setActive: (projectId: string | null) => invoke('workspace:set-active', { projectId }),
+    savePanes: (panes: PaneSnapshot[]) => invoke('workspace:save-panes', { panes }),
+    getBootState: () => invoke('workspace:get-boot-state'),
+    bumpRestoreAttempts: () => invoke('workspace:bump-restore-attempts'),
+    resetRestoreAttempts: () => invoke('workspace:reset-restore-attempts'),
   },
 }
 

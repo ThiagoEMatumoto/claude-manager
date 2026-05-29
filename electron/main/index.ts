@@ -9,7 +9,11 @@ import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc } from './ipc/git'
-import { registerWorkspaceIpc } from './ipc/workspace'
+import {
+  registerWorkspaceIpc,
+  markWorkspaceRunning,
+  markWorkspaceCleanShutdown,
+} from './ipc/workspace'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -50,6 +54,9 @@ function createMainWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   getDb()
+  // Captura o clean_shutdown do boot anterior e o zera; deve rodar antes da
+  // janela para que o renderer leia o valor correto via workspace:get-boot-state.
+  markWorkspaceRunning()
   registerProjectIpc()
   registerSessionIpc()
   registerShellIpc()
@@ -70,6 +77,7 @@ app.on('before-quit', () => {
   getDb()
     .prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'")
     .run(Date.now())
+  markWorkspaceCleanShutdown()
   closeDb()
 })
 

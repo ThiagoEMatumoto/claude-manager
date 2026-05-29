@@ -74,6 +74,19 @@ export interface SessionSummary {
   isLive: boolean
 }
 
+export interface PaneSnapshot {
+  ccSessionId: string
+  repo: Repo
+  projectName: string
+  projectIcon: string | null
+}
+
+export interface WorkspaceBootState {
+  openPanes: PaneSnapshot[]
+  cleanShutdown: boolean
+  restoreAttempts: number
+}
+
 export interface PtyDataEvent {
   sessionId: string
   data: string
@@ -141,5 +154,9 @@ export interface Api {
   workspace: {
     getActive(): Promise<string | null>
     setActive(projectId: string | null): Promise<void>
+    savePanes(panes: PaneSnapshot[]): Promise<void>
+    getBootState(): Promise<WorkspaceBootState>
+    bumpRestoreAttempts(): Promise<void>
+    resetRestoreAttempts(): Promise<void>
   }
 }

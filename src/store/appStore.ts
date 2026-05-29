@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
-import type { Repo, Session } from '../../shared/types/ipc'
+import type { PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
 export type Area = 'projects'
 
@@ -10,6 +10,25 @@ export interface ActivePane {
   repo: Repo
   projectName: string
   projectIcon: string | null
+}
+
+let savePanesTimer: ReturnType<typeof setTimeout> | null = null
+
+// Persiste um snapshot enxuto (suficiente pra resume sem lookups), com debounce
+// pra não gravar a cada teclada de spawn/close em sequência.
+function schedulePersist(panes: ActivePane[]): void {
+  if (savePanesTimer) clearTimeout(savePanesTimer)
+  savePanesTimer = setTimeout(() => {
+    const snapshots: PaneSnapshot[] = panes
+      .filter((p) => p.session.ccSessionId)
+      .map((p) => ({
+        ccSessionId: p.session.ccSessionId as string,
+        repo: p.repo,
+        projectName: p.projectName,
+        projectIcon: p.projectIcon,
+      }))
+    void workspaceApi.savePanes(snapshots)
+  }, 500)
 }
 
 interface AppState {
@@ -61,6 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
       ],
     }))
+    schedulePersist(get().panes)
   },
 
   resumeSession: async (repo, projectName, projectIcon, ccSessionId) => {
@@ -74,11 +94,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
       ],
     }))
+    schedulePersist(get().panes)
   },
 
   closePane: (paneId) => {
     const pane = get().panes.find((p) => p.paneId === paneId)
     if (pane) void sessionsApi.kill(pane.session.id)
     set((s) => ({ panes: s.panes.filter((p) => p.paneId !== paneId) }))
+    schedulePersist(get().panes)
   },
 }))

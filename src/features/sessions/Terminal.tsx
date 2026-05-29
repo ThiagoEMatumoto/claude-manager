@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
 import { useSession } from './useSession'
+import type { SessionActivity } from '../../../shared/types/ipc'
 
 interface Props {
   repoId: string
@@ -28,6 +29,32 @@ const THEME = {
   brightBlack: '#9c9cae',
 }
 
+function activityStatusView(
+  status: SessionActivity['status'] | undefined,
+): { label: string; className: string } | null {
+  switch (status) {
+    case 'working':
+      return { label: '✦ trabalhando', className: 'text-[var(--color-accent)]' }
+    case 'waiting':
+      return { label: '⏳ aguardando você', className: 'text-amber-400' }
+    case 'idle':
+      return { label: '☾ ocioso', className: 'text-[var(--color-text-dim)]' }
+    case 'starting':
+      return { label: '… iniciando', className: 'text-[var(--color-text-dim)]' }
+    default:
+      return null
+  }
+}
+
+function formatRelative(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `há ${s}s`
+  const m = Math.round(s / 60)
+  if (m < 60) return `há ${m}min`
+  const h = Math.round(m / 60)
+  return `há ${h}h`
+}
+
 export function Terminal({
   repoId,
   repoLabel,
@@ -46,12 +73,39 @@ export function Terminal({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
+  const [activity, setActivity] = useState<SessionActivity | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     setTitle(session?.title ?? null)
   }, [session?.title])
 
+  // O ccSessionId é o próprio session.id (ver sessions:spawn no main).
+  const ccSessionId = session?.ccSessionId ?? null
+
+  useEffect(() => {
+    if (!ccSessionId || exited) return
+    void sessionsApi.watchActivity(ccSessionId)
+    const off = sessionsApi.onActivity((a) => {
+      if (a.ccSessionId === ccSessionId) setActivity(a)
+    })
+    return () => {
+      off()
+      void sessionsApi.unwatchActivity(ccSessionId)
+    }
+  }, [ccSessionId, exited])
+
+  // Tick para manter o "há Xs" relativo atualizado sem novos broadcasts.
+  useEffect(() => {
+    if (!activity?.lastActivityAt || exited) return
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [activity?.lastActivityAt, exited])
+
   const displayTitle = title ?? repoLabel
+
+  const statusView = activityStatusView(activity?.status)
+  const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
 
   function copySelection() {
     const sel = xtermRef.current?.getSelection()
@@ -215,7 +269,21 @@ export function Terminal({
           <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
         </div>
         <div className="flex items-center gap-3 text-[var(--color-text-dim)]">
-          {session && !exited && <span className="text-emerald-400">● running</span>}
+          {session && !exited && (
+            <div className="flex min-w-0 items-center gap-2">
+              {statusView ? (
+                <span className={statusView.className}>{statusView.label}</span>
+              ) : (
+                <span className="text-emerald-400">● running</span>
+              )}
+              {relTime && <span className="text-[10px]">{relTime}</span>}
+              {activity?.title && (
+                <span className="max-w-40 truncate text-[10px] text-[var(--color-text-dim)]">
+                  {activity.title}
+                </span>
+              )}
+            </div>
+          )}
           {exited && <span>● exited ({exitCode ?? '?'})</span>}
           {error && <span className="text-red-400">⚠ {error}</span>}
           <button

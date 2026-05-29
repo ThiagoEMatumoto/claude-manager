@@ -40,8 +40,13 @@ class TypedEmitter extends EventEmitter {
   }
 }
 
+const BACKLOG_CAP = 256 * 1024
+
 class PtyManager extends TypedEmitter {
   private ptys = new Map<string, IPty>()
+  // Histórico de saída por sessão desde o spawn, para replay quando o renderer
+  // anexa depois do processo já ter emitido bytes (banner inicial do claude).
+  private backlog = new Map<string, string>()
 
   spawn(opts: SpawnOptions): void {
     if (this.ptys.has(opts.sessionId)) {
@@ -66,8 +71,15 @@ class PtyManager extends TypedEmitter {
     })
 
     this.ptys.set(opts.sessionId, pty)
+    this.backlog.set(opts.sessionId, '')
 
     pty.onData((data) => {
+      const prev = this.backlog.get(opts.sessionId) ?? ''
+      const next = prev + data
+      this.backlog.set(
+        opts.sessionId,
+        next.length > BACKLOG_CAP ? next.slice(next.length - BACKLOG_CAP) : next,
+      )
       this.emit('data', { sessionId: opts.sessionId, data })
     })
 
@@ -75,6 +87,10 @@ class PtyManager extends TypedEmitter {
       this.ptys.delete(opts.sessionId)
       this.emit('exit', { sessionId: opts.sessionId, exitCode, signal: signal ?? null })
     })
+  }
+
+  getBacklog(sessionId: string): string {
+    return this.backlog.get(sessionId) ?? ''
   }
 
   write(sessionId: string, data: string): void {
@@ -93,11 +109,13 @@ class PtyManager extends TypedEmitter {
     const pty = this.ptys.get(sessionId)
     if (!pty) return
     pty.kill()
+    this.backlog.delete(sessionId)
   }
 
   killAll(): void {
     for (const pty of this.ptys.values()) pty.kill()
     this.ptys.clear()
+    this.backlog.clear()
   }
 
   isRunning(sessionId: string): boolean {

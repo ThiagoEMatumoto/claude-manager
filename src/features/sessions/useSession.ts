@@ -1,74 +1,64 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sessionsApi } from '@/lib/ipc'
-import type { Session, PtyDataEvent, PtyExitEvent } from '../../../shared/types/ipc'
+import type { PtyDataEvent, PtyExitEvent } from '../../../shared/types/ipc'
 
 interface State {
-  session: Session | null
-  buffer: string
   exited: boolean
   exitCode: number | null
   error: string | null
 }
 
 const INITIAL: State = {
-  session: null,
-  buffer: '',
   exited: false,
   exitCode: null,
   error: null,
 }
 
-export function useSession(repoId: string | null) {
+type DataHandler = (data: string) => void
+
+// A sessão já foi spawnada no clique (App.handleSpawn). Aqui só anexamos ao
+// stream de uma sessão existente: registramos data/exit e expomos write/resize/kill.
+export function useSession(sessionId: string) {
   const [state, setState] = useState<State>(INITIAL)
-  const sessionIdRef = useRef<string | null>(null)
+  const dataHandlerRef = useRef<DataHandler | null>(null)
 
-  useEffect(() => {
-    sessionIdRef.current = state.session?.id ?? null
-  }, [state.session])
-
-  const start = useCallback(async () => {
-    if (!repoId) return
-    setState(INITIAL)
-    try {
-      const session = await sessionsApi.spawn({ repoId })
-      setState((s) => ({ ...s, session }))
-    } catch (err) {
-      setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }))
-    }
-  }, [repoId])
-
-  const write = useCallback((data: string) => {
-    const id = sessionIdRef.current
-    if (!id) return
-    void sessionsApi.write(id, data)
+  const setDataHandler = useCallback((handler: DataHandler | null) => {
+    dataHandlerRef.current = handler
   }, [])
+
+  const write = useCallback(
+    (data: string) => {
+      void sessionsApi.write(sessionId, data)
+    },
+    [sessionId],
+  )
 
   const kill = useCallback(() => {
-    const id = sessionIdRef.current
-    if (!id) return
-    void sessionsApi.kill(id)
-  }, [])
+    void sessionsApi.kill(sessionId)
+  }, [sessionId])
 
-  const resize = useCallback((cols: number, rows: number) => {
-    const id = sessionIdRef.current
-    if (!id) return
-    void sessionsApi.resize(id, cols, rows)
-  }, [])
+  const resize = useCallback(
+    (cols: number, rows: number) => {
+      void sessionsApi.resize(sessionId, cols, rows)
+    },
+    [sessionId],
+  )
 
   useEffect(() => {
+    setState(INITIAL)
     const offData = sessionsApi.onData((e: PtyDataEvent) => {
-      if (e.sessionId !== sessionIdRef.current) return
-      setState((s) => ({ ...s, buffer: s.buffer + e.data }))
+      if (e.sessionId !== sessionId) return
+      dataHandlerRef.current?.(e.data)
     })
     const offExit = sessionsApi.onExit((e: PtyExitEvent) => {
-      if (e.sessionId !== sessionIdRef.current) return
+      if (e.sessionId !== sessionId) return
       setState((s) => ({ ...s, exited: true, exitCode: e.exitCode }))
     })
     return () => {
       offData()
       offExit()
     }
-  }, [])
+  }, [sessionId])
 
-  return { ...state, start, write, kill, resize }
+  return { ...state, write, kill, resize, setDataHandler }
 }

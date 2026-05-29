@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
-import type { LinkKind, Project } from '../../../shared/types/ipc'
+import { Menu } from '@/components/ui/Menu'
+import { SessionsModal } from '@/features/sessions/SessionsModal'
+import { useAppStore } from '@/store/appStore'
+import type { LinkKind, Project, Repo } from '../../../shared/types/ipc'
 
 interface Props {
   project: Project
-  onSpawnSession: (repoId: string) => Promise<void>
 }
 
 const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
@@ -14,7 +16,7 @@ const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
   external: { icon: '↗', title: 'Referência externa' },
 }
 
-export function ProjectRepos({ project, onSpawnSession }: Props) {
+export function ProjectRepos({ project }: Props) {
   const { repos, create, remove } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
 
@@ -22,31 +24,7 @@ export function ProjectRepos({ project, onSpawnSession }: Props) {
     <div className="border-l border-[var(--color-border)]/50 bg-[var(--color-bg)]/40 pl-4">
       <ul className="flex flex-col gap-px py-1">
         {repos.map((r) => (
-          <li
-            key={r.id}
-            className="group flex items-center justify-between px-4 py-1.5 text-xs"
-          >
-            <button
-              type="button"
-              onClick={() => onSpawnSession(r.id)}
-              className="flex flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
-              title={r.path}
-            >
-              <span className="text-[10px]" title={LINK_BADGE[r.linkKind].title}>
-                {LINK_BADGE[r.linkKind].icon}
-              </span>
-              <span>{r.label}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (confirm(`Apagar repo "${r.label}"?`)) void remove(r.id)
-              }}
-              className="hidden text-[var(--color-text-dim)] hover:text-red-400 group-hover:inline"
-            >
-              ×
-            </button>
-          </li>
+          <RepoRow key={r.id} repo={r} project={project} onRemove={remove} />
         ))}
       </ul>
 
@@ -65,5 +43,71 @@ export function ProjectRepos({ project, onSpawnSession }: Props) {
         onCreate={create}
       />
     </div>
+  )
+}
+
+interface RepoRowProps {
+  repo: Repo
+  project: Project
+  onRemove: (id: string) => Promise<void>
+}
+
+function RepoRow({ repo, project, onRemove }: RepoRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const openSession = useAppStore((s) => s.openSession)
+
+  return (
+    <li className="text-xs">
+      <div className="group flex items-center justify-between gap-1 px-1 py-1.5">
+        <button
+          type="button"
+          onClick={() => void openSession(repo, project.name, project.icon)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+          title={`Nova sessão · ${repo.path}`}
+        >
+          <span className="text-[10px]" title={LINK_BADGE[repo.linkKind].title}>
+            {LINK_BADGE[repo.linkKind].icon}
+          </span>
+          <span className="truncate">{repo.label}</span>
+        </button>
+
+        <Menu
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          items={[
+            {
+              label: 'Nova sessão',
+              onClick: () => void openSession(repo, project.name, project.icon),
+            },
+            { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
+            {
+              label: 'Remover repo',
+              danger: true,
+              onClick: () => {
+                if (confirm(`Apagar repo "${repo.label}"?`)) void onRemove(repo.id)
+              },
+            },
+          ]}
+        >
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="shrink-0 rounded px-1 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
+            title="Ações do repo"
+          >
+            ⋯
+          </button>
+        </Menu>
+      </div>
+
+      <SessionsModal
+        repo={repo}
+        projectName={project.name}
+        projectIcon={project.icon}
+        open={sessionsOpen}
+        onClose={() => setSessionsOpen(false)}
+      />
+    </li>
   )
 }

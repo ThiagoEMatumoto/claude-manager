@@ -4,8 +4,10 @@ import type {
   CreateProjectInput,
   CreateRepoInput,
   SpawnSessionInput,
+  ResumeSessionInput,
   PtyDataEvent,
   PtyExitEvent,
+  SessionActivity,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -31,12 +33,19 @@ const api: Api = {
   },
   sessions: {
     spawn: (input: SpawnSessionInput) => invoke('sessions:spawn', input),
+    resume: (input: ResumeSessionInput) => invoke('sessions:resume', input),
+    listByRepo: (repoId) => invoke('sessions:list-by-repo', repoId),
+    getBacklog: (sessionId) => invoke('sessions:get-backlog', sessionId),
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
     resize: (sessionId, cols, rows) => invoke('sessions:resize', sessionId, cols, rows),
     kill: (sessionId) => invoke('sessions:kill', sessionId),
+    rename: (sessionId, title) => invoke('sessions:rename', sessionId, title),
     list: () => invoke('sessions:list'),
     onData: (handler) => subscribe<PtyDataEvent>('pty:data', handler),
     onExit: (handler) => subscribe<PtyExitEvent>('pty:exit', handler),
+    watchActivity: (ccSessionId) => invoke('session:activity:watch', ccSessionId),
+    unwatchActivity: (ccSessionId) => invoke('session:activity:unwatch', ccSessionId),
+    onActivity: (handler) => subscribe<SessionActivity>('session:activity', handler),
   },
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),

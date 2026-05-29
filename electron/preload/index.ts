@@ -34,6 +34,7 @@ const api: Api = {
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
     resize: (sessionId, cols, rows) => invoke('sessions:resize', sessionId, cols, rows),
     kill: (sessionId) => invoke('sessions:kill', sessionId),
+    rename: (sessionId, title) => invoke('sessions:rename', sessionId, title),
     list: () => invoke('sessions:list'),
     onData: (handler) => subscribe<PtyDataEvent>('pty:data', handler),
     onExit: (handler) => subscribe<PtyExitEvent>('pty:exit', handler),

@@ -142,6 +142,13 @@ export function registerSessionIpc(): void {
       .run(Date.now(), sessionId)
   })
 
+  ipcMain.handle('sessions:rename', (_e, sessionId: string, title: string) => {
+    const trimmed = title.trim()
+    getDb()
+      .prepare('UPDATE sessions SET title = ? WHERE id = ?')
+      .run(trimmed.length > 0 ? trimmed : null, sessionId)
+  })
+
   ipcMain.handle('sessions:list', () => {
     const rows = getDb()
       .prepare('SELECT * FROM sessions ORDER BY started_at DESC')

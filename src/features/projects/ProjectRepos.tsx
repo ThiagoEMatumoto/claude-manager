@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { Menu } from '@/components/ui/Menu'
+import { SessionsModal } from '@/features/sessions/SessionsModal'
 import { useAppStore } from '@/store/appStore'
 import type { LinkKind, Project, Repo } from '../../../shared/types/ipc'
 
@@ -53,6 +54,7 @@ interface RepoRowProps {
 
 function RepoRow({ repo, project, onRemove }: RepoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
 
   return (
@@ -78,6 +80,7 @@ function RepoRow({ repo, project, onRemove }: RepoRowProps) {
               label: 'Nova sessão',
               onClick: () => void openSession(repo, project.name, project.icon),
             },
+            { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
             {
               label: 'Remover repo',
               danger: true,
@@ -97,6 +100,14 @@ function RepoRow({ repo, project, onRemove }: RepoRowProps) {
           </button>
         </Menu>
       </div>
+
+      <SessionsModal
+        repo={repo}
+        projectName={project.name}
+        projectIcon={project.icon}
+        open={sessionsOpen}
+        onClose={() => setSessionsOpen(false)}
+      />
     </li>
   )
 }

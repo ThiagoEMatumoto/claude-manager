@@ -49,8 +49,11 @@ export function AppShell() {
   // paneIds que o store já removeu — usado pra suprimir o eco do onDidRemovePanel
   // (quando nós mesmos chamamos api.removePanel, ele dispara o evento de volta).
   const removingFromStore = useRef(new Set<string>())
-  // Direção do próximo painel novo (atalhos de split). Consumido pelo reconcile.
-  const nextDirection = useRef<'right' | 'below'>('right')
+  // Posição do próximo painel novo. O atalho seta a intent ANTES de openSession;
+  // o reconcile consome no addPanel (relativo ao painel ativo) e reseta pra default.
+  // 'tab' = mesmo grupo do ativo; 'right'/'below' = split. undefined = clique normal
+  // no repo, mantendo o comportamento atual (split à direita do ativo).
+  const nextPosition = useRef<'tab' | 'right' | 'below' | undefined>(undefined)
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -93,15 +96,21 @@ export function AppShell() {
         continue
       }
       const active = api.activePanel
+      const intent = nextPosition.current
+      // Sem ativo: primeiro painel, sem posição relativa. Com ativo: 'tab' entra no
+      // mesmo grupo (within); 'right'/'below' fazem split; default (clique) = right.
+      const position = active
+        ? intent === 'tab'
+          ? { referenceGroup: active.group.id }
+          : { referencePanel: active.id, direction: intent ?? 'right' }
+        : undefined
       api.addPanel<PaneParams>({
         id: pane.paneId,
         component: 'terminal',
         params: { pane },
-        position: active
-          ? { referencePanel: active.id, direction: nextDirection.current }
-          : undefined,
+        position,
       })
-      nextDirection.current = 'right'
+      nextPosition.current = undefined
     }
   }, [panes, ready])
 
@@ -124,23 +133,23 @@ export function AppShell() {
         return
       }
 
-      // Ctrl+\ (vertical) / Ctrl+Shift+\ (horizontal): split do ativo com nova
-      // sessão no mesmo repo. Vertical = painéis lado a lado (direction right);
-      // horizontal = empilhados (direction below).
-      if (e.key === '\\') {
+      // Ctrl+\ (split à direita) / Ctrl+Shift+\ (split abaixo): nova sessão no
+      // repo do painel ativo. Usamos e.code === 'Backslash' porque e.key vira '|'
+      // com Shift pressionado, fazendo Ctrl+Shift+\ nunca casar com '\\'.
+      if (e.code === 'Backslash') {
         const active = api?.activePanel
         const pane = active
           ? useAppStore.getState().panes.find((p) => p.paneId === active.id)
           : undefined
         if (pane) {
           e.preventDefault()
-          nextDirection.current = e.shiftKey ? 'below' : 'right'
+          nextPosition.current = e.shiftKey ? 'below' : 'right'
           void openSession(pane.repo, pane.projectName, pane.projectIcon)
         }
         return
       }
 
-      // Ctrl+T: nova sessão no mesmo repo da pane ativa.
+      // Ctrl+T: nova sessão como aba no mesmo grupo do painel ativo.
       if (e.key === 't' && !e.shiftKey) {
         const active = api?.activePanel
         const pane = active
@@ -148,6 +157,7 @@ export function AppShell() {
           : undefined
         if (pane) {
           e.preventDefault()
+          nextPosition.current = 'tab'
           void openSession(pane.repo, pane.projectName, pane.projectIcon)
         }
       }

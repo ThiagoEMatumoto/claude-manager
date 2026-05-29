@@ -1,8 +1,11 @@
-// D0 minimal terminal: shows raw PTY output in a <pre>, captures keystrokes
-// and writes them back. Will be replaced with xterm.js in D0.5 once the
-// install finishes — but already exercises the full IPC pipeline end-to-end.
+import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef } from 'react'
+import { Terminal as Xterm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
+import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { useSession } from './useSession'
 
 interface Props {
@@ -11,40 +14,69 @@ interface Props {
   repoPath: string
 }
 
+const THEME = {
+  background: '#0b0b0f',
+  foreground: '#e8e8ef',
+  cursor: '#ff7a45',
+  cursorAccent: '#0b0b0f',
+  selectionBackground: '#2a2a35',
+  black: '#14141b',
+  brightBlack: '#9c9cae',
+}
+
 export function Terminal({ repoId, repoLabel, repoPath }: Props) {
-  const { session, buffer, exited, exitCode, error, start, write, kill } = useSession(repoId)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const { session, exited, exitCode, error, start, write, kill, resize, setDataHandler } =
+    useSession(repoId)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const xtermRef = useRef<Xterm | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
 
   useEffect(() => {
-    void start()
-    return () => kill()
+    const host = hostRef.current
+    if (!host) return
+
+    const term = new Xterm({
+      theme: THEME,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
+      fontSize: 13,
+      cursorBlink: true,
+      allowProposedApi: true,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.loadAddon(new WebLinksAddon())
+    term.loadAddon(new SearchAddon())
+    term.loadAddon(new ClipboardAddon())
+    term.open(host)
+    fit.fit()
+
+    xtermRef.current = term
+    fitRef.current = fit
+
+    // Registrar o sink antes do spawn garante que os primeiros bytes do claude
+    // sejam escritos no xterm sem perda.
+    setDataHandler((data) => term.write(data))
+    term.onData((d) => write(d))
+
+    void start(term.cols, term.rows)
+
+    const observer = new ResizeObserver(() => {
+      if (!xtermRef.current || !fitRef.current) return
+      fitRef.current.fit()
+      resize(xtermRef.current.cols, xtermRef.current.rows)
+    })
+    observer.observe(host)
+
+    return () => {
+      observer.disconnect()
+      setDataHandler(null)
+      kill()
+      term.dispose()
+      xtermRef.current = null
+      fitRef.current = null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId])
-
-  useEffect(() => {
-    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight })
-  }, [buffer])
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (!session || exited) return
-    e.preventDefault()
-
-    if (e.key === 'Enter') return write('\r')
-    if (e.key === 'Backspace') return write('\x7f')
-    if (e.key === 'Tab') return write('\t')
-    if (e.key === 'Escape') return write('\x1b')
-    if (e.key === 'ArrowUp') return write('\x1b[A')
-    if (e.key === 'ArrowDown') return write('\x1b[B')
-    if (e.key === 'ArrowRight') return write('\x1b[C')
-    if (e.key === 'ArrowLeft') return write('\x1b[D')
-
-    if (e.ctrlKey && e.key.length === 1) {
-      const code = e.key.toUpperCase().charCodeAt(0) - 64
-      if (code >= 1 && code <= 26) return write(String.fromCharCode(code))
-    }
-
-    if (e.key.length === 1) write(e.key)
-  }
 
   return (
     <div className="flex h-full flex-col">
@@ -68,17 +100,7 @@ export function Terminal({ repoId, repoLabel, repoPath }: Props) {
         </div>
       </div>
 
-      <div
-        ref={containerRef}
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-        className="flex-1 overflow-y-auto bg-black p-3 font-mono text-[13px] leading-tight outline-none"
-      >
-        <pre className="whitespace-pre-wrap break-all text-green-300">{buffer}</pre>
-        {!session && !error && (
-          <div className="text-[var(--color-text-dim)]">iniciando…</div>
-        )}
-      </div>
+      <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--color-bg)] p-2" />
     </div>
   )
 }

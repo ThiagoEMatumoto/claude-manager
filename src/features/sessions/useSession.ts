@@ -4,7 +4,6 @@ import type { Session, PtyDataEvent, PtyExitEvent } from '../../../shared/types/
 
 interface State {
   session: Session | null
-  buffer: string
   exited: boolean
   exitCode: number | null
   error: string | null
@@ -12,30 +11,41 @@ interface State {
 
 const INITIAL: State = {
   session: null,
-  buffer: '',
   exited: false,
   exitCode: null,
   error: null,
 }
 
+type DataHandler = (data: string) => void
+
 export function useSession(repoId: string | null) {
   const [state, setState] = useState<State>(INITIAL)
   const sessionIdRef = useRef<string | null>(null)
+  const dataHandlerRef = useRef<DataHandler | null>(null)
 
   useEffect(() => {
     sessionIdRef.current = state.session?.id ?? null
   }, [state.session])
 
-  const start = useCallback(async () => {
-    if (!repoId) return
-    setState(INITIAL)
-    try {
-      const session = await sessionsApi.spawn({ repoId })
-      setState((s) => ({ ...s, session }))
-    } catch (err) {
-      setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }))
-    }
-  }, [repoId])
+  // Registrar o sink de dados ANTES de spawnar evita perder os primeiros bytes
+  // que o PTY emite (ex: o banner inicial do claude) antes do React montar o xterm.
+  const setDataHandler = useCallback((handler: DataHandler | null) => {
+    dataHandlerRef.current = handler
+  }, [])
+
+  const start = useCallback(
+    async (cols?: number, rows?: number) => {
+      if (!repoId) return
+      setState(INITIAL)
+      try {
+        const session = await sessionsApi.spawn({ repoId, cols, rows })
+        setState((s) => ({ ...s, session }))
+      } catch (err) {
+        setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }))
+      }
+    },
+    [repoId],
+  )
 
   const write = useCallback((data: string) => {
     const id = sessionIdRef.current
@@ -58,7 +68,7 @@ export function useSession(repoId: string | null) {
   useEffect(() => {
     const offData = sessionsApi.onData((e: PtyDataEvent) => {
       if (e.sessionId !== sessionIdRef.current) return
-      setState((s) => ({ ...s, buffer: s.buffer + e.data }))
+      dataHandlerRef.current?.(e.data)
     })
     const offExit = sessionsApi.onExit((e: PtyExitEvent) => {
       if (e.sessionId !== sessionIdRef.current) return
@@ -70,5 +80,5 @@ export function useSession(repoId: string | null) {
     }
   }, [])
 
-  return { ...state, start, write, kill, resize }
+  return { ...state, start, write, kill, resize, setDataHandler }
 }

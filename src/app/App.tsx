@@ -1,0 +1,104 @@
+import { useEffect, useState } from 'react'
+import { Sidebar } from '@/features/projects/Sidebar'
+import { Terminal } from '@/features/sessions/Terminal'
+import { useProjects } from '@/features/projects/useProjects'
+import { projectsApi } from '@/lib/ipc'
+import type { Repo } from '../../shared/types/ipc'
+
+interface ActiveSession {
+  paneId: string
+  repo: Repo
+}
+
+export default function App() {
+  const { projects, loading, create, remove } = useProjects()
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([])
+
+  useEffect(() => {
+    if (!activeProjectId && projects.length > 0) {
+      setActiveProjectId(projects[0].id)
+    }
+  }, [projects, activeProjectId])
+
+  async function handleSpawn(repoId: string) {
+    const projectId = activeProjectId
+    if (!projectId) return
+    const repos = await projectsApi.listRepos(projectId)
+    const repo = repos.find((r) => r.id === repoId)
+    if (!repo) return
+    setActiveSessions((prev) => [
+      ...prev,
+      { paneId: `pane-${Date.now()}`, repo },
+    ])
+  }
+
+  function closePane(paneId: string) {
+    setActiveSessions((prev) => prev.filter((p) => p.paneId !== paneId))
+  }
+
+  return (
+    <div className="flex h-full w-full overflow-hidden">
+      <Sidebar
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={setActiveProjectId}
+        onCreateProject={create}
+        onDeleteProject={remove}
+        onSpawnSession={handleSpawn}
+      />
+
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {activeSessions.length === 0 ? (
+          <EmptyMain loading={loading} hasProjects={projects.length > 0} />
+        ) : (
+          <div className="grid h-full auto-rows-fr gap-px bg-[var(--color-border)]" style={{ gridTemplateColumns: `repeat(${Math.min(activeSessions.length, 3)}, minmax(0, 1fr))` }}>
+            {activeSessions.map((s) => (
+              <div key={s.paneId} className="relative flex flex-col bg-[var(--color-bg)]">
+                <button
+                  type="button"
+                  onClick={() => closePane(s.paneId)}
+                  className="absolute right-2 top-2 z-10 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-xs text-[var(--color-text-dim)] hover:text-red-400"
+                  title="Fechar pane"
+                >
+                  ×
+                </button>
+                <Terminal
+                  repoId={s.repo.id}
+                  repoLabel={s.repo.label}
+                  repoPath={s.repo.path}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function EmptyMain({ loading, hasProjects }: { loading: boolean; hasProjects: boolean }) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="max-w-md text-center text-[var(--color-text-dim)]">
+        {loading ? (
+          <span>carregando…</span>
+        ) : !hasProjects ? (
+          <>
+            <div className="mb-2 text-lg font-medium text-[var(--color-text)]">
+              Sem projetos ainda
+            </div>
+            <div>Crie um projeto na barra lateral pra começar.</div>
+          </>
+        ) : (
+          <>
+            <div className="mb-2 text-lg font-medium text-[var(--color-text)]">
+              Selecione um repo
+            </div>
+            <div>Clique em ▸ &lt;label&gt; na sidebar pra abrir uma sessão.</div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
 import { ccPluginsApi } from '@/lib/ipc'
 import type {
   ManagedPluginInfo,
@@ -22,14 +23,53 @@ interface Props {
   onNavigate: (target: FocusedItem) => void
 }
 
+type StatusFilter = 'all' | 'enabled' | 'disabled'
+const ALL = '__all__'
+
 export function PluginsTab({ installed, loading, error, runAction, onNavigate }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [status, setStatus] = useState<StatusFilter>('all')
+  const [category, setCategory] = useState<string>(ALL)
+  const [marketplace, setMarketplace] = useState<string>(ALL)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (selected && !installed.some((p) => p.name === selected)) {
       setSelected(null)
     }
   }, [installed, selected])
+
+  const categories = useMemo(
+    () =>
+      [...new Set(installed.map((p) => p.category).filter((c): c is string => !!c))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [installed],
+  )
+  const marketplaces = useMemo(
+    () =>
+      [...new Set(installed.map((p) => p.marketplace).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [installed],
+  )
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return installed.filter((p) => {
+      if (status === 'enabled' && !p.enabled) return false
+      if (status === 'disabled' && p.enabled) return false
+      if (category !== ALL && p.category !== category) return false
+      if (marketplace !== ALL && p.marketplace !== marketplace) return false
+      if (q) {
+        const hay = [p.name, p.description ?? '', p.maintainer ?? '', p.author ?? '']
+          .join(' ')
+          .toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [installed, status, category, marketplace, query])
 
   if (error) return <CenterMessage text={error} />
   if (loading && installed.length === 0) return <CenterMessage text="Carregando plugins…" />
@@ -39,16 +79,60 @@ export function PluginsTab({ installed, loading, error, runAction, onNavigate }:
 
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
-          {installed.map((p) => (
-            <PluginCard
-              key={p.id}
-              plugin={p}
-              active={p.name === selected}
-              onSelect={() => setSelected(p.name)}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-4 py-3">
+          <div className="min-w-[180px] flex-1">
+            <Input
+              placeholder="Buscar por nome, descrição ou autor…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-          ))}
+          </div>
+          <FilterSelect
+            value={status}
+            onChange={(v) => setStatus(v as StatusFilter)}
+            options={[
+              { value: 'all', label: 'Todos' },
+              { value: 'enabled', label: 'Enabled' },
+              { value: 'disabled', label: 'Disabled' },
+            ]}
+          />
+          <FilterSelect
+            value={category}
+            onChange={setCategory}
+            options={[
+              { value: ALL, label: 'Categoria' },
+              ...categories.map((c) => ({ value: c, label: c })),
+            ]}
+          />
+          <FilterSelect
+            value={marketplace}
+            onChange={setMarketplace}
+            options={[
+              { value: ALL, label: 'Marketplace' },
+              ...marketplaces.map((m) => ({ value: m, label: m })),
+            ]}
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          <div className="mb-3 text-xs text-[var(--color-text-dim)]">
+            {filtered.length} de {installed.length}
+          </div>
+          {filtered.length === 0 ? (
+            <CenterMessage text="Nenhum plugin para os filtros." />
+          ) : (
+            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+              {filtered.map((p) => (
+                <PluginCard
+                  key={p.id}
+                  plugin={p}
+                  active={p.name === selected}
+                  onSelect={() => setSelected(p.name)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {selectedPlugin && (
@@ -61,6 +145,30 @@ export function PluginsTab({ installed, loading, error, runAction, onNavigate }:
         />
       )}
     </div>
+  )
+}
+
+function FilterSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   )
 }
 

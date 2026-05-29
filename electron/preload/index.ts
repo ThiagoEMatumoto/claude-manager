@@ -44,6 +44,21 @@ const api: Api = {
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),
   },
+  vault: {
+    getRoot: () => invoke('vault:get-root'),
+    setRoot: (root: string) => invoke('vault:set-root', { root }),
+    ensureDir: (path: string) => invoke('vault:ensure-dir', { path }),
+    isInside: (vaultPath: string, target: string) =>
+      invoke('vault:is-inside', { vaultPath, target }),
+  },
+  repo: {
+    moveIntoVault: (source: string, vaultPath: string, label: string) =>
+      invoke('repo:move-into-vault', { source, vaultPath, label }),
+    symlinkIntoVault: (source: string, vaultPath: string, label: string) =>
+      invoke('repo:symlink-into-vault', { source, vaultPath, label }),
+    cloneUrl: (url: string, vaultPath: string) =>
+      invoke('repo:clone-url', { url, vaultPath }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

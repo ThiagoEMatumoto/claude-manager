@@ -7,6 +7,7 @@ import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
+import { registerGitIpc } from './ipc/git'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -51,6 +52,7 @@ app.whenReady().then(() => {
   registerSessionIpc()
   registerShellIpc()
   registerDialogIpc()
+  registerGitIpc()
 
   createMainWindow()
 

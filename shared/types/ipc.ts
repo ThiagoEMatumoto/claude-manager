@@ -93,4 +93,15 @@ export interface Api {
   dialog: {
     openDirectory(): Promise<string | null>
   }
+  vault: {
+    getRoot(): Promise<string>
+    setRoot(root: string): Promise<void>
+    ensureDir(path: string): Promise<{ created: boolean; wasEmpty: boolean }>
+    isInside(vaultPath: string, target: string): Promise<boolean>
+  }
+  repo: {
+    moveIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
+    symlinkIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
+    cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
+  }
 }

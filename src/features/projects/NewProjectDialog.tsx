@@ -13,7 +13,7 @@ interface Props {
   onCreate: (input: CreateProjectInput) => Promise<void>
 }
 
-const COLORS = [
+export const COLORS = [
   '#ff7a45',
   '#f97316',
   '#facc15',

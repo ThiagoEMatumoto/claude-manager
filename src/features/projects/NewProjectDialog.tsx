@@ -1,90 +1,160 @@
 import { useEffect, useRef, useState } from 'react'
+import { Dialog } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { EmojiPicker } from '@/components/ui/EmojiPicker'
+import { ColorSelect } from '@/components/ui/ColorSelect'
+import { dialogApi, vaultApi } from '@/lib/ipc'
+import type { CreateProjectInput } from '../../../shared/types/ipc'
 
 interface Props {
   open: boolean
   onClose: () => void
-  onCreate: (name: string, color: string | null) => Promise<void>
+  onCreate: (input: CreateProjectInput) => Promise<void>
 }
 
-const COLORS = ['#ff7a45', '#22d3ee', '#a78bfa', '#34d399', '#facc15', '#f472b6']
+const COLORS = [
+  '#ff7a45',
+  '#f97316',
+  '#facc15',
+  '#a3e635',
+  '#34d399',
+  '#10b981',
+  '#22d3ee',
+  '#38bdf8',
+  '#3b82f6',
+  '#6366f1',
+  '#a78bfa',
+  '#d946ef',
+  '#f472b6',
+  '#f43f5e',
+]
+
+function joinPath(root: string, name: string): string {
+  const trimmed = root.replace(/\/+$/, '')
+  return `${trimmed}/${name}`
+}
 
 export function NewProjectDialog({ open, onClose, onCreate }: Props) {
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(COLORS[0])
+  const [icon, setIcon] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [root, setRoot] = useState('')
+  const [override, setOverride] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (open) {
-      setName('')
-      setColor(COLORS[0])
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
+    if (!open) return
+    setName('')
+    setColor(COLORS[0])
+    setIcon('')
+    setOverride(null)
+    void vaultApi.getRoot().then(setRoot)
+    setTimeout(() => inputRef.current?.focus(), 0)
   }, [open])
 
-  if (!open) return null
+  const slug = name.trim().replace(/\s+/g, '-').toLowerCase()
+  const vaultPath = override ?? (root && slug ? joinPath(root, slug) : '')
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!name.trim() || submitting) return
+  async function pickFolder() {
+    const picked = await dialogApi.openDirectory()
+    if (picked) setOverride(picked)
+  }
+
+  async function changeRoot() {
+    const picked = await dialogApi.openDirectory()
+    if (!picked) return
+    await vaultApi.setRoot(picked)
+    setRoot(picked)
+    setOverride(null)
+  }
+
+  async function handleSubmit() {
+    if (!name.trim() || !vaultPath || submitting) return
     setSubmitting(true)
     try {
-      await onCreate(name.trim(), color)
+      const { created, wasEmpty } = await vaultApi.ensureDir(vaultPath)
+      if (!created && !wasEmpty) {
+        if (!confirm('Esta pasta já tem arquivos — continuar?')) return
+      }
+      await onCreate({
+        name: name.trim(),
+        color,
+        icon: icon.trim() || null,
+        vaultPath,
+      })
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <form
-        onSubmit={handleSubmit}
-        className="w-96 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl"
-      >
-        <div className="mb-4 text-lg font-semibold">Novo projeto</div>
-
-        <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Nome</label>
-        <input
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Novo projeto"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!name.trim() || !vaultPath}
+            loading={submitting}
+          >
+            Criar
+          </Button>
+        </>
+      }
+    >
+      <div className="flex items-end gap-2">
+        <div>
+          <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Ícone</label>
+          <EmojiPicker value={icon} onChange={setIcon} />
+        </div>
+        <Input
           ref={inputRef}
+          label="Nome"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleSubmit()
+          }}
           placeholder="Ex: site"
-          className="mb-4 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
         />
+      </div>
 
-        <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Cor</label>
-        <div className="mb-6 flex gap-2">
-          {COLORS.map((c) => (
-            <button
-              type="button"
-              key={c}
-              onClick={() => setColor(c)}
-              aria-label={`Cor ${c}`}
-              className={`h-6 w-6 rounded-full transition ${
-                color === c ? 'ring-2 ring-offset-2 ring-offset-[var(--color-surface)]' : ''
-              }`}
-              style={{ background: c, '--tw-ring-color': c } as React.CSSProperties}
-            />
-          ))}
-        </div>
+      <label className="mb-1 mt-4 block text-xs text-[var(--color-text-dim)]">Cor</label>
+      <ColorSelect value={color} onChange={setColor} options={COLORS} />
 
-        <div className="flex justify-end gap-2">
+      <div className="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-[var(--color-text-dim)]">Pasta do projeto</span>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+            onClick={changeRoot}
+            className="text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
           >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={!name.trim() || submitting}
-            className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? 'Criando…' : 'Criar'}
+            alterar raiz
           </button>
         </div>
-      </form>
-    </div>
+        <div
+          className="truncate text-sm text-[var(--color-text)]"
+          title={vaultPath || undefined}
+        >
+          {vaultPath || <span className="text-[var(--color-text-dim)]">defina um nome…</span>}
+        </div>
+        <button
+          type="button"
+          onClick={pickFolder}
+          className="mt-2 text-xs text-[var(--color-accent)] hover:underline"
+        >
+          Escolher outra pasta
+        </button>
+      </div>
+    </Dialog>
   )
 }

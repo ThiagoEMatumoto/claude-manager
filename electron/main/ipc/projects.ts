@@ -1,11 +1,13 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { mkdirSync } from 'node:fs'
 import { getDb } from '../services/db'
 import type {
   Project,
   Repo,
   CreateProjectInput,
   CreateRepoInput,
+  LinkKind,
 } from '../../../shared/types/ipc'
 
 interface ProjectRow {
@@ -13,6 +15,7 @@ interface ProjectRow {
   name: string
   color: string | null
   icon: string | null
+  vault_path: string | null
   created_at: number
   updated_at: number
 }
@@ -23,6 +26,8 @@ interface RepoRow {
   label: string
   path: string
   role: string | null
+  link_kind: string
+  source: string | null
   position: number
   created_at: number
 }
@@ -32,6 +37,7 @@ const toProject = (row: ProjectRow): Project => ({
   name: row.name,
   color: row.color,
   icon: row.icon,
+  vaultPath: row.vault_path,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -42,6 +48,8 @@ const toRepo = (row: RepoRow): Repo => ({
   label: row.label,
   path: row.path,
   role: row.role,
+  linkKind: row.link_kind as LinkKind,
+  source: row.source,
   position: row.position,
   createdAt: row.created_at,
 })
@@ -61,14 +69,18 @@ export function registerProjectIpc(): void {
       name: input.name,
       color: input.color ?? null,
       icon: input.icon ?? null,
+      vault_path: input.vaultPath ?? null,
       created_at: now,
       updated_at: now,
     }
+    if (row.vault_path) {
+      mkdirSync(row.vault_path, { recursive: true })
+    }
     getDb()
       .prepare(
-        'INSERT INTO projects (id, name, color, icon, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO projects (id, name, color, icon, vault_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(row.id, row.name, row.color, row.icon, row.created_at, row.updated_at)
+      .run(row.id, row.name, row.color, row.icon, row.vault_path, row.created_at, row.updated_at)
     return toProject(row)
   })
 
@@ -96,12 +108,24 @@ export function registerProjectIpc(): void {
       label: input.label,
       path: input.path,
       role: input.role ?? null,
+      link_kind: input.linkKind ?? 'external',
+      source: input.source ?? null,
       position: maxPos.max + 1,
       created_at: Date.now(),
     }
     db.prepare(
-      'INSERT INTO repos (id, project_id, label, path, role, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(row.id, row.project_id, row.label, row.path, row.role, row.position, row.created_at)
+      'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      row.id,
+      row.project_id,
+      row.label,
+      row.path,
+      row.role,
+      row.link_kind,
+      row.source,
+      row.position,
+      row.created_at,
+    )
     return toRepo(row)
   })
 

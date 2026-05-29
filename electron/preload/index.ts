@@ -41,6 +41,29 @@ const api: Api = {
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),
   },
+  dialog: {
+    openDirectory: () => invoke('dialog:open-directory'),
+  },
+  vault: {
+    getRoot: () => invoke('vault:get-root'),
+    isConfigured: () => invoke('vault:is-configured'),
+    setRoot: (root: string) => invoke('vault:set-root', { root }),
+    ensureDir: (path: string) => invoke('vault:ensure-dir', { path }),
+    isInside: (vaultPath: string, target: string) =>
+      invoke('vault:is-inside', { vaultPath, target }),
+  },
+  repo: {
+    moveIntoVault: (source: string, vaultPath: string, label: string) =>
+      invoke('repo:move-into-vault', { source, vaultPath, label }),
+    symlinkIntoVault: (source: string, vaultPath: string, label: string) =>
+      invoke('repo:symlink-into-vault', { source, vaultPath, label }),
+    cloneUrl: (url: string, vaultPath: string) =>
+      invoke('repo:clone-url', { url, vaultPath }),
+  },
+  workspace: {
+    getActive: () => invoke('workspace:get-active'),
+    setActive: (projectId: string | null) => invoke('workspace:set-active', { projectId }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

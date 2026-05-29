@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Sidebar } from '@/features/projects/Sidebar'
 import { Terminal } from '@/features/sessions/Terminal'
 import { useProjects } from '@/features/projects/useProjects'
-import { projectsApi } from '@/lib/ipc'
+import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
+import { projectsApi, vaultApi, workspaceApi } from '@/lib/ipc'
 import type { Repo } from '../../shared/types/ipc'
 
 interface ActiveSession {
@@ -13,13 +14,36 @@ interface ActiveSession {
 export default function App() {
   const { projects, loading, create, remove } = useProjects()
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [restored, setRestored] = useState(false)
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([])
+  const [vaultConfigured, setVaultConfigured] = useState<boolean | null>(null)
 
   useEffect(() => {
+    void vaultApi.isConfigured().then(setVaultConfigured)
+  }, [])
+
+  useEffect(() => {
+    void workspaceApi.getActive().then((id) => {
+      setActiveProjectId(id)
+      setRestored(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!restored) return
+    if (activeProjectId && !projects.some((p) => p.id === activeProjectId)) {
+      setActiveProjectId(null)
+      return
+    }
     if (!activeProjectId && projects.length > 0) {
       setActiveProjectId(projects[0].id)
     }
-  }, [projects, activeProjectId])
+  }, [projects, activeProjectId, restored])
+
+  function selectProject(id: string) {
+    setActiveProjectId(id)
+    void workspaceApi.setActive(id)
+  }
 
   async function handleSpawn(repoId: string) {
     const projectId = activeProjectId
@@ -37,12 +61,16 @@ export default function App() {
     setActiveSessions((prev) => prev.filter((p) => p.paneId !== paneId))
   }
 
+  if (vaultConfigured === false) {
+    return <WelcomeDialog onDone={() => setVaultConfigured(true)} />
+  }
+
   return (
     <div className="flex h-full w-full overflow-hidden">
       <Sidebar
         projects={projects}
         activeProjectId={activeProjectId}
-        onSelectProject={setActiveProjectId}
+        onSelectProject={selectProject}
         onCreateProject={create}
         onDeleteProject={remove}
         onSpawnSession={handleSpawn}

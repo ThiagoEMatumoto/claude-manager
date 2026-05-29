@@ -52,6 +52,20 @@ export interface CreateRepoInput {
   source?: string | null
 }
 
+export interface UpdateProjectInput {
+  id: string
+  name?: string
+  color?: string | null
+  icon?: string | null
+  vaultPath?: string | null
+}
+
+export interface UpdateRepoInput {
+  id: string
+  label?: string
+  role?: string | null
+}
+
 export interface SpawnSessionInput {
   repoId: string
   name?: string
@@ -215,9 +229,11 @@ export interface Api {
   projects: {
     list(): Promise<Project[]>
     create(input: CreateProjectInput): Promise<Project>
+    update(input: UpdateProjectInput): Promise<Project>
     delete(id: string): Promise<void>
     listRepos(projectId: string): Promise<Repo[]>
     createRepo(input: CreateRepoInput): Promise<Repo>
+    updateRepo(input: UpdateRepoInput): Promise<Repo>
     deleteRepo(id: string): Promise<void>
   }
   sessions: {

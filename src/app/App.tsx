@@ -20,7 +20,10 @@ export default function App() {
     void useAppStore
       .getState()
       .initActiveProject()
-      .then(() => setRestored(true))
+      .then(() => {
+        setRestored(true)
+        return useAppStore.getState().restoreWorkspace()
+      })
   }, [])
 
   useEffect(() => {

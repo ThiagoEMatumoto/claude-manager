@@ -9,6 +9,8 @@ export function AppShell() {
   const area = useAppStore((s) => s.area)
   const panes = useAppStore((s) => s.panes)
   const closePane = useAppStore((s) => s.closePane)
+  const restoreBlocked = useAppStore((s) => s.restoreBlocked)
+  const retryRestore = useAppStore((s) => s.retryRestore)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
@@ -18,6 +20,25 @@ export function AppShell() {
       {area === 'projects' && <ProjectsSidebar />}
 
       <main className="flex flex-1 flex-col overflow-hidden">
+        {restoreBlocked && (
+          <div
+            className="flex items-center justify-between gap-3 border-b px-4 py-2 text-sm"
+            style={{
+              borderColor: 'var(--color-border)',
+              background: 'var(--color-bg-elevated, var(--color-bg))',
+              color: 'var(--color-text-dim)',
+            }}
+          >
+            <span>Houve um problema ao restaurar as sessões anteriores.</span>
+            <button
+              onClick={() => void retryRestore()}
+              className="rounded px-2 py-1 text-xs"
+              style={{ background: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              Restaurar sessões
+            </button>
+          </div>
+        )}
         {panes.length === 0 ? (
           <EmptyMain />
         ) : (

@@ -31,13 +31,40 @@ function schedulePersist(panes: ActivePane[]): void {
   }, 500)
 }
 
+// Resume com paralelismo limitado: no máximo `limit` chamadas claude --resume
+// simultâneas, pra não disparar dezenas de PTYs de uma vez. A falha de um resume
+// (transcript sumiu) não aborta os demais — o erro aparece no terminal da pane.
+async function restoreFromSnapshots(
+  snapshots: PaneSnapshot[],
+  resume: AppState['resumeSession'],
+  limit = 4,
+): Promise<void> {
+  const queue = [...snapshots]
+  async function worker(): Promise<void> {
+    let snap = queue.shift()
+    while (snap) {
+      const current = snap
+      try {
+        await resume(current.repo, current.projectName, current.projectIcon, current.ccSessionId)
+      } catch {
+        // Sessão individual não retomável — segue restaurando as outras.
+      }
+      snap = queue.shift()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, snapshots.length) }, worker))
+}
+
 interface AppState {
   area: Area
   activeProjectId: string | null
   panes: ActivePane[]
+  restoreBlocked: boolean
 
   setArea: (area: Area) => void
   initActiveProject: () => Promise<void>
+  restoreWorkspace: () => Promise<void>
+  retryRestore: () => Promise<void>
   setActiveProject: (id: string | null) => void
   openSession: (
     repo: Repo,
@@ -57,12 +84,38 @@ export const useAppStore = create<AppState>((set, get) => ({
   area: 'projects',
   activeProjectId: null,
   panes: [],
+  restoreBlocked: false,
 
   setArea: (area) => set({ area }),
 
   initActiveProject: async () => {
     const id = await workspaceApi.getActive()
     set({ activeProjectId: id })
+  },
+
+  restoreWorkspace: async () => {
+    const { openPanes, cleanShutdown, restoreAttempts } = await workspaceApi.getBootState()
+    if (openPanes.length === 0) return
+
+    // Shutdown gracioso: confiamos no estado salvo e restauramos direto.
+    // Crash com >=2 tentativas seguidas: provável crash-loop — não auto-restaura,
+    // expõe banner pra o usuário decidir.
+    const manualOnly = !cleanShutdown && restoreAttempts >= 2
+    if (manualOnly) {
+      set({ restoreBlocked: true })
+      return
+    }
+
+    if (!cleanShutdown) await workspaceApi.bumpRestoreAttempts()
+    await restoreFromSnapshots(openPanes, get().resumeSession)
+    await workspaceApi.resetRestoreAttempts()
+  },
+
+  retryRestore: async () => {
+    const { openPanes } = await workspaceApi.getBootState()
+    set({ restoreBlocked: false })
+    await restoreFromSnapshots(openPanes, get().resumeSession)
+    await workspaceApi.resetRestoreAttempts()
   },
 
   setActiveProject: (id) => {

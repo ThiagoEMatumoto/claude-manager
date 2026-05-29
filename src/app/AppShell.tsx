@@ -2,10 +2,12 @@ import 'dockview/dist/styles/dockview.css'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  DockviewDefaultTab,
   DockviewReact,
   themeAbyss,
   type DockviewApi,
   type DockviewReadyEvent,
+  type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from 'dockview'
 import { IconRail } from './IconRail'
@@ -29,9 +31,25 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       repoPath={pane.repo.path}
       projectName={pane.projectName}
       projectIcon={pane.projectIcon}
+      projectColor={pane.projectColor}
       onClose={() => closePane(pane.paneId)}
       onTitleChange={(t) => props.api.setTitle(t)}
     />
+  )
+}
+
+// Aba do dockview com um dot na cor do projeto antes do título/close padrão.
+// Reusa DockviewDefaultTab pra herdar o título dinâmico (api.title via setTitle) e o X.
+function TerminalTab(props: IDockviewPanelHeaderProps<PaneParams>) {
+  const color = props.params.pane?.projectColor ?? null
+  return (
+    <div className="flex items-center">
+      <span
+        className="ml-2 h-2 w-2 shrink-0 rounded-full"
+        style={{ background: color ?? 'var(--color-border)' }}
+      />
+      <DockviewDefaultTab {...props} />
+    </div>
   )
 }
 
@@ -43,6 +61,7 @@ function paneTabTitle(pane: ActivePane): string {
 }
 
 const components = { terminal: TerminalPanel }
+const tabComponents = { terminal: TerminalTab }
 
 export function AppShell() {
   const area = useAppStore((s) => s.area)
@@ -116,6 +135,7 @@ export function AppShell() {
       api.addPanel<PaneParams>({
         id: pane.paneId,
         component: 'terminal',
+        tabComponent: 'terminal',
         title: paneTabTitle(pane),
         params: { pane },
         position,
@@ -212,6 +232,7 @@ export function AppShell() {
             className="absolute inset-0"
             theme={themeAbyss}
             components={components}
+            tabComponents={tabComponents}
             defaultRenderer="always"
             onReady={onReady}
           />

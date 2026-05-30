@@ -16,6 +16,7 @@ import {
   markWorkspaceRunning,
   markWorkspaceCleanShutdown,
 } from './ipc/workspace'
+import { initUpdater } from './services/updater'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -69,6 +70,7 @@ app.whenReady().then(() => {
   registerClaudePluginsIpc()
 
   createMainWindow()
+  initUpdater()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

@@ -11,6 +11,7 @@ import type {
   PtyExitEvent,
   SessionActivity,
   PaneSnapshot,
+  UpdateStatus,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -92,6 +93,10 @@ const api: Api = {
     available: () => invoke('cc:plugins:available'),
     details: (name: string) => invoke('cc:plugins:details', { name }),
     action: (action, name) => invoke('cc:plugins:action', { action, name }),
+  },
+  updates: {
+    onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),
+    install: () => invoke('updates:install'),
   },
 }
 

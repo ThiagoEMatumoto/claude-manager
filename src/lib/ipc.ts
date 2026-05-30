@@ -13,5 +13,6 @@ export const repoApi = api.repo
 export const workspaceApi = api.workspace
 export const ccConfigsApi = api.ccConfigs
 export const ccPluginsApi = api.ccPlugins
+export const updatesApi = api.updates
 
 export { api }

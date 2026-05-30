@@ -18,8 +18,13 @@ asarUnpack:
   - node_modules/@homebridge/node-pty-prebuilt-multiarch/**
 npmRebuild: false
 afterPack: ./scripts/alias-node-pty-prebuilds.mjs
+publish:
+  provider: github
+  owner: ThiagoEMatumoto
+  repo: claude-manager
 linux:
   target:
+    - AppImage
     - deb
   category: Development
   maintainer: thiagoeijimatumoto@gmail.com

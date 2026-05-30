@@ -15,6 +15,7 @@ import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
+import { CommandPalette } from '@/features/command-palette/CommandPalette'
 import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
 
@@ -82,6 +83,7 @@ export function AppShell() {
   const pendingLayout = useAppStore((s) => s.pendingLayout)
   const clearPendingLayout = useAppStore((s) => s.clearPendingLayout)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -263,6 +265,21 @@ export function AppShell() {
     }
   }, [panes, ready, pendingLayout])
 
+  // Command palette: Ctrl+K (Cmd+K no mac). preventDefault antes do xterm processar
+  // — o attachCustomKeyEventHandler do Terminal só intercepta copy/paste e devolve
+  // o resto, então este listener global (capture) ganha a tecla antes do claude.
+  // O 'k' nunca é um combo crítico do claude, então o app pode ter prioridade aqui.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes
   // combos nunca colidem com o que o claude precisa receber. preventDefault evita
@@ -359,6 +376,11 @@ export function AppShell() {
       </main>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
     </div>
   )
 }

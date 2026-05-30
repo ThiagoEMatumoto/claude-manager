@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import * as init from './001_init'
 import * as vault from './002_vault'
 import * as workspacePanes from './003_workspace_panes'
+import * as dockLayout from './004_dock_layout'
 
 interface Migration {
   version: number
@@ -9,7 +10,7 @@ interface Migration {
   up(db: Database.Database): void
 }
 
-const migrations: Migration[] = [init, vault, workspacePanes]
+const migrations: Migration[] = [init, vault, workspacePanes, dockLayout]
 
 export function runMigrations(db: Database.Database): void {
   db.exec(`

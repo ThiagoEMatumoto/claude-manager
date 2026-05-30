@@ -95,6 +95,9 @@ export interface PaneSnapshot {
   projectIcon: string | null
   // Opcional: snapshots gravados antes desta feature não têm a cor (fallback null).
   projectColor?: string | null
+  // Opcional: id do painel no dockview. Preservado pra que o layout salvo (que
+  // referencia painéis por id) bata ao restaurar. Snapshots antigos não têm.
+  paneId?: string
 }
 
 export interface WorkspaceBootState {

@@ -16,6 +16,7 @@ interface Props {
   repoPath: string
   projectName: string
   projectIcon?: string | null
+  projectColor?: string | null
   onClose: () => void
   onTitleChange?: (title: string) => void
 }
@@ -63,6 +64,7 @@ export function Terminal({
   repoPath,
   projectName,
   projectIcon,
+  projectColor,
   onClose,
   onTitleChange,
 }: Props) {
@@ -266,11 +268,18 @@ export function Terminal({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2 text-xs">
+      <div
+        className="flex items-start justify-between gap-3 border-b border-l-2 border-[var(--color-border)] px-4 py-2 text-xs"
+        style={projectColor ? { borderLeftColor: projectColor } : undefined}
+      >
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             {projectName && (
               <span className="flex items-center gap-1 text-[var(--color-text-dim)]">
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: projectColor ?? 'var(--color-border)' }}
+                />
                 {projectIcon && <span>{projectIcon}</span>}
                 <span>{projectName}</span>
                 <span className="text-[var(--color-border)]">›</span>

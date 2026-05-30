@@ -11,6 +11,7 @@ interface Props {
   repo: Repo
   projectName: string
   projectIcon: string | null
+  projectColor: string | null
   open: boolean
   onClose: () => void
 }
@@ -37,7 +38,14 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'ended', label: 'Encerradas' },
 ]
 
-export function SessionsModal({ repo, projectName, projectIcon, open, onClose }: Props) {
+export function SessionsModal({
+  repo,
+  projectName,
+  projectIcon,
+  projectColor,
+  open,
+  onClose,
+}: Props) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
@@ -79,7 +87,7 @@ export function SessionsModal({ repo, projectName, projectIcon, open, onClose }:
           variant="primary"
           className="shrink-0"
           onClick={() => {
-            void openSession(repo, projectName, projectIcon)
+            void openSession(repo, projectName, projectIcon, projectColor)
             onClose()
           }}
         >
@@ -144,7 +152,7 @@ export function SessionsModal({ repo, projectName, projectIcon, open, onClose }:
                 variant="ghost"
                 className="shrink-0"
                 onClick={() => {
-                  void resumeSession(repo, projectName, projectIcon, s.ccSessionId)
+                  void resumeSession(repo, projectName, projectIcon, projectColor, s.ccSessionId)
                   onClose()
                 }}
               >

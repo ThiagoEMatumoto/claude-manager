@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { projectsApi } from '@/lib/ipc'
-import type { CreateProjectInput, CreateRepoInput, Project, Repo } from '../../../shared/types/ipc'
+import type {
+  CreateProjectInput,
+  CreateRepoInput,
+  Project,
+  Repo,
+  UpdateProjectInput,
+  UpdateRepoInput,
+} from '../../../shared/types/ipc'
 
 export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -23,6 +30,14 @@ export function useProjects() {
     [refresh],
   )
 
+  const update = useCallback(
+    async (input: UpdateProjectInput) => {
+      await projectsApi.update(input)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const remove = useCallback(
     async (id: string) => {
       await projectsApi.delete(id)
@@ -31,7 +46,7 @@ export function useProjects() {
     [refresh],
   )
 
-  return { projects, loading, refresh, create, remove }
+  return { projects, loading, refresh, create, update, remove }
 }
 
 export function useRepos(projectId: string | null) {
@@ -61,6 +76,14 @@ export function useRepos(projectId: string | null) {
     [projectId, refresh],
   )
 
+  const update = useCallback(
+    async (input: UpdateRepoInput) => {
+      await projectsApi.updateRepo(input)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const remove = useCallback(
     async (id: string) => {
       await projectsApi.deleteRepo(id)
@@ -69,5 +92,5 @@ export function useRepos(projectId: string | null) {
     [refresh],
   )
 
-  return { repos, loading, refresh, create, remove }
+  return { repos, loading, refresh, create, update, remove }
 }

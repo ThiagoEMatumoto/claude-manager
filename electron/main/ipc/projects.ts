@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
+import { z } from 'zod'
 import { getDb } from '../services/db'
 import type {
   Project,
@@ -9,6 +10,20 @@ import type {
   CreateRepoInput,
   LinkKind,
 } from '../../../shared/types/ipc'
+
+const updateProjectSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).optional(),
+  color: z.string().nullable().optional(),
+  icon: z.string().nullable().optional(),
+  vaultPath: z.string().nullable().optional(),
+})
+
+const updateRepoSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1).optional(),
+  role: z.string().nullable().optional(),
+})
 
 interface ProjectRow {
   id: string
@@ -84,6 +99,37 @@ export function registerProjectIpc(): void {
     return toProject(row)
   })
 
+  ipcMain.handle('projects:update', (_e, raw: unknown) => {
+    const input = updateProjectSchema.parse(raw)
+    const db = getDb()
+
+    const sets: string[] = []
+    const values: unknown[] = []
+    if (input.name !== undefined) {
+      sets.push('name = ?')
+      values.push(input.name)
+    }
+    if (input.color !== undefined) {
+      sets.push('color = ?')
+      values.push(input.color)
+    }
+    if (input.icon !== undefined) {
+      sets.push('icon = ?')
+      values.push(input.icon)
+    }
+    if (input.vaultPath !== undefined) {
+      sets.push('vault_path = ?')
+      values.push(input.vaultPath)
+      if (input.vaultPath) mkdirSync(input.vaultPath, { recursive: true })
+    }
+    sets.push('updated_at = ?')
+    values.push(Date.now())
+
+    db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values, input.id)
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(input.id) as ProjectRow
+    return toProject(row)
+  })
+
   ipcMain.handle('projects:delete', (_e, id: string) => {
     getDb().prepare('DELETE FROM projects WHERE id = ?').run(id)
   })
@@ -126,6 +172,28 @@ export function registerProjectIpc(): void {
       row.position,
       row.created_at,
     )
+    return toRepo(row)
+  })
+
+  ipcMain.handle('projects:repos:update', (_e, raw: unknown) => {
+    const input = updateRepoSchema.parse(raw)
+    const db = getDb()
+
+    const sets: string[] = []
+    const values: unknown[] = []
+    if (input.label !== undefined) {
+      sets.push('label = ?')
+      values.push(input.label)
+    }
+    if (input.role !== undefined) {
+      sets.push('role = ?')
+      values.push(input.role)
+    }
+
+    if (sets.length > 0) {
+      db.prepare(`UPDATE repos SET ${sets.join(', ')} WHERE id = ?`).run(...values, input.id)
+    }
+    const row = db.prepare('SELECT * FROM repos WHERE id = ?').get(input.id) as RepoRow
     return toRepo(row)
   })
 

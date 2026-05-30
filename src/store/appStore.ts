@@ -10,6 +10,7 @@ export interface ActivePane {
   repo: Repo
   projectName: string
   projectIcon: string | null
+  projectColor: string | null
 }
 
 let savePanesTimer: ReturnType<typeof setTimeout> | null = null
@@ -32,6 +33,7 @@ function schedulePersist(panes: ActivePane[]): void {
         repo: p.repo,
         projectName: p.projectName,
         projectIcon: p.projectIcon,
+        projectColor: p.projectColor,
       }))
     void workspaceApi.savePanes(snapshots)
   }, 500)
@@ -51,7 +53,13 @@ async function restoreFromSnapshots(
     while (snap) {
       const current = snap
       try {
-        await resume(current.repo, current.projectName, current.projectIcon, current.ccSessionId)
+        await resume(
+          current.repo,
+          current.projectName,
+          current.projectIcon,
+          current.projectColor ?? null,
+          current.ccSessionId,
+        )
       } catch {
         // Sessão individual não retomável — segue restaurando as outras.
       }
@@ -76,11 +84,13 @@ interface AppState {
     repo: Repo,
     projectName: string,
     projectIcon: string | null,
+    projectColor: string | null,
   ) => Promise<void>
   resumeSession: (
     repo: Repo,
     projectName: string,
     projectIcon: string | null,
+    projectColor: string | null,
     ccSessionId: string,
   ) => Promise<void>
   closePane: (paneId: string) => void
@@ -131,20 +141,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     void workspaceApi.setActive(id)
   },
 
-  openSession: async (repo, projectName, projectIcon) => {
+  openSession: async (repo, projectName, projectIcon, projectColor) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
     const session = await sessionsApi.spawn({ repoId: repo.id })
     set((s) => ({
       panes: [
         ...s.panes,
-        { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
+        { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon, projectColor },
       ],
     }))
     schedulePersist(get().panes)
   },
 
-  resumeSession: async (repo, projectName, projectIcon, ccSessionId) => {
+  resumeSession: async (repo, projectName, projectIcon, projectColor, ccSessionId) => {
     // Já há uma pane com essa sessão aberta (ou um resume em voo)? Não duplicar.
     // `resuming` é reservado de forma síncrona antes do await pra fechar a corrida.
     if (get().panes.some((p) => p.session.ccSessionId === ccSessionId) || resuming.has(ccSessionId))
@@ -155,7 +165,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((s) => ({
         panes: [
           ...s.panes,
-          { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon },
+          { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon, projectColor },
         ],
       }))
       schedulePersist(get().panes)

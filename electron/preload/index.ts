@@ -3,6 +3,8 @@ import type {
   Api,
   CreateProjectInput,
   CreateRepoInput,
+  UpdateProjectInput,
+  UpdateRepoInput,
   SpawnSessionInput,
   ResumeSessionInput,
   PtyDataEvent,
@@ -27,9 +29,11 @@ const api: Api = {
   projects: {
     list: () => invoke('projects:list'),
     create: (input: CreateProjectInput) => invoke('projects:create', input),
+    update: (input: UpdateProjectInput) => invoke('projects:update', input),
     delete: (id: string) => invoke('projects:delete', id),
     listRepos: (projectId: string) => invoke('projects:repos:list', projectId),
     createRepo: (input: CreateRepoInput) => invoke('projects:repos:create', input),
+    updateRepo: (input: UpdateRepoInput) => invoke('projects:repos:update', input),
     deleteRepo: (id: string) => invoke('projects:repos:delete', id),
   },
   sessions: {

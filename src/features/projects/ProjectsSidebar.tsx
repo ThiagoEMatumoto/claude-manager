@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { useProjects } from './useProjects'
 import { NewProjectDialog } from './NewProjectDialog'
+import { EditProjectDialog } from './EditProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
+import { Menu } from '@/components/ui/Menu'
 import { useAppStore } from '@/store/appStore'
+import type { Project, UpdateProjectInput } from '../../../shared/types/ipc'
 
 export function ProjectsSidebar() {
-  const { projects, create, remove } = useProjects()
+  const { projects, create, update, remove } = useProjects()
   const activeProjectId = useAppStore((s) => s.activeProjectId)
   const setActiveProject = useAppStore((s) => s.setActiveProject)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<Project | null>(null)
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -35,46 +39,47 @@ export function ProjectsSidebar() {
             const active = p.id === activeProjectId
             return (
               <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => setActiveProject(p.id)}
-                  className={`group flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
+                <div
+                  className={`group flex items-center justify-between border-l-2 px-4 py-2 text-sm transition ${
                     active
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
-                      : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+                      : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                   }`}
+                  style={
+                    active
+                      ? { borderLeftColor: p.color ?? 'var(--color-accent)' }
+                      : undefined
+                  }
                 >
-                  <span className="flex items-center gap-2">
-                    {p.icon ? (
-                      <span className="text-sm leading-none">{p.icon}</span>
-                    ) : (
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: p.color ?? '#5c5c70' }}
-                      />
-                    )}
-                    {p.name}
+                  <button
+                    type="button"
+                    onClick={() => setActiveProject(p.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: p.color ?? '#5c5c70' }}
+                    />
+                    {p.icon && <span className="text-sm leading-none">{p.icon}</span>}
+                    <span className="truncate">{p.name}</span>
                     {!p.vaultPath && (
                       <span
-                        className="text-[10px] text-[var(--color-text-dim)] opacity-60"
+                        className="shrink-0 text-[10px] text-[var(--color-text-dim)] opacity-60"
                         title="Este projeto não tem um vault definido"
                       >
                         sem vault
                       </span>
                     )}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation()
+                  </button>
+
+                  <ProjectMenu
+                    project={p}
+                    onEdit={() => setEditing(p)}
+                    onRemove={() => {
                       if (confirm(`Apagar projeto "${p.name}"?`)) void remove(p.id)
                     }}
-                    className="hidden text-xs text-[var(--color-text-dim)] hover:text-red-400 group-hover:inline"
-                  >
-                    ×
-                  </span>
-                </button>
+                  />
+                </div>
 
                 {active && <ProjectRepos project={p} />}
               </li>
@@ -91,6 +96,52 @@ export function ProjectsSidebar() {
           setDialogOpen(false)
         }}
       />
+
+      {editing && (
+        <EditProjectDialog
+          open
+          project={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (input: UpdateProjectInput) => {
+            await update(input)
+            setEditing(null)
+          }}
+        />
+      )}
     </aside>
+  )
+}
+
+function ProjectMenu({
+  project,
+  onEdit,
+  onRemove,
+}: {
+  project: Project
+  onEdit: () => void
+  onRemove: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Menu
+      open={open}
+      onClose={() => setOpen(false)}
+      items={[
+        { label: 'Editar', onClick: onEdit },
+        { label: 'Remover', danger: true, onClick: onRemove },
+      ]}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className="shrink-0 rounded px-1 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
+        title={`Ações de "${project.name}"`}
+      >
+        ⋯
+      </button>
+    </Menu>
   )
 }

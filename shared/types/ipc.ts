@@ -95,12 +95,17 @@ export interface PaneSnapshot {
   projectIcon: string | null
   // Opcional: snapshots gravados antes desta feature não têm a cor (fallback null).
   projectColor?: string | null
+  // Opcional: id do painel no dockview. Preservado pra que o layout salvo (que
+  // referencia painéis por id) bata ao restaurar. Snapshots antigos não têm.
+  paneId?: string
 }
 
 export interface WorkspaceBootState {
   openPanes: PaneSnapshot[]
   cleanShutdown: boolean
   restoreAttempts: number
+  // Layout serializado do dockview (api.toJSON()). null se nunca salvo.
+  dockLayout: string | null
 }
 
 export interface PtyDataEvent {
@@ -241,6 +246,7 @@ export interface Api {
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>
     resume(input: ResumeSessionInput): Promise<Session>
+    isResumable(ccSessionId: string): Promise<boolean>
     listByRepo(repoId: string): Promise<SessionSummary[]>
     getBacklog(sessionId: string): Promise<string>
     write(sessionId: string, data: string): Promise<void>
@@ -276,6 +282,7 @@ export interface Api {
     getActive(): Promise<string | null>
     setActive(projectId: string | null): Promise<void>
     savePanes(panes: PaneSnapshot[]): Promise<void>
+    saveLayout(layout: string | null): Promise<void>
     getBootState(): Promise<WorkspaceBootState>
     bumpRestoreAttempts(): Promise<void>
     resetRestoreAttempts(): Promise<void>

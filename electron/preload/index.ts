@@ -39,6 +39,7 @@ const api: Api = {
   sessions: {
     spawn: (input: SpawnSessionInput) => invoke('sessions:spawn', input),
     resume: (input: ResumeSessionInput) => invoke('sessions:resume', input),
+    isResumable: (ccSessionId) => invoke('sessions:is-resumable', ccSessionId),
     listByRepo: (repoId) => invoke('sessions:list-by-repo', repoId),
     getBacklog: (sessionId) => invoke('sessions:get-backlog', sessionId),
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
@@ -78,6 +79,7 @@ const api: Api = {
     getActive: () => invoke('workspace:get-active'),
     setActive: (projectId: string | null) => invoke('workspace:set-active', { projectId }),
     savePanes: (panes: PaneSnapshot[]) => invoke('workspace:save-panes', { panes }),
+    saveLayout: (layout: string | null) => invoke('workspace:save-layout', { layout }),
     getBootState: () => invoke('workspace:get-boot-state'),
     bumpRestoreAttempts: () => invoke('workspace:bump-restore-attempts'),
     resetRestoreAttempts: () => invoke('workspace:reset-restore-attempts'),

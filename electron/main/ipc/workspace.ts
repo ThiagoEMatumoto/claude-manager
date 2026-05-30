@@ -10,6 +10,7 @@ interface BootRow {
   open_panes: string | null
   clean_shutdown: number
   restore_attempts: number
+  dock_layout: string | null
 }
 
 // O valor de clean_shutdown do boot ANTERIOR precisa ser lido antes de o boot
@@ -65,10 +66,15 @@ export function registerWorkspaceIpc(): void {
       .run(JSON.stringify(panes))
   })
 
+  ipcMain.handle('workspace:save-layout', (_e, { layout }: { layout: string | null }) => {
+    ensureRow()
+    getDb().prepare('UPDATE workspace_state SET dock_layout = ? WHERE id = 1').run(layout)
+  })
+
   ipcMain.handle('workspace:get-boot-state', (): WorkspaceBootState => {
     const row = getDb()
-      .prepare('SELECT open_panes, restore_attempts FROM workspace_state WHERE id = 1')
-      .get() as Pick<BootRow, 'open_panes' | 'restore_attempts'> | undefined
+      .prepare('SELECT open_panes, restore_attempts, dock_layout FROM workspace_state WHERE id = 1')
+      .get() as Pick<BootRow, 'open_panes' | 'restore_attempts' | 'dock_layout'> | undefined
     let openPanes: PaneSnapshot[] = []
     if (row?.open_panes) {
       try {
@@ -81,6 +87,7 @@ export function registerWorkspaceIpc(): void {
       openPanes,
       cleanShutdown: prevCleanShutdown,
       restoreAttempts: row?.restore_attempts ?? 0,
+      dockLayout: row?.dock_layout ?? null,
     }
   })
 

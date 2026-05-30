@@ -16,14 +16,23 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { useAppStore, type ActivePane } from '@/store/appStore'
+import { workspaceApi } from '@/lib/ipc'
 
 interface PaneParams {
   pane: ActivePane
 }
 
 function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
-  const { pane } = props.params
   const closePane = useAppStore((s) => s.closePane)
+  // Busca a pane no store pelo id do painel (= paneId). Após api.fromJSON do
+  // restore, os params serializados no JSON podem estar stale (session/repo são
+  // recriados pelo resume), então a fonte da verdade é sempre o store. Fallback
+  // para os params se ainda não estiver no store (transição de addPanel).
+  const fromStore = useAppStore((s) => s.panes.find((p) => p.paneId === props.api.id))
+  const pane = fromStore ?? props.params.pane
+  // Painel órfão: existe no dockview mas a pane sumiu do store (resume falhou ou
+  // foi fechada). Nada a renderizar — o effect de restore/reconcile vai removê-lo.
+  if (!pane) return null
   return (
     <Terminal
       session={pane.session}
@@ -70,6 +79,8 @@ export function AppShell() {
   const openSession = useAppStore((s) => s.openSession)
   const restoreBlocked = useAppStore((s) => s.restoreBlocked)
   const retryRestore = useAppStore((s) => s.retryRestore)
+  const pendingLayout = useAppStore((s) => s.pendingLayout)
+  const clearPendingLayout = useAppStore((s) => s.clearPendingLayout)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const apiRef = useRef<DockviewApi | null>(null)
@@ -82,6 +93,18 @@ export function AppShell() {
   // 'tab' = mesmo grupo do ativo; 'right'/'below' = split. undefined = clique normal
   // no repo, mantendo o comportamento atual (split à direita do ativo).
   const nextPosition = useRef<'tab' | 'right' | 'below' | undefined>(undefined)
+  // Guard: true enquanto api.fromJSON do restore roda — suprime persist e a
+  // reconciliação store→dockview (que duplicaria/removeria painéis).
+  const applyingLayout = useRef(false)
+  // false até o fluxo de restore concluir (ou se não houver restore pendente).
+  // Enquanto false, NÃO persistimos layout (evita sobrescrever o salvo com vazio
+  // antes das panes voltarem).
+  const restoreDone = useRef(false)
+  // Timer de fallback: aplica o layout parcial se algum resume não voltar a tempo.
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Debounce do persist de layout: onDidLayoutChange dispara a cada drag/resize.
+  const layoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -94,10 +117,99 @@ export function AppShell() {
           closePane(panel.id)
         }
       })
+      event.api.onDidLayoutChange(() => {
+        // Não persiste enquanto aplicamos o layout do restore (evita salvar estados
+        // intermediários da reconstrução) nem antes do restore ter terminado.
+        if (applyingLayout.current || !restoreDone.current) return
+        if (layoutTimer.current) clearTimeout(layoutTimer.current)
+        layoutTimer.current = setTimeout(() => {
+          const api = apiRef.current
+          if (!api) return
+          const layout = api.panels.length > 0 ? JSON.stringify(api.toJSON()) : null
+          void workspaceApi.saveLayout(layout)
+        }, 500)
+      })
       setReady(true)
     },
     [closePane],
   )
+
+  // Restore do layout exato. Quando há pendingLayout, aplicamos api.fromJSON UMA
+  // vez — em vez de deixar o effect de reconciliação criar os painéis no arranjo
+  // padrão. Esperamos as panes do restore (criadas com os paneIds salvos) já
+  // existirem no store antes de aplicar, pra que os ids do layout batam.
+  useEffect(() => {
+    if (!ready) return
+    const api = apiRef.current
+    if (!api) return
+
+    // Sem layout pendente: nada a restaurar, libera o persist normal.
+    if (!pendingLayout) {
+      restoreDone.current = true
+      return
+    }
+
+    let layout: ReturnType<DockviewApi['toJSON']>
+    let wantedIds: string[]
+    try {
+      layout = JSON.parse(pendingLayout)
+      wantedIds = Object.keys(layout?.panels ?? {})
+    } catch {
+      // Layout corrompido: descarta e cai no fluxo padrão (addPanel).
+      clearPendingLayout()
+      restoreDone.current = true
+      return
+    }
+
+    const storeIds = new Set(panes.map((p) => p.paneId))
+    const restored = wantedIds.filter((id) => storeIds.has(id))
+    // Ainda faltam panes do layout voltando do resume: espera o próximo render.
+    // Timeout de fallback aplica o parcial (remove órfãos) caso algum resume falhe.
+    const allBack = wantedIds.every((id) => storeIds.has(id))
+    if (!allBack && restored.length === 0) return
+
+    const apply = () => {
+      if (!pendingLayout) return
+      applyingLayout.current = true
+      try {
+        // Remove do JSON os painéis cujas panes não voltaram (resume falhou),
+        // pra fromJSON não tentar materializar painéis órfãos.
+        const orphans = wantedIds.filter((id) => !storeIds.has(id))
+        if (orphans.length > 0) {
+          for (const id of orphans) delete layout.panels[id]
+        }
+        api.fromJSON(layout)
+        // Sincroniza params de cada painel com a pane do store (id = paneId).
+        for (const panel of api.panels) {
+          const pane = useAppStore.getState().panes.find((p) => p.paneId === panel.id)
+          if (pane) panel.api.updateParameters({ pane })
+        }
+      } catch {
+        // fromJSON falhou: limpa tudo e deixa o effect de reconciliação refazer
+        // os painéis no arranjo padrão (addPanel).
+        for (const panel of api.panels) {
+          removingFromStore.current.add(panel.id)
+          api.removePanel(panel)
+        }
+      } finally {
+        applyingLayout.current = false
+        clearPendingLayout()
+        restoreDone.current = true
+        if (fallbackTimer.current) {
+          clearTimeout(fallbackTimer.current)
+          fallbackTimer.current = null
+        }
+      }
+    }
+
+    if (allBack) {
+      apply()
+    } else if (!fallbackTimer.current) {
+      // Algumas panes ainda não voltaram; dá um tempo extra antes de aplicar o
+      // parcial. Se chegarem antes, o ramo allBack acima dispara e limpa o timer.
+      fallbackTimer.current = setTimeout(apply, 1500)
+    }
+  }, [ready, panes, pendingLayout, clearPendingLayout])
 
   // Reconciliação store → dockview. O store é a fonte da verdade: criamos painéis
   // pra panes novas e removemos painéis órfãos, SEM tocar nos painéis existentes
@@ -106,6 +218,13 @@ export function AppShell() {
   useEffect(() => {
     const api = apiRef.current
     if (!api) return
+    // Durante o restore (pendingLayout setado) ou enquanto api.fromJSON roda, o
+    // effect de restore é o dono dos painéis. Não reconciliamos aqui pra não criar
+    // painéis no arranjo padrão (antes do fromJSON) nem remover panes que ainda
+    // estão voltando do resume. Após o fromJSON, pendingLayout é limpo e este
+    // effect roda de novo — aí os painéis já existem com os ids certos e ele só
+    // atualiza params (não duplica).
+    if (pendingLayout || applyingLayout.current) return
 
     const storeIds = new Set(panes.map((p) => p.paneId))
 
@@ -142,7 +261,7 @@ export function AppShell() {
       })
       nextPosition.current = undefined
     }
-  }, [panes, ready])
+  }, [panes, ready, pendingLayout])
 
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes

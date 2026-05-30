@@ -17,7 +17,7 @@
     "dev": "electron-vite dev -- --no-sandbox",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist:linux": "electron-vite build && electron-builder --linux deb",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage deb",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
@@ -34,6 +34,7 @@
     "better-sqlite3": "^11.10.0",
     "chokidar": "^5.0.0",
     "dockview": "^6.6.1",
+    "electron-updater": "^6.8.3",
     "emoji-mart": "^5.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

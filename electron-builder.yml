@@ -1,0 +1,26 @@
+appId: com.thiagomatumoto.claude-manager
+productName: Claude Manager
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron/*'
+  - '!shared/*'
+  - '!{electron.vite.config.ts,tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.eslintrc,.prettierrc,.npmrc}'
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/@homebridge/node-pty-prebuilt-multiarch/**
+npmRebuild: false
+afterPack: ./scripts/alias-node-pty-prebuilds.mjs
+linux:
+  target:
+    - deb
+  category: Development
+  maintainer: thiagoeijimatumoto@gmail.com
+  icon: build/icon.png

@@ -40,12 +40,15 @@ function schedulePersist(panes: ActivePane[]): void {
   }, 500)
 }
 
-// Resume com paralelismo limitado: no máximo `limit` chamadas claude --resume
-// simultâneas, pra não disparar dezenas de PTYs de uma vez. A falha de um resume
-// (transcript sumiu) não aborta os demais — o erro aparece no terminal da pane.
+// Restaura com paralelismo limitado: no máximo `limit` spawns de claude
+// simultâneos, pra não disparar dezenas de PTYs de uma vez. A falha de um
+// individual não aborta os demais — o erro aparece no terminal da pane.
+// Sessões com transcript retomam (--resume); as sem (spawn que nunca conversou)
+// viram sessão NOVA no mesmo repo, mantendo o paneId pra o layout do dockview bater.
 async function restoreFromSnapshots(
   snapshots: PaneSnapshot[],
   resume: AppState['resumeSession'],
+  open: AppState['openSession'],
   limit = 4,
 ): Promise<void> {
   const queue = [...snapshots]
@@ -54,16 +57,27 @@ async function restoreFromSnapshots(
     while (snap) {
       const current = snap
       try {
-        await resume(
-          current.repo,
-          current.projectName,
-          current.projectIcon,
-          current.projectColor ?? null,
-          current.ccSessionId,
-          current.paneId,
-        )
+        const resumable = await sessionsApi.isResumable(current.ccSessionId)
+        if (resumable) {
+          await resume(
+            current.repo,
+            current.projectName,
+            current.projectIcon,
+            current.projectColor ?? null,
+            current.ccSessionId,
+            current.paneId,
+          )
+        } else {
+          await open(
+            current.repo,
+            current.projectName,
+            current.projectIcon,
+            current.projectColor ?? null,
+            current.paneId,
+          )
+        }
       } catch {
-        // Sessão individual não retomável — segue restaurando as outras.
+        // Pane individual não restaurável — segue restaurando as outras.
       }
       snap = queue.shift()
     }
@@ -138,7 +152,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // pendingLayout só faz sentido se todos os snapshots têm paneId (gravados após
     // esta feature). Snapshots antigos caem no addPanel padrão.
     if (dockLayout && openPanes.every((p) => p.paneId)) set({ pendingLayout: dockLayout })
-    await restoreFromSnapshots(openPanes, get().resumeSession)
+    await restoreFromSnapshots(openPanes, get().resumeSession, get().openSession)
     await workspaceApi.resetRestoreAttempts()
   },
 
@@ -146,7 +160,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { openPanes, dockLayout } = await workspaceApi.getBootState()
     set({ restoreBlocked: false })
     if (dockLayout && openPanes.every((p) => p.paneId)) set({ pendingLayout: dockLayout })
-    await restoreFromSnapshots(openPanes, get().resumeSession)
+    await restoreFromSnapshots(openPanes, get().resumeSession, get().openSession)
     await workspaceApi.resetRestoreAttempts()
   },
 

@@ -19,6 +19,8 @@ interface Props {
   projectColor?: string | null
   onClose: () => void
   onTitleChange?: (title: string) => void
+  onReopen?: () => void
+  onOpenSettings?: () => void
 }
 
 const THEME = {
@@ -67,11 +69,19 @@ export function Terminal({
   projectColor,
   onClose,
   onTitleChange,
+  onReopen,
+  onOpenSettings,
 }: Props) {
   const { exited, exitCode, error, write, kill, resize, setDataHandler } = useSession(session.id)
   const hostRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  // Heurístico de "claude não encontrado": registramos se algum byte chegou do PTY.
+  // Se o processo saiu rápido com código != 0 e nunca emitiu nada, provavelmente o
+  // comando não foi resolvido (ENOENT) em vez de uma sessão de verdade ter morrido.
+  const gotDataRef = useRef(false)
+  // Instante do exit, pra medir quanto tempo a sessão viveu (heurístico abaixo).
+  const exitAtRef = useRef<number | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
@@ -123,6 +133,16 @@ export function Terminal({
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
+
+  // Saiu em < 3s do start, com código != 0 e sem nunca ter emitido bytes →
+  // tratamos como "claude não encontrado". Não é detecção perfeita, mas evita o
+  // críptico "exited (127)" pro caso mais comum (comando não instalado / errado).
+  if (exited && exitAtRef.current === null) exitAtRef.current = Date.now()
+  const claudeNotFound =
+    exited &&
+    exitCode !== 0 &&
+    !gotDataRef.current &&
+    (exitAtRef.current ?? Date.now()) - session.startedAt < 3000
 
   function copySelection() {
     const sel = xtermRef.current?.getSelection()
@@ -191,6 +211,7 @@ export function Terminal({
     let flushed = false
     let liveTotal = ''
     setDataHandler((data) => {
+      gotDataRef.current = true
       if (flushed) term.write(data)
       else liveTotal += data
     })
@@ -333,8 +354,13 @@ export function Terminal({
               )}
             </div>
           )}
-          {exited && <span>● exited ({exitCode ?? '?'})</span>}
-          {error && <span className="text-red-400">⚠ {error}</span>}
+          {exited &&
+            (claudeNotFound ? (
+              <span className="text-red-400">⚠ claude não encontrado</span>
+            ) : (
+              <span className="text-red-400">● encerrada ({exitCode ?? '?'})</span>
+            ))}
+          {error && !claudeNotFound && <span className="text-red-400">⚠ {error}</span>}
           <button
             type="button"
             onClick={kill}
@@ -355,6 +381,44 @@ export function Terminal({
           </button>
         </div>
       </div>
+
+      {exited && (
+        <div
+          className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs"
+          style={{ color: 'var(--color-text-dim)' }}
+        >
+          {claudeNotFound ? (
+            <span className="text-[var(--color-text)]">
+              <span className="text-red-400">claude não encontrado</span> — verifique a instalação
+              ou configure o comando em Configurações.
+            </span>
+          ) : (
+            <span>
+              A sessão foi encerrada{exitCode != null ? ` (código ${exitCode})` : ''}.
+            </span>
+          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {claudeNotFound && onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+              >
+                Configurações
+              </button>
+            )}
+            {onReopen && (
+              <button
+                type="button"
+                onClick={onReopen}
+                className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
+              >
+                Reabrir
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--color-bg)] p-2" />
 

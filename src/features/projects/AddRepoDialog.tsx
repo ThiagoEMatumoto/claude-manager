@@ -107,7 +107,8 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
         source: `git-clone:${url.trim()}`,
       })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Falha ao clonar.')
+      const detail = e instanceof Error ? e.message : String(e)
+      setError(`Não foi possível clonar o repositório. ${detail}`)
     } finally {
       setSubmitting(false)
     }
@@ -190,7 +191,15 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
         />
         <RoleSelect value={role} onChange={setRole} />
 
-        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+        {error && (
+          <div className="mt-3 rounded-md border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+            <div className="font-medium text-red-400">⚠ Erro</div>
+            <div className="mt-0.5 break-words">{error}</div>
+            <div className="mt-1 text-[10px] text-red-300/70">
+              Verifique a URL/permissões e tente novamente.
+            </div>
+          </div>
+        )}
       </Dialog>
 
       {linkChoice && project.vaultPath && (

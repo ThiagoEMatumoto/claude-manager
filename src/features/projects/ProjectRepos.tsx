@@ -23,19 +23,34 @@ export function ProjectRepos({ project }: Props) {
 
   return (
     <div className="border-l border-[var(--color-border)]/50 bg-[var(--color-bg)]/40 pl-4">
-      <ul className="flex flex-col gap-px py-1">
-        {repos.map((r) => (
-          <RepoRow key={r.id} repo={r} project={project} onUpdate={update} onRemove={remove} />
-        ))}
-      </ul>
+      {repos.length === 0 ? (
+        <div className="px-4 py-3 text-xs text-[var(--color-text-dim)]">
+          <div className="mb-2">Nenhum repo neste projeto.</div>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[var(--color-text)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          >
+            + Adicionar repo
+          </button>
+        </div>
+      ) : (
+        <>
+          <ul className="flex flex-col gap-px py-1">
+            {repos.map((r) => (
+              <RepoRow key={r.id} repo={r} project={project} onUpdate={update} onRemove={remove} />
+            ))}
+          </ul>
 
-      <button
-        type="button"
-        onClick={() => setAdding(true)}
-        className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
-      >
-        + repo
-      </button>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+          >
+            + repo
+          </button>
+        </>
+      )}
 
       <AddRepoDialog
         open={adding}

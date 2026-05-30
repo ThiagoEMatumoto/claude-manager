@@ -15,6 +15,7 @@ import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
+import { CommandPalette } from '@/features/command-palette/CommandPalette'
 import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
 
@@ -22,8 +23,15 @@ interface PaneParams {
   pane: ActivePane
 }
 
+// O dockview renderiza este painel fora da árvore do AppShell, então em vez de
+// prop drilling usamos um CustomEvent pra pedir a abertura das Configurações.
+function requestOpenSettings() {
+  window.dispatchEvent(new CustomEvent('cm:open-settings'))
+}
+
 function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
   const closePane = useAppStore((s) => s.closePane)
+  const openSession = useAppStore((s) => s.openSession)
   // Busca a pane no store pelo id do painel (= paneId). Após api.fromJSON do
   // restore, os params serializados no JSON podem estar stale (session/repo são
   // recriados pelo resume), então a fonte da verdade é sempre o store. Fallback
@@ -43,6 +51,11 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       projectColor={pane.projectColor}
       onClose={() => closePane(pane.paneId)}
       onTitleChange={(t) => props.api.setTitle(t)}
+      onReopen={() => {
+        closePane(pane.paneId)
+        void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
+      }}
+      onOpenSettings={requestOpenSettings}
     />
   )
 }
@@ -82,6 +95,7 @@ export function AppShell() {
   const pendingLayout = useAppStore((s) => s.pendingLayout)
   const clearPendingLayout = useAppStore((s) => s.clearPendingLayout)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -263,6 +277,29 @@ export function AppShell() {
     }
   }, [panes, ready, pendingLayout])
 
+  // Command palette: Ctrl+K (Cmd+K no mac). preventDefault antes do xterm processar
+  // — o attachCustomKeyEventHandler do Terminal só intercepta copy/paste e devolve
+  // o resto, então este listener global (capture) ganha a tecla antes do claude.
+  // O 'k' nunca é um combo crítico do claude, então o app pode ter prioridade aqui.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Abre Configurações sob demanda (ex: error state do Terminal, renderizado pelo
+  // dockview fora desta árvore — ver requestOpenSettings).
+  useEffect(() => {
+    const onOpen = () => setSettingsOpen(true)
+    window.addEventListener('cm:open-settings', onOpen)
+    return () => window.removeEventListener('cm:open-settings', onOpen)
+  }, [])
+
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes
   // combos nunca colidem com o que o claude precisa receber. preventDefault evita
@@ -359,6 +396,11 @@ export function AppShell() {
       </main>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
     </div>
   )
 }
@@ -366,11 +408,25 @@ export function AppShell() {
 function EmptyMain() {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex h-full items-center justify-center">
-      <div className="max-w-md text-center text-[var(--color-text-dim)]">
+      <div className="max-w-sm text-center text-[var(--color-text-dim)]">
+        <div className="mb-4 text-4xl opacity-60">⌨</div>
         <div className="mb-2 text-lg font-medium text-[var(--color-text)]">
           Nenhuma sessão aberta
         </div>
-        <div>Selecione um repo na barra lateral pra abrir uma sessão.</div>
+        <div className="text-sm">
+          Clique num repo na barra lateral pra abrir uma sessão.
+        </div>
+        <div className="mt-3 text-xs">
+          ou pressione{' '}
+          <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text)]">
+            Ctrl
+          </kbd>
+          {' '}
+          <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text)]">
+            K
+          </kbd>{' '}
+          pra buscar
+        </div>
       </div>
     </div>
   )

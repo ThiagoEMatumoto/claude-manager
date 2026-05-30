@@ -16,6 +16,7 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
+import { UpdateToast } from '@/features/updates/UpdateToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
 
@@ -401,6 +402,7 @@ export function AppShell() {
         onClose={() => setPaletteOpen(false)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+      <UpdateToast />
     </div>
   )
 }

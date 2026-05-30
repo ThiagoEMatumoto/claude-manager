@@ -29,8 +29,19 @@ export function ProjectsSidebar() {
 
       <div className="flex-1 overflow-y-auto">
         {projects.length === 0 && (
-          <div className="px-4 py-8 text-center text-xs text-[var(--color-text-dim)]">
-            Nenhum projeto. Crie o primeiro.
+          <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+            <div className="text-3xl opacity-60">🗂</div>
+            <div className="text-sm font-medium text-[var(--color-text)]">Nenhum projeto ainda</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Crie um projeto pra agrupar seus repositórios e sessões.
+            </div>
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className="mt-1 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90"
+            >
+              Criar projeto
+            </button>
           </div>
         )}
 

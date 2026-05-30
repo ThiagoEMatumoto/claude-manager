@@ -388,11 +388,25 @@ export function AppShell() {
 function EmptyMain() {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex h-full items-center justify-center">
-      <div className="max-w-md text-center text-[var(--color-text-dim)]">
+      <div className="max-w-sm text-center text-[var(--color-text-dim)]">
+        <div className="mb-4 text-4xl opacity-60">⌨</div>
         <div className="mb-2 text-lg font-medium text-[var(--color-text)]">
           Nenhuma sessão aberta
         </div>
-        <div>Selecione um repo na barra lateral pra abrir uma sessão.</div>
+        <div className="text-sm">
+          Clique num repo na barra lateral pra abrir uma sessão.
+        </div>
+        <div className="mt-3 text-xs">
+          ou pressione{' '}
+          <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text)]">
+            Ctrl
+          </kbd>
+          {' '}
+          <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text)]">
+            K
+          </kbd>{' '}
+          pra buscar
+        </div>
       </div>
     </div>
   )

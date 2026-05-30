@@ -60,6 +60,7 @@ async function restoreFromSnapshots(
           current.projectIcon,
           current.projectColor ?? null,
           current.ccSessionId,
+          current.paneId,
         )
       } catch {
         // Sessão individual não retomável — segue restaurando as outras.
@@ -75,17 +76,22 @@ interface AppState {
   activeProjectId: string | null
   panes: ActivePane[]
   restoreBlocked: boolean
+  // Layout do dockview a aplicar (api.fromJSON) UMA vez, após as panes do restore
+  // existirem no store. O AppShell consome e chama clearPendingLayout.
+  pendingLayout: string | null
 
   setArea: (area: Area) => void
   initActiveProject: () => Promise<void>
   restoreWorkspace: () => Promise<void>
   retryRestore: () => Promise<void>
+  clearPendingLayout: () => void
   setActiveProject: (id: string | null) => void
   openSession: (
     repo: Repo,
     projectName: string,
     projectIcon: string | null,
     projectColor: string | null,
+    paneId?: string,
   ) => Promise<void>
   resumeSession: (
     repo: Repo,
@@ -93,6 +99,7 @@ interface AppState {
     projectIcon: string | null,
     projectColor: string | null,
     ccSessionId: string,
+    paneId?: string,
   ) => Promise<void>
   closePane: (paneId: string) => void
 }
@@ -102,6 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeProjectId: null,
   panes: [],
   restoreBlocked: false,
+  pendingLayout: null,
 
   setArea: (area) => set({ area }),
 
@@ -113,7 +121,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   restoreWorkspace: async () => {
     if (restoreStarted) return
     restoreStarted = true
-    const { openPanes, cleanShutdown, restoreAttempts } = await workspaceApi.getBootState()
+    const { openPanes, cleanShutdown, restoreAttempts, dockLayout } =
+      await workspaceApi.getBootState()
     if (openPanes.length === 0) return
 
     // Shutdown gracioso: confiamos no estado salvo e restauramos direto.
@@ -126,36 +135,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (!cleanShutdown) await workspaceApi.bumpRestoreAttempts()
+    // pendingLayout só faz sentido se todos os snapshots têm paneId (gravados após
+    // esta feature). Snapshots antigos caem no addPanel padrão.
+    if (dockLayout && openPanes.every((p) => p.paneId)) set({ pendingLayout: dockLayout })
     await restoreFromSnapshots(openPanes, get().resumeSession)
     await workspaceApi.resetRestoreAttempts()
   },
 
   retryRestore: async () => {
-    const { openPanes } = await workspaceApi.getBootState()
+    const { openPanes, dockLayout } = await workspaceApi.getBootState()
     set({ restoreBlocked: false })
+    if (dockLayout && openPanes.every((p) => p.paneId)) set({ pendingLayout: dockLayout })
     await restoreFromSnapshots(openPanes, get().resumeSession)
     await workspaceApi.resetRestoreAttempts()
   },
+
+  clearPendingLayout: () => set({ pendingLayout: null }),
 
   setActiveProject: (id) => {
     set({ activeProjectId: id })
     void workspaceApi.setActive(id)
   },
 
-  openSession: async (repo, projectName, projectIcon, projectColor) => {
+  openSession: async (repo, projectName, projectIcon, projectColor, paneId) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
     const session = await sessionsApi.spawn({ repoId: repo.id })
     set((s) => ({
       panes: [
         ...s.panes,
-        { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon, projectColor },
+        {
+          paneId: paneId ?? `pane-${Date.now()}`,
+          session,
+          repo,
+          projectName,
+          projectIcon,
+          projectColor,
+        },
       ],
     }))
     schedulePersist(get().panes)
   },
 
-  resumeSession: async (repo, projectName, projectIcon, projectColor, ccSessionId) => {
+  resumeSession: async (repo, projectName, projectIcon, projectColor, ccSessionId, paneId) => {
     // Já há uma pane com essa sessão aberta (ou um resume em voo)? Não duplicar.
     // `resuming` é reservado de forma síncrona antes do await pra fechar a corrida.
     if (get().panes.some((p) => p.session.ccSessionId === ccSessionId) || resuming.has(ccSessionId))
@@ -166,7 +188,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((s) => ({
         panes: [
           ...s.panes,
-          { paneId: `pane-${Date.now()}`, session, repo, projectName, projectIcon, projectColor },
+          {
+            paneId: paneId ?? `pane-${Date.now()}`,
+            session,
+            repo,
+            projectName,
+            projectIcon,
+            projectColor,
+          },
         ],
       }))
       schedulePersist(get().panes)

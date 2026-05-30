@@ -205,6 +205,10 @@ export function registerSessionIpc(): void {
     })
   })
 
+  ipcMain.handle('sessions:is-resumable', (_e, ccSessionId: string): boolean => {
+    return findTranscriptPath(ccSessionId) !== null
+  })
+
   ipcMain.handle('sessions:list-by-repo', (_e, repoId: string): SessionSummary[] => {
     const db = getDb()
     const rows = db

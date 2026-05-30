@@ -246,6 +246,7 @@ export interface Api {
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>
     resume(input: ResumeSessionInput): Promise<Session>
+    isResumable(ccSessionId: string): Promise<boolean>
     listByRepo(repoId: string): Promise<SessionSummary[]>
     getBacklog(sessionId: string): Promise<string>
     write(sessionId: string, data: string): Promise<void>

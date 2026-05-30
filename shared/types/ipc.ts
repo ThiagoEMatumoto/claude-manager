@@ -104,6 +104,8 @@ export interface WorkspaceBootState {
   openPanes: PaneSnapshot[]
   cleanShutdown: boolean
   restoreAttempts: number
+  // Layout serializado do dockview (api.toJSON()). null se nunca salvo.
+  dockLayout: string | null
 }
 
 export interface PtyDataEvent {
@@ -279,6 +281,7 @@ export interface Api {
     getActive(): Promise<string | null>
     setActive(projectId: string | null): Promise<void>
     savePanes(panes: PaneSnapshot[]): Promise<void>
+    saveLayout(layout: string | null): Promise<void>
     getBootState(): Promise<WorkspaceBootState>
     bumpRestoreAttempts(): Promise<void>
     resetRestoreAttempts(): Promise<void>

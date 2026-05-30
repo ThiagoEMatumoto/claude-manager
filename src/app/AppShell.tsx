@@ -16,6 +16,7 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { useAppStore, type ActivePane } from '@/store/appStore'
+import { workspaceApi } from '@/lib/ipc'
 
 interface PaneParams {
   pane: ActivePane
@@ -82,6 +83,16 @@ export function AppShell() {
   // 'tab' = mesmo grupo do ativo; 'right'/'below' = split. undefined = clique normal
   // no repo, mantendo o comportamento atual (split à direita do ativo).
   const nextPosition = useRef<'tab' | 'right' | 'below' | undefined>(undefined)
+  // Guard: true enquanto api.fromJSON do restore roda — suprime persist e a
+  // reconciliação store→dockview (que duplicaria/removeria painéis).
+  const applyingLayout = useRef(false)
+  // false até o fluxo de restore concluir (ou se não houver restore pendente).
+  // Enquanto false, NÃO persistimos layout (evita sobrescrever o salvo com vazio
+  // antes das panes voltarem).
+  const restoreDone = useRef(false)
+
+  // Debounce do persist de layout: onDidLayoutChange dispara a cada drag/resize.
+  const layoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -94,10 +105,28 @@ export function AppShell() {
           closePane(panel.id)
         }
       })
+      event.api.onDidLayoutChange(() => {
+        // Não persiste enquanto aplicamos o layout do restore (evita salvar estados
+        // intermediários da reconstrução) nem antes do restore ter terminado.
+        if (applyingLayout.current || !restoreDone.current) return
+        if (layoutTimer.current) clearTimeout(layoutTimer.current)
+        layoutTimer.current = setTimeout(() => {
+          const api = apiRef.current
+          if (!api) return
+          const layout = api.panels.length > 0 ? JSON.stringify(api.toJSON()) : null
+          void workspaceApi.saveLayout(layout)
+        }, 500)
+      })
       setReady(true)
     },
     [closePane],
   )
+
+  // Libera o persist de layout assim que o dockview está pronto. No Commit C este
+  // gate passa a esperar o restore do layout salvo aplicar antes de liberar.
+  useEffect(() => {
+    if (ready) restoreDone.current = true
+  }, [ready])
 
   // Reconciliação store → dockview. O store é a fonte da verdade: criamos painéis
   // pra panes novas e removemos painéis órfãos, SEM tocar nos painéis existentes

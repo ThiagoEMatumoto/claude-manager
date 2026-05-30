@@ -78,6 +78,7 @@ const api: Api = {
     getActive: () => invoke('workspace:get-active'),
     setActive: (projectId: string | null) => invoke('workspace:set-active', { projectId }),
     savePanes: (panes: PaneSnapshot[]) => invoke('workspace:save-panes', { panes }),
+    saveLayout: (layout: string | null) => invoke('workspace:save-layout', { layout }),
     getBootState: () => invoke('workspace:get-boot-state'),
     bumpRestoreAttempts: () => invoke('workspace:bump-restore-attempts'),
     resetRestoreAttempts: () => invoke('workspace:reset-restore-attempts'),

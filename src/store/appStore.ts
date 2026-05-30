@@ -34,6 +34,7 @@ function schedulePersist(panes: ActivePane[]): void {
         projectName: p.projectName,
         projectIcon: p.projectIcon,
         projectColor: p.projectColor,
+        paneId: p.paneId,
       }))
     void workspaceApi.savePanes(snapshots)
   }, 500)

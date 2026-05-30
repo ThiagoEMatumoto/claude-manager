@@ -23,8 +23,15 @@ interface PaneParams {
   pane: ActivePane
 }
 
+// O dockview renderiza este painel fora da árvore do AppShell, então em vez de
+// prop drilling usamos um CustomEvent pra pedir a abertura das Configurações.
+function requestOpenSettings() {
+  window.dispatchEvent(new CustomEvent('cm:open-settings'))
+}
+
 function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
   const closePane = useAppStore((s) => s.closePane)
+  const openSession = useAppStore((s) => s.openSession)
   // Busca a pane no store pelo id do painel (= paneId). Após api.fromJSON do
   // restore, os params serializados no JSON podem estar stale (session/repo são
   // recriados pelo resume), então a fonte da verdade é sempre o store. Fallback
@@ -44,6 +51,11 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       projectColor={pane.projectColor}
       onClose={() => closePane(pane.paneId)}
       onTitleChange={(t) => props.api.setTitle(t)}
+      onReopen={() => {
+        closePane(pane.paneId)
+        void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
+      }}
+      onOpenSettings={requestOpenSettings}
     />
   )
 }
@@ -278,6 +290,14 @@ export function AppShell() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Abre Configurações sob demanda (ex: error state do Terminal, renderizado pelo
+  // dockview fora desta árvore — ver requestOpenSettings).
+  useEffect(() => {
+    const onOpen = () => setSettingsOpen(true)
+    window.addEventListener('cm:open-settings', onOpen)
+    return () => window.removeEventListener('cm:open-settings', onOpen)
   }, [])
 
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só

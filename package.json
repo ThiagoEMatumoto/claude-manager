@@ -17,6 +17,7 @@
     "dev": "electron-vite dev -- --no-sandbox",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "dist:linux": "electron-vite build && electron-builder --linux deb",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
@@ -54,6 +55,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "electron": "^32.3.3",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^2.3.0",
     "node-gyp": "^11.5.0",
     "tailwindcss": "^4.0.0",

@@ -49,7 +49,7 @@ export function ProjectRepos({ project }: Props) {
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
           >
             + repo
           </button>
@@ -85,7 +85,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
         <button
           type="button"
           onClick={() => void openSession(repo, project.name, project.icon, project.color)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
           title={`Nova sessão · ${repo.path}`}
         >
           <span className="shrink-0" title={LINK_BADGE[repo.linkKind].title}>

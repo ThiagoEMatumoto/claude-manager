@@ -225,7 +225,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
                   data-idx={idx}
                   onMouseMove={() => setActive(idx)}
                   onClick={() => runAt(idx)}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition ${
                     idx === active
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
                       : 'text-[var(--color-text-dim)]'

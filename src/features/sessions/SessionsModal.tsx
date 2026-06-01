@@ -104,7 +104,7 @@ export function SessionsModal({
             className={`rounded-md px-2 py-1 text-xs transition ${
               filter === f.id
                 ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
-                : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+                : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
             }`}
           >
             {f.label}
@@ -129,7 +129,7 @@ export function SessionsModal({
           {filtered?.map((s) => (
             <li
               key={s.ccSessionId}
-              className="flex items-center justify-between gap-3 rounded-md px-2 py-2.5 hover:bg-[var(--color-surface-2)]/60"
+              className="flex items-center justify-between gap-3 rounded-md px-2 py-2.5 transition hover:bg-[var(--color-surface-2)]/60"
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <span

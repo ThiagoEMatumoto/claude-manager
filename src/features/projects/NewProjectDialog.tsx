@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import { EmojiPicker } from '@/components/ui/EmojiPicker'
+import { IconPicker } from '@/components/ui/IconPicker'
 import { ColorSelect } from '@/components/ui/ColorSelect'
 import { dialogApi, vaultApi } from '@/lib/ipc'
 import type { CreateProjectInput } from '../../../shared/types/ipc'
@@ -38,7 +38,7 @@ function joinPath(root: string, name: string): string {
 export function NewProjectDialog({ open, onClose, onCreate }: Props) {
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(COLORS[0])
-  const [icon, setIcon] = useState('')
+  const [icon, setIcon] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const [root, setRoot] = useState('')
@@ -49,7 +49,7 @@ export function NewProjectDialog({ open, onClose, onCreate }: Props) {
     if (!open) return
     setName('')
     setColor(COLORS[0])
-    setIcon('')
+    setIcon(null)
     setOverride(null)
     void vaultApi.getRoot().then(setRoot)
     setTimeout(() => inputRef.current?.focus(), 0)
@@ -82,7 +82,7 @@ export function NewProjectDialog({ open, onClose, onCreate }: Props) {
       await onCreate({
         name: name.trim(),
         color,
-        icon: icon.trim() || null,
+        icon,
         vaultPath,
       })
     } finally {
@@ -113,7 +113,7 @@ export function NewProjectDialog({ open, onClose, onCreate }: Props) {
       <div className="flex items-end gap-2">
         <div>
           <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Ícone</label>
-          <EmojiPicker value={icon} onChange={setIcon} />
+          <IconPicker value={icon} onChange={setIcon} />
         </div>
         <Input
           ref={inputRef}

@@ -18,6 +18,7 @@ import {
 } from './ipc/workspace'
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
+import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -30,6 +31,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    frame: false,
     autoHideMenuBar: true,
     backgroundColor: '#0b0b0f',
     webPreferences: {
@@ -41,6 +43,8 @@ function createMainWindow(): BrowserWindow {
   })
 
   win.on('ready-to-show', () => win.show())
+
+  wireWindowMaximizeBroadcast(win)
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -69,6 +73,7 @@ app.whenReady().then(() => {
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()
+  registerWindowIpc()
 
   createMainWindow()
   initUpdater()

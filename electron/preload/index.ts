@@ -102,7 +102,9 @@ const api: Api = {
   },
   updates: {
     onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),
+    apply: () => invoke('updates:apply'),
     install: () => invoke('updates:install'),
+    openRelease: () => invoke('updates:open-release'),
   },
   usage: {
     get: () => invoke('usage:get'),

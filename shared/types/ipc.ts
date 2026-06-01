@@ -129,10 +129,18 @@ export interface SessionActivity {
   tokens?: { output: number; context: number }
 }
 
+export type UpdateFormat = 'appimage' | 'deb'
+
+export interface GithubAsset {
+  name: string
+  browser_download_url: string
+}
+
 export type UpdateStatus =
-  | { state: 'available'; version: string }
+  | { state: 'available'; version: string; format?: UpdateFormat }
   | { state: 'downloading'; percent: number }
   | { state: 'downloaded'; version: string }
+  | { state: 'awaiting-install'; version: string }
   | { state: 'error'; message: string }
 
 export interface UsageWindow {
@@ -334,7 +342,9 @@ export interface Api {
   }
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void
+    apply(): Promise<void>
     install(): Promise<void>
+    openRelease(): Promise<void>
   }
   usage: {
     get(): Promise<UsageStatus>

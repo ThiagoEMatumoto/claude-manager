@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { UsageStatus, UsageWindow } from '../../../shared/types/ipc'
+import { getNotifPrefs, notify } from './notifications'
+
+const HIGH_USAGE_THRESHOLD = 90
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 // Poll lento de segurança: o uso só muda quando uma sessão consome, então o
@@ -49,6 +52,10 @@ let lastFetchAt = 0
 let backoffMs = 0
 // Lê Retry-After (segundos) na resposta 429; null se ausente ou inválido.
 let pendingRetryAfterMs: number | null = null
+// Últimas utilizações conhecidas por janela, pra notificar só na borda <90→≥90
+// (não repetir enquanto continua ≥90).
+let fiveHourHigh = false
+let sevenDayHigh = false
 
 // Anexa os últimos fiveHour/sevenDay conhecidos a um status degradado, marcando
 // stale. Sem dados prévios, o status fica como veio (sem valores).
@@ -100,6 +107,32 @@ async function fetchUsage(): Promise<UsageStatus> {
   }
 }
 
+// Notifica na borda de subida (<90 → ≥90) de cada janela; a flag por janela
+// impede repetir enquanto a utilização continua ≥90.
+function checkHighUsage(status: UsageStatus): void {
+  if (status.state !== 'ok') return
+  const five = status.fiveHour?.utilization
+  const seven = status.sevenDay?.utilization
+
+  const crossedFive = typeof five === 'number' && five >= HIGH_USAGE_THRESHOLD && !fiveHourHigh
+  const crossedSeven = typeof seven === 'number' && seven >= HIGH_USAGE_THRESHOLD && !sevenDayHigh
+
+  if (typeof five === 'number') fiveHourHigh = five >= HIGH_USAGE_THRESHOLD
+  if (typeof seven === 'number') sevenDayHigh = seven >= HIGH_USAGE_THRESHOLD
+
+  if (!crossedFive && !crossedSeven) return
+
+  const prefs = getNotifPrefs()
+  if (!prefs.enabled || !prefs.usageHigh) return
+
+  const pct = crossedFive ? five : seven
+  const window = crossedFive ? '5h' : 'semanal'
+  notify({
+    title: 'Uso alto (janela 5h/semanal)',
+    body: `${Math.round(pct as number)}% usado na janela ${window}`,
+  })
+}
+
 function broadcast(status: UsageStatus): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('usage:status', status)
@@ -125,6 +158,7 @@ async function tick(): Promise<void> {
   if (status.state === 'ok') {
     lastGoodStatus = status
     backoffMs = 0
+    checkHighUsage(status)
   } else if (status.state === 'rate-limited') {
     // Sem Retry-After, dobra o backoff a partir de 2min até o teto.
     if (pendingRetryAfterMs === null) {

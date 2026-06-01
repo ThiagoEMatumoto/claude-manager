@@ -8,6 +8,7 @@ export const projectsApi = api.projects
 export const sessionsApi = api.sessions
 export const shellApi = api.shell
 export const dialogApi = api.dialog
+export const prefsApi = api.prefs
 export const vaultApi = api.vault
 export const repoApi = api.repo
 export const workspaceApi = api.workspace
@@ -16,5 +17,6 @@ export const ccPluginsApi = api.ccPlugins
 export const updatesApi = api.updates
 export const usageApi = api.usage
 export const windowApi = api.window
+export const notificationsApi = api.notifications
 
 export { api }

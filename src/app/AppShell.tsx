@@ -17,6 +17,7 @@ import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
 import { UpdateToast } from '@/features/updates/UpdateToast'
+import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
 
@@ -403,6 +404,7 @@ export function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <UpdateToast />
+      <NotificationToast />
     </div>
   )
 }

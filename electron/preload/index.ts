@@ -13,6 +13,7 @@ import type {
   PaneSnapshot,
   UpdateStatus,
   UsageStatus,
+  NotificationEvent,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -61,6 +62,10 @@ const api: Api = {
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),
   },
+  prefs: {
+    get: <T>(key: string) => invoke<T | null>('prefs:get', { key }),
+    set: (key: string, value: unknown) => invoke('prefs:set', { key, value }),
+  },
   vault: {
     getRoot: () => invoke('vault:get-root'),
     isConfigured: () => invoke('vault:is-configured'),
@@ -103,6 +108,9 @@ const api: Api = {
     get: () => invoke('usage:get'),
     refresh: () => invoke('usage:refresh'),
     onStatus: (handler) => subscribe<UsageStatus>('usage:status', handler),
+  },
+  notifications: {
+    onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),
   },
   window: {
     minimize: () => invoke('window:minimize'),

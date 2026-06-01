@@ -9,6 +9,7 @@ import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc } from './ipc/git'
+import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import {
@@ -19,6 +20,7 @@ import {
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
+import { setMainWindow } from './services/notifications'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -44,6 +46,7 @@ function createMainWindow(): BrowserWindow {
 
   win.on('ready-to-show', () => win.show())
 
+  setMainWindow(win)
   wireWindowMaximizeBroadcast(win)
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -70,6 +73,7 @@ app.whenReady().then(() => {
   registerShellIpc()
   registerDialogIpc()
   registerGitIpc()
+  registerPrefsIpc()
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()

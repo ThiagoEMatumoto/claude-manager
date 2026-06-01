@@ -286,6 +286,10 @@ export interface Api {
   dialog: {
     openDirectory(): Promise<string | null>
   }
+  prefs: {
+    get<T>(key: string): Promise<T | null>
+    set(key: string, value: unknown): Promise<void>
+  }
   vault: {
     getRoot(): Promise<string>
     isConfigured(): Promise<boolean>

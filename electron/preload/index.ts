@@ -61,6 +61,10 @@ const api: Api = {
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),
   },
+  prefs: {
+    get: <T>(key: string) => invoke<T | null>('prefs:get', { key }),
+    set: (key: string, value: unknown) => invoke('prefs:set', { key, value }),
+  },
   vault: {
     getRoot: () => invoke('vault:get-root'),
     isConfigured: () => invoke('vault:is-configured'),

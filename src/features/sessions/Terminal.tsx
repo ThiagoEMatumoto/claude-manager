@@ -1,7 +1,12 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, ChevronRight, Circle, Clock, Loader, Moon, X, Zap } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
+import { Icon } from '@/components/ui/Icon'
+import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
@@ -33,18 +38,23 @@ const THEME = {
   brightBlack: '#9c9cae',
 }
 
-function activityStatusView(
-  status: SessionActivity['status'] | undefined,
-): { label: string; className: string } | null {
+interface StatusView {
+  label: string
+  icon: ComponentType<LucideProps>
+  className: string
+  spin?: boolean
+}
+
+function activityStatusView(status: SessionActivity['status'] | undefined): StatusView | null {
   switch (status) {
     case 'working':
-      return { label: '✦ trabalhando', className: 'text-[var(--color-accent)]' }
+      return { label: 'trabalhando', icon: Zap, className: 'text-[var(--color-accent)]' }
     case 'waiting':
-      return { label: '⏳ aguardando você', className: 'text-amber-400' }
+      return { label: 'aguardando você', icon: Clock, className: 'text-[var(--color-warning)]' }
     case 'idle':
-      return { label: '☾ ocioso', className: 'text-[var(--color-text-dim)]' }
+      return { label: 'ocioso', icon: Moon, className: 'text-[var(--color-text-dim)]' }
     case 'starting':
-      return { label: '… iniciando', className: 'text-[var(--color-text-dim)]' }
+      return { label: 'iniciando', icon: Loader, className: 'text-[var(--color-text-dim)]', spin: true }
     case 'ended':
     default:
       return null
@@ -301,9 +311,9 @@ export function Terminal({
                   className="h-2 w-2 shrink-0 rounded-full"
                   style={{ background: projectColor ?? 'var(--color-border)' }}
                 />
-                {projectIcon && <span>{projectIcon}</span>}
+                <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>
                 <span>{projectName}</span>
-                <span className="text-[var(--color-border)]">›</span>
+                <Icon as={ChevronRight} size={12} className="text-[var(--color-border)]" />
               </span>
             )}
             {editing ? (
@@ -340,11 +350,21 @@ export function Terminal({
           {!exited && (
             <div className="flex min-w-0 items-center gap-2">
               {statusView ? (
-                <span className={statusView.className}>{statusView.label}</span>
+                <span className={`flex items-center gap-1 ${statusView.className}`}>
+                  <Icon
+                    as={statusView.icon}
+                    size={13}
+                    className={statusView.spin ? 'animate-spin' : undefined}
+                  />
+                  {statusView.label}
+                </span>
               ) : activity?.status === 'ended' ? (
                 <span className="text-[var(--color-text-dim)]">encerrada</span>
               ) : (
-                <span className="text-emerald-400">● running</span>
+                <span className="flex items-center gap-1 text-[var(--color-success)]">
+                  <Icon as={Circle} size={9} className="fill-current" />
+                  running
+                </span>
               )}
               {relTime && <span className="text-[10px]">{relTime}</span>}
               {activity?.title && (
@@ -356,11 +376,22 @@ export function Terminal({
           )}
           {exited &&
             (claudeNotFound ? (
-              <span className="text-red-400">⚠ claude não encontrado</span>
+              <span className="flex items-center gap-1 text-[var(--color-danger)]">
+                <Icon as={AlertCircle} size={13} />
+                claude não encontrado
+              </span>
             ) : (
-              <span className="text-red-400">● encerrada ({exitCode ?? '?'})</span>
+              <span className="flex items-center gap-1 text-[var(--color-danger)]">
+                <Icon as={Circle} size={9} className="fill-current" />
+                encerrada ({exitCode ?? '?'})
+              </span>
             ))}
-          {error && !claudeNotFound && <span className="text-red-400">⚠ {error}</span>}
+          {error && !claudeNotFound && (
+            <span className="flex items-center gap-1 text-[var(--color-danger)]">
+              <Icon as={AlertCircle} size={13} />
+              {error}
+            </span>
+          )}
           <button
             type="button"
             onClick={kill}
@@ -375,9 +406,9 @@ export function Terminal({
             onClick={onClose}
             title="Fechar a pane"
             aria-label="Fechar a pane"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 leading-none hover:bg-[var(--color-surface-2)] hover:text-red-400"
+            className="flex items-center rounded border border-[var(--color-border)] px-2 py-0.5 leading-none hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)]"
           >
-            ✕
+            <Icon as={X} size={14} />
           </button>
         </div>
       </div>
@@ -389,7 +420,7 @@ export function Terminal({
         >
           {claudeNotFound ? (
             <span className="text-[var(--color-text)]">
-              <span className="text-red-400">claude não encontrado</span> — verifique a instalação
+              <span className="text-[var(--color-danger)]">claude não encontrado</span> — verifique a instalação
               ou configure o comando em Configurações.
             </span>
           ) : (

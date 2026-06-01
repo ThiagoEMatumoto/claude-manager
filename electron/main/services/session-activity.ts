@@ -13,6 +13,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import type { SessionActivity } from '../../../shared/types/ipc'
+import { notifyUsageConsumption } from './usage-monitor'
 
 const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
@@ -247,6 +248,9 @@ class SessionActivityService extends EventEmitter {
   private watched = new Map<string, WatchEntry>()
   // sessionId -> dados do sessions/<pid>.json (índice por PID, lido dos arquivos).
   private index = new Map<string, IndexEntry>()
+  // sessionId -> último status efetivo, pra detectar a transição busy→não-busy
+  // (fim de consumo) e disparar o fetch de usage só na borda, não a cada tick.
+  private lastEffectiveStatus = new Map<string, SessionActivity['status']>()
   private dirWatcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
 
@@ -301,7 +305,34 @@ class SessionActivityService extends EventEmitter {
 
   private onIndexChanged(): void {
     this.rebuildIndex()
+    this.detectConsumption()
     for (const id of this.watched.keys()) void this.emitFor(id)
+  }
+
+  // Status efetivo de uma entry do índice (mesma regra do emitFor, sem o
+  // enriquecimento do JSONL). Sessão sem PID vivo conta como encerrada.
+  private effectiveStatus(entry: IndexEntry): SessionActivity['status'] {
+    return isPidAlive(entry.pid) ? mapStatus(entry.status) : 'ended'
+  }
+
+  // Uso do plano só muda quando uma sessão termina um turno. Detectamos a borda
+  // working → waiting/idle/ended e notificamos o usage-monitor (que debounça e
+  // respeita o MIN_INTERVAL). starting→working e outras transições não disparam.
+  private detectConsumption(): void {
+    let consumed = false
+    for (const [sessionId, entry] of this.index) {
+      const current = this.effectiveStatus(entry)
+      const prev = this.lastEffectiveStatus.get(sessionId)
+      if (prev === 'working' && current !== 'working') consumed = true
+      this.lastEffectiveStatus.set(sessionId, current)
+    }
+    // Sessões que sumiram do índice: trata como fim de consumo se estavam working.
+    for (const [sessionId, prev] of this.lastEffectiveStatus) {
+      if (this.index.has(sessionId)) continue
+      if (prev === 'working') consumed = true
+      this.lastEffectiveStatus.delete(sessionId)
+    }
+    if (consumed) notifyUsageConsumption()
   }
 
   private async emitFor(ccSessionId: string): Promise<void> {

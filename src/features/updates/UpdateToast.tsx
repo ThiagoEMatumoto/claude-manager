@@ -16,8 +16,6 @@ export function UpdateToast() {
   }, [])
 
   if (!status || dismissed) return null
-  // 'available' é coberto pelo 'downloading' que vem em seguida (autoDownload).
-  if (status.state === 'available') return null
 
   return (
     <div
@@ -29,10 +27,19 @@ export function UpdateToast() {
       }}
     >
       <Icon
-        as={status.state === 'downloaded' ? RefreshCw : Download}
+        as={status.state === 'downloaded' || status.state === 'awaiting-install' ? RefreshCw : Download}
         className="shrink-0 text-[var(--color-accent)]"
       />
       <div className="flex-1">{renderBody(status)}</div>
+      {status.state === 'available' && (
+        <button
+          onClick={() => void updatesApi.apply()}
+          className="shrink-0 rounded px-2 py-1 text-xs font-medium"
+          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+        >
+          Atualizar
+        </button>
+      )}
       {status.state === 'downloaded' && (
         <button
           onClick={() => void updatesApi.install()}
@@ -40,6 +47,15 @@ export function UpdateToast() {
           style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
         >
           Reiniciar e instalar
+        </button>
+      )}
+      {status.state === 'error' && (
+        <button
+          onClick={() => void updatesApi.openRelease()}
+          className="shrink-0 rounded px-2 py-1 text-xs font-medium"
+          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+        >
+          Abrir release
         </button>
       )}
       <button
@@ -56,14 +72,14 @@ export function UpdateToast() {
 
 function renderBody(status: UpdateStatus) {
   switch (status.state) {
+    case 'available':
+      return <span>atualização v{status.version} disponível</span>
     case 'downloading':
       return <span>baixando atualização… ({status.percent}%)</span>
     case 'downloaded':
-      return (
-        <span>
-          atualização v{status.version} pronta
-        </span>
-      )
+      return <span>atualização v{status.version} pronta</span>
+    case 'awaiting-install':
+      return <span>instalador aberto — conclua a instalação e reabra o app.</span>
     case 'error':
       return (
         <span style={{ color: 'var(--color-text-dim)' }}>

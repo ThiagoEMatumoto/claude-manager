@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AppShell } from './AppShell'
 import { useProjects } from '@/features/projects/useProjects'
 import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
+import { TitleBar } from '@/features/titlebar/TitleBar'
 import { vaultApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 
@@ -37,9 +38,16 @@ export default function App() {
     }
   }, [projects, activeProjectId, restored, setActiveProject])
 
-  if (vaultConfigured === false) {
-    return <WelcomeDialog onDone={() => setVaultConfigured(true)} />
-  }
-
-  return <AppShell />
+  return (
+    <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="min-h-0 flex-1">
+        {vaultConfigured === false ? (
+          <WelcomeDialog onDone={() => setVaultConfigured(true)} />
+        ) : (
+          <AppShell />
+        )}
+      </div>
+    </div>
+  )
 }

@@ -135,6 +135,18 @@ export type UpdateStatus =
   | { state: 'downloaded'; version: string }
   | { state: 'error'; message: string }
 
+export interface UsageWindow {
+  utilization: number
+  resetsAt: string
+}
+
+export interface UsageStatus {
+  state: 'ok' | 'no-token' | 'unauthorized' | 'error'
+  fiveHour?: UsageWindow
+  sevenDay?: UsageWindow
+  fetchedAt: number
+}
+
 export interface PluginInfo {
   name: string
   marketplace: string
@@ -305,5 +317,17 @@ export interface Api {
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void
     install(): Promise<void>
+  }
+  usage: {
+    get(): Promise<UsageStatus>
+    refresh(): Promise<UsageStatus>
+    onStatus(handler: (status: UsageStatus) => void): () => void
+  }
+  window: {
+    minimize(): Promise<void>
+    toggleMaximize(): Promise<void>
+    close(): Promise<void>
+    isMaximized(): Promise<boolean>
+    onMaximizeChange(handler: (maximized: boolean) => void): () => void
   }
 }

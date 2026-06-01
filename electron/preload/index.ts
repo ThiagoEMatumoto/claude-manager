@@ -12,6 +12,7 @@ import type {
   SessionActivity,
   PaneSnapshot,
   UpdateStatus,
+  UsageStatus,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -97,6 +98,18 @@ const api: Api = {
   updates: {
     onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),
     install: () => invoke('updates:install'),
+  },
+  usage: {
+    get: () => invoke('usage:get'),
+    refresh: () => invoke('usage:refresh'),
+    onStatus: (handler) => subscribe<UsageStatus>('usage:status', handler),
+  },
+  window: {
+    minimize: () => invoke('window:minimize'),
+    toggleMaximize: () => invoke('window:toggle-maximize'),
+    close: () => invoke('window:close'),
+    isMaximized: () => invoke('window:is-maximized'),
+    onMaximizeChange: (handler) => subscribe<boolean>('window:maximize-changed', handler),
   },
 }
 

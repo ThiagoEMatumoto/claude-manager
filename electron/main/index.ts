@@ -17,6 +17,7 @@ import {
   markWorkspaceCleanShutdown,
 } from './ipc/workspace'
 import { initUpdater } from './services/updater'
+import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -71,6 +72,7 @@ app.whenReady().then(() => {
 
   createMainWindow()
   initUpdater()
+  startUsageMonitor()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
@@ -78,6 +80,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  stopUsageMonitor()
   ptyManager.killAll()
   sessionActivityService.closeAll()
   getDb()

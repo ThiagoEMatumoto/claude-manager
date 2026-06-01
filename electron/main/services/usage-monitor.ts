@@ -5,10 +5,17 @@ import { join } from 'node:path'
 import type { UsageStatus, UsageWindow } from '../../../shared/types/ipc'
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
-const POLL_INTERVAL_MS = 60_000
-// Intervalo mínimo entre requisições reais. usage:get/refresh e o caminho de
-// foco da janela reusam o último status se a última chamada foi mais recente.
-const MIN_INTERVAL_MS = 60_000
+// Poll lento de segurança: o uso só muda quando uma sessão consome, então o
+// disparo principal é event-driven (notifyUsageConsumption). Esse poll só cobre
+// drift/janelas que resetam sem consumo nosso.
+const FALLBACK_POLL_MS = 10 * 60_000
+// Intervalo mínimo entre requisições reais. usage:get/refresh, o caminho de foco
+// da janela e os eventos de consumo reusam/aguardam em vez de martelar: várias
+// sessões terminando juntas geram no máximo 1 fetch a cada MIN_INTERVAL.
+const MIN_INTERVAL_MS = 120_000
+// Janela curta pra agregar várias sessões que terminam o turno quase juntas num
+// único fetch, em vez de um por sessão.
+const CONSUMPTION_DEBOUNCE_MS = 8_000
 // Teto do backoff exponencial em resposta a 429 (api/oauth/usage é rate-limited
 // por frequência, então recuamos progressivamente em vez de martelar o endpoint).
 const BACKOFF_MAX_MS = 15 * 60_000
@@ -35,6 +42,7 @@ function mapWindow(raw: unknown): UsageWindow | undefined {
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let lastStatus: UsageStatus | null = null
 let lastGoodStatus: UsageStatus | null = null
 let lastFetchAt = 0
@@ -99,7 +107,7 @@ function broadcast(status: UsageStatus): void {
 }
 
 function scheduleNext(): void {
-  let delay = POLL_INTERVAL_MS
+  let delay = FALLBACK_POLL_MS
   if (pendingRetryAfterMs !== null) {
     delay = pendingRetryAfterMs
   } else if (backoffMs > 0) {
@@ -138,6 +146,20 @@ async function maybeFetch(force = false): Promise<UsageStatus> {
   return lastStatus as UsageStatus
 }
 
+// Chamado quando uma sessão termina de consumir. Agenda um fetch debounced que
+// respeita o MIN_INTERVAL: se o último fetch real foi recente, o timer é estendido
+// pra a próxima janela liberar, garantindo no máximo 1 fetch a cada MIN_INTERVAL
+// mesmo sob uma rajada de eventos.
+export function notifyUsageConsumption(): void {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  const sinceLastFetch = Date.now() - lastFetchAt
+  const delay = Math.max(CONSUMPTION_DEBOUNCE_MS, MIN_INTERVAL_MS - sinceLastFetch)
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null
+    void tick()
+  }, delay)
+}
+
 export function startUsageMonitor(): void {
   ipcMain.handle('usage:get', async () => {
     if (lastStatus) return lastStatus
@@ -155,5 +177,9 @@ export function stopUsageMonitor(): void {
   if (timer) {
     clearTimeout(timer)
     timer = null
+  }
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
   }
 }

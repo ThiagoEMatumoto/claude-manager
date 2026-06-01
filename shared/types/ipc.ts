@@ -141,10 +141,12 @@ export interface UsageWindow {
 }
 
 export interface UsageStatus {
-  state: 'ok' | 'no-token' | 'unauthorized' | 'error'
+  state: 'ok' | 'no-token' | 'unauthorized' | 'error' | 'rate-limited'
   fiveHour?: UsageWindow
   sevenDay?: UsageWindow
   fetchedAt: number
+  // Dados anexados são do último 'ok' conhecido (429/erro de rede transitório).
+  stale?: boolean
 }
 
 export interface PluginInfo {

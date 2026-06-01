@@ -13,6 +13,7 @@ import type {
   PaneSnapshot,
   UpdateStatus,
   UsageStatus,
+  NotificationEvent,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -107,6 +108,9 @@ const api: Api = {
     get: () => invoke('usage:get'),
     refresh: () => invoke('usage:refresh'),
     onStatus: (handler) => subscribe<UsageStatus>('usage:status', handler),
+  },
+  notifications: {
+    onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),
   },
   window: {
     minimize: () => invoke('window:minimize'),

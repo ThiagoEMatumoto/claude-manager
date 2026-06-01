@@ -20,6 +20,7 @@ import {
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
+import { setMainWindow } from './services/notifications'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -45,6 +46,7 @@ function createMainWindow(): BrowserWindow {
 
   win.on('ready-to-show', () => win.show())
 
+  setMainWindow(win)
   wireWindowMaximizeBroadcast(win)
 
   win.webContents.setWindowOpenHandler(({ url }) => {

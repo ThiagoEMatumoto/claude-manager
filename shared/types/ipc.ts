@@ -149,6 +149,18 @@ export interface UsageStatus {
   stale?: boolean
 }
 
+export interface NotificationPrefs {
+  enabled: boolean
+  sessionWaiting: boolean
+  usageHigh: boolean
+}
+
+export interface NotificationEvent {
+  title: string
+  body: string
+  at: number
+}
+
 export interface PluginInfo {
   name: string
   marketplace: string
@@ -328,6 +340,9 @@ export interface Api {
     get(): Promise<UsageStatus>
     refresh(): Promise<UsageStatus>
     onStatus(handler: (status: UsageStatus) => void): () => void
+  }
+  notifications: {
+    onEvent(handler: (event: NotificationEvent) => void): () => void
   }
   window: {
     minimize(): Promise<void>

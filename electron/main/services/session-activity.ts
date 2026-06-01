@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import { notifyUsageConsumption } from './usage-monitor'
+import { getNotifPrefs, getMainWindow, notify } from './notifications'
 
 const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
@@ -324,6 +325,12 @@ class SessionActivityService extends EventEmitter {
       const current = this.effectiveStatus(entry)
       const prev = this.lastEffectiveStatus.get(sessionId)
       if (prev === 'working' && current !== 'working') consumed = true
+      // "Sessão aguardando" é a borda working→waiting especificamente (não
+      // qualquer não-busy). Só notifica com o app fora de foco, pra não spammar
+      // quem está olhando o terminal.
+      if (prev === 'working' && current === 'waiting') {
+        this.notifySessionWaiting(entry)
+      }
       this.lastEffectiveStatus.set(sessionId, current)
     }
     // Sessões que sumiram do índice: trata como fim de consumo se estavam working.
@@ -333,6 +340,17 @@ class SessionActivityService extends EventEmitter {
       this.lastEffectiveStatus.delete(sessionId)
     }
     if (consumed) notifyUsageConsumption()
+  }
+
+  private notifySessionWaiting(entry: IndexEntry): void {
+    const prefs = getNotifPrefs()
+    if (!prefs.enabled || !prefs.sessionWaiting) return
+    if (getMainWindow()?.isFocused()) return
+    const name = entry.name ?? 'Sessão'
+    notify({
+      title: `${name} aguardando você`,
+      body: 'A sessão terminou e espera sua resposta.',
+    })
   }
 
   private async emitFor(ccSessionId: string): Promise<void> {

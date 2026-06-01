@@ -3,9 +3,9 @@ import { usageApi } from '@/lib/ipc'
 import type { UsageStatus, UsageWindow } from '../../../shared/types/ipc'
 
 function barColor(util: number): string {
-  if (util > 90) return '#ef4444'
-  if (util >= 70) return '#eab308'
-  return '#22c55e'
+  if (util > 90) return 'var(--color-danger)'
+  if (util >= 70) return 'var(--color-warning)'
+  return 'var(--color-success)'
 }
 
 function formatCountdown(resetsAt: string): string {

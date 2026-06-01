@@ -19,8 +19,8 @@ interface Props {
 type StatusFilter = 'all' | 'live' | 'ended'
 
 const STATUS_DOT: Record<SessionSummary['status'], string> = {
-  working: 'bg-green-400',
-  waiting: 'bg-yellow-400',
+  working: 'bg-[var(--color-success)]',
+  waiting: 'bg-[var(--color-warning)]',
   idle: 'bg-[var(--color-accent)]',
   ended: 'bg-[var(--color-text-dim)]',
 }
@@ -75,7 +75,7 @@ export function SessionsModal({
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Sessões · ${projectIcon ? `${projectIcon} ` : ''}${repo.label}`}
+      title={`Sessões · ${repo.label}`}
     >
       <div className="mb-3 flex items-center gap-2">
         <Input

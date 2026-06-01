@@ -5,6 +5,7 @@ import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
 import { TitleBar } from '@/features/titlebar/TitleBar'
 import { vaultApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
+import { loadAndApplyTheme } from './useTheme'
 
 export default function App() {
   const { projects } = useProjects()
@@ -12,6 +13,10 @@ export default function App() {
   const [restored, setRestored] = useState(false)
   const activeProjectId = useAppStore((s) => s.activeProjectId)
   const setActiveProject = useAppStore((s) => s.setActiveProject)
+
+  useEffect(() => {
+    void loadAndApplyTheme()
+  }, [])
 
   useEffect(() => {
     void vaultApi.isConfigured().then(setVaultConfigured)

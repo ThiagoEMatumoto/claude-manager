@@ -1,15 +1,19 @@
+import { Blocks, Folder, Settings } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
 import type { Area } from '@/store/appStore'
 import { useAppStore } from '@/store/appStore'
+import { Icon, ICON_SIZE_HEADER } from '@/components/ui/Icon'
 
 interface AreaDef {
   id: Area
-  icon: string
+  icon: ComponentType<LucideProps>
   label: string
 }
 
 const AREAS: AreaDef[] = [
-  { id: 'projects', icon: '🗂', label: 'Projetos' },
-  { id: 'cc-configs', icon: '🧩', label: 'Configs do CC' },
+  { id: 'projects', icon: Folder, label: 'Projetos' },
+  { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },
 ]
 
 interface Props {
@@ -31,13 +35,13 @@ export function IconRail({ onOpenSettings }: Props) {
                 type="button"
                 onClick={() => setArea(a.id)}
                 title={a.label}
-                className={`flex h-10 w-10 items-center justify-center rounded-md text-lg transition ${
+                className={`flex h-10 w-10 items-center justify-center rounded-md transition ${
                   active
                     ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
                     : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                 }`}
               >
-                {a.icon}
+                <Icon as={a.icon} size={ICON_SIZE_HEADER} />
               </button>
             </li>
           )
@@ -48,9 +52,9 @@ export function IconRail({ onOpenSettings }: Props) {
         type="button"
         onClick={onOpenSettings}
         title="Configurações"
-        className="flex h-10 w-10 items-center justify-center rounded-md text-lg text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]"
+        className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]"
       >
-        ⚙
+        <Icon as={Settings} size={ICON_SIZE_HEADER} />
       </button>
     </nav>
   )

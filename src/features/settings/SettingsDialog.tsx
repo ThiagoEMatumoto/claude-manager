@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import { Settings, Palette, Keyboard, Bell } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { ColorSelect } from '@/components/ui/ColorSelect'
 import { dialogApi, vaultApi } from '@/lib/ipc'
 import { SHORTCUTS, type ShortcutContext } from '@/lib/shortcuts'
+import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
+import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
 interface Props {
   open: boolean
@@ -55,7 +58,7 @@ export function SettingsDialog({ open, onClose }: Props) {
 
         <div className="min-w-0 flex-1">
           {tab === 'general' && <GeneralTab open={open} />}
-          {tab === 'appearance' && <Placeholder />}
+          {tab === 'appearance' && <AppearanceTab open={open} />}
           {tab === 'shortcuts' && <ShortcutsTab />}
           {tab === 'notifications' && <Placeholder />}
         </div>
@@ -94,6 +97,84 @@ function GeneralTab({ open }: { open: boolean }) {
       </div>
       <div className="truncate text-sm text-[var(--color-text)]" title={root || undefined}>
         {root || <span className="text-[var(--color-text-dim)]">carregando…</span>}
+      </div>
+    </div>
+  )
+}
+
+const SWATCH_KEYS = ['bg', 'surface-2', 'accent', 'text', 'border'] as const
+
+function AppearanceTab({ open }: { open: boolean }) {
+  const [pref, setPref] = useState<ThemePref>({ presetId: DEFAULT_PRESET_ID })
+
+  useEffect(() => {
+    if (!open) return
+    void loadThemePref().then((p) => {
+      if (p) setPref(p)
+    })
+  }, [open])
+
+  function update(next: ThemePref) {
+    setPref(next)
+    applyThemePref(next)
+    void saveThemePref(next)
+  }
+
+  const accent = pref.accent ?? getPreset(pref.presetId).tokens.accent
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Tema
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {PRESETS.map((preset) => {
+            const selected = preset.id === pref.presetId
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => update({ presetId: preset.id, accent: pref.accent })}
+                className={`flex items-center gap-3 rounded-md border p-3 text-left transition-colors ${
+                  selected
+                    ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]'
+                    : 'border-[var(--color-border)] hover:border-[var(--color-text-dim)]'
+                }`}
+                style={{ background: preset.tokens.surface }}
+              >
+                <div className="flex gap-1">
+                  {SWATCH_KEYS.map((k) => (
+                    <span
+                      key={k}
+                      className="h-5 w-5 rounded-full"
+                      style={{ background: preset.tokens[k] }}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm" style={{ color: preset.tokens.text }}>
+                  {preset.label}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Cor de destaque
+        </div>
+        <ColorSelect
+          value={accent}
+          onChange={(hex) => update({ presetId: pref.presetId, accent: hex })}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="ghost" onClick={() => update({ presetId: DEFAULT_PRESET_ID })}>
+          Restaurar padrão
+        </Button>
       </div>
     </div>
   )

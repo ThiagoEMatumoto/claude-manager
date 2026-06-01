@@ -9,6 +9,10 @@
   --color-text-dim: #9c9cae;
   --color-accent: #ff7a45;
   --color-accent-dim: #c95f33;
+  --color-success: #5a9e6f;
+  --color-warning: #c79a4a;
+  --color-danger: #c0584f;
+  --color-info: #5a85b0;
 }
 
 html, body, #root {

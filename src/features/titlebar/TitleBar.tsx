@@ -95,7 +95,7 @@ function ControlButton({
       style={noDrag}
       className={`flex h-9 w-11 items-center justify-center text-[var(--color-text-dim)] transition-colors ${
         danger
-          ? 'hover:bg-red-600 hover:text-white'
+          ? 'hover:bg-[var(--color-danger)] hover:text-white'
           : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
       }`}
     >

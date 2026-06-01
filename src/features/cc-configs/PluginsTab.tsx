@@ -291,7 +291,7 @@ function PluginDrawer({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-2 py-1 text-xs text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+          className="rounded-md px-2 py-1 text-xs text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
         >
           Fechar
         </button>
@@ -300,7 +300,9 @@ function PluginDrawer({
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {loadingDetails && <div className="text-sm text-[var(--color-text-dim)]">Carregando…</div>}
         {detailsError && (
-          <div className="text-sm text-red-400">Falha ao carregar detalhes: {detailsError}</div>
+          <div className="text-sm text-[var(--color-danger)]">
+            Falha ao carregar detalhes: {detailsError}
+          </div>
         )}
         {details && (
           <div className="flex flex-col gap-4">
@@ -356,7 +358,7 @@ function PluginDrawer({
           className={`mx-4 mb-2 rounded-md px-3 py-2 text-xs ${
             notice.tone === 'ok'
               ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-              : 'bg-red-500/15 text-red-400'
+              : 'bg-[var(--color-danger)]/15 text-[var(--color-danger)]'
           }`}
         >
           {notice.text}

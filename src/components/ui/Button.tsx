@@ -14,7 +14,7 @@ const variants: Record<Variant, string> = {
   primary: 'bg-[var(--color-accent)] text-black hover:opacity-90',
   ghost:
     'border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]',
-  danger: 'bg-red-500/90 text-white hover:bg-red-500',
+  danger: 'bg-[var(--color-danger)] text-white hover:opacity-90',
 }
 
 export function Button({

@@ -20,12 +20,23 @@ function formatCountdown(resetsAt: string): string {
   return `${rem}m`
 }
 
-function Indicator({ label, window }: { label: string; window: UsageWindow }) {
+function Indicator({
+  label,
+  window,
+  stale,
+}: {
+  label: string
+  window: UsageWindow
+  stale?: boolean
+}) {
   const util = Math.max(0, Math.min(100, window.utilization))
   return (
     <div
       className="flex items-center gap-1.5"
-      title={`${label}: ${util.toFixed(0)}% • reseta em ${formatCountdown(window.resetsAt)}`}
+      style={{ opacity: stale ? 0.55 : 1 }}
+      title={`${label}: ${util.toFixed(0)}% • reseta em ${formatCountdown(window.resetsAt)}${
+        stale ? ' • desatualizado' : ''
+      }`}
     >
       <span className="text-[10px] font-medium" style={{ color: 'var(--color-text-dim)' }}>
         {label}
@@ -59,13 +70,11 @@ export function UsageWidget() {
 
   useEffect(() => {
     const unsub = usageApi.onStatus(setStatus)
-    void usageApi.refresh()
-    const onFocus = () => void usageApi.refresh()
-    window.addEventListener('focus', onFocus)
-    return () => {
-      unsub()
-      window.removeEventListener('focus', onFocus)
-    }
+    // get() reusa o cache do main (que já faz poll de 60s). No foco confiamos no
+    // poll do main em vez de forçar fetch — forçar a cada foco estourava o rate
+    // limit do endpoint.
+    void usageApi.get().then(setStatus)
+    return unsub
   }, [])
 
   if (!status) return <Note text="—" />
@@ -75,15 +84,14 @@ export function UsageWidget() {
   }
 
   const hasData = status.fiveHour || status.sevenDay
-  if (status.state === 'error' && !hasData) {
+  if (!hasData) {
     return <Note text="indisponível" />
   }
 
   return (
     <div className="flex items-center gap-3">
-      {status.fiveHour && <Indicator label="5h" window={status.fiveHour} />}
-      {status.sevenDay && <Indicator label="7d" window={status.sevenDay} />}
-      {status.state === 'error' && <Note text="indisponível" />}
+      {status.fiveHour && <Indicator label="5h" window={status.fiveHour} stale={status.stale} />}
+      {status.sevenDay && <Indicator label="7d" window={status.sevenDay} stale={status.stale} />}
     </div>
   )
 }

@@ -3,7 +3,8 @@ import { Settings, Palette, Keyboard, Bell } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { ColorSelect } from '@/components/ui/ColorSelect'
-import { dialogApi, vaultApi } from '@/lib/ipc'
+import { dialogApi, prefsApi, vaultApi } from '@/lib/ipc'
+import type { NotificationPrefs } from '../../../shared/types/ipc'
 import { SHORTCUTS, type ShortcutContext } from '@/lib/shortcuts'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
@@ -60,7 +61,7 @@ export function SettingsDialog({ open, onClose }: Props) {
           {tab === 'general' && <GeneralTab open={open} />}
           {tab === 'appearance' && <AppearanceTab open={open} />}
           {tab === 'shortcuts' && <ShortcutsTab />}
-          {tab === 'notifications' && <Placeholder />}
+          {tab === 'notifications' && <NotificationsTab open={open} />}
         </div>
       </div>
     </Dialog>
@@ -213,10 +214,84 @@ function ShortcutsTab() {
   )
 }
 
-function Placeholder() {
+const DEFAULT_NOTIF_PREFS: NotificationPrefs = {
+  enabled: true,
+  sessionWaiting: true,
+  usageHigh: true,
+}
+
+function NotificationsTab({ open }: { open: boolean }) {
+  const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIF_PREFS)
+
+  useEffect(() => {
+    if (!open) return
+    void prefsApi.get<NotificationPrefs>('notifications').then((p) => {
+      if (p) setPrefs({ ...DEFAULT_NOTIF_PREFS, ...p })
+    })
+  }, [open])
+
+  function update(next: NotificationPrefs) {
+    setPrefs(next)
+    void prefsApi.set('notifications', next)
+  }
+
   return (
-    <div className="flex h-full min-h-[16rem] items-center justify-center text-sm text-[var(--color-text-dim)]">
-      Em breve
+    <div className="space-y-4">
+      <Toggle
+        label="Ativar notificações"
+        checked={prefs.enabled}
+        onChange={(v) => update({ ...prefs, enabled: v })}
+      />
+      <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
+        <Toggle
+          label="Sessão aguardando você"
+          checked={prefs.sessionWaiting}
+          disabled={!prefs.enabled}
+          onChange={(v) => update({ ...prefs, sessionWaiting: v })}
+        />
+        <Toggle
+          label="Uso alto (janela 5h/semanal)"
+          checked={prefs.usageHigh}
+          disabled={!prefs.enabled}
+          onChange={(v) => update({ ...prefs, usageHigh: v })}
+        />
+      </div>
     </div>
+  )
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  label: string
+  checked: boolean
+  onChange: (value: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center justify-between rounded-md px-1 py-1 text-sm transition-opacity ${
+        disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+      }`}
+    >
+      <span className="text-[var(--color-text)]">{label}</span>
+      <span
+        className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+        style={{ background: checked ? 'var(--color-accent)' : 'var(--color-border)' }}
+      >
+        <span
+          className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+          style={{ transform: checked ? 'translateX(1.125rem)' : 'translateX(0.125rem)' }}
+        />
+      </span>
+    </button>
   )
 }

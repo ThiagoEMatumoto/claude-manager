@@ -17,5 +17,6 @@ export const ccPluginsApi = api.ccPlugins
 export const updatesApi = api.updates
 export const usageApi = api.usage
 export const windowApi = api.window
+export const notificationsApi = api.notifications
 
 export { api }

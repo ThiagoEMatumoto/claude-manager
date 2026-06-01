@@ -6,9 +6,10 @@ interface Props {
   title?: string
   children: ReactNode
   footer?: ReactNode
+  widthClassName?: string
 }
 
-export function Dialog({ open, onClose, title, children, footer }: Props) {
+export function Dialog({ open, onClose, title, children, footer, widthClassName }: Props) {
   if (!open) return null
 
   return (
@@ -18,7 +19,9 @@ export function Dialog({ open, onClose, title, children, footer }: Props) {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-[28rem] max-w-[90vw] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl">
+      <div
+        className={`${widthClassName ?? 'w-[28rem]'} max-w-[90vw] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl`}
+      >
         {title && <div className="mb-4 text-lg font-semibold">{title}</div>}
         {children}
         {footer && <div className="mt-6 flex justify-end gap-2">{footer}</div>}

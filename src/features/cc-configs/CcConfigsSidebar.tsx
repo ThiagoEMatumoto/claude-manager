@@ -1,3 +1,8 @@
+import { Bot, Plug, Puzzle, RefreshCw, Sparkles, Store, Webhook } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
+import { Icon } from '@/components/ui/Icon'
+
 export type CcTab = 'plugins' | 'marketplace' | 'agents' | 'skills' | 'mcps' | 'hooks'
 
 // Abas que renderizam componentes agregados de ccConfigs.read().
@@ -6,15 +11,16 @@ export type ComponentTab = 'agents' | 'skills' | 'mcps' | 'hooks'
 interface TabDef {
   id: CcTab
   label: string
+  icon: ComponentType<LucideProps>
 }
 
 const TABS: TabDef[] = [
-  { id: 'plugins', label: 'Plugins' },
-  { id: 'marketplace', label: 'Marketplace' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'mcps', label: 'MCPs' },
-  { id: 'hooks', label: 'Hooks' },
+  { id: 'plugins', label: 'Plugins', icon: Puzzle },
+  { id: 'marketplace', label: 'Marketplace', icon: Store },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'skills', label: 'Skills', icon: Sparkles },
+  { id: 'mcps', label: 'MCPs', icon: Plug },
+  { id: 'hooks', label: 'Hooks', icon: Webhook },
 ]
 
 interface Props {
@@ -34,9 +40,11 @@ export function CcConfigsSidebar({ active, counts, onSelect, onReload, loading }
           type="button"
           onClick={onReload}
           disabled={loading}
-          className="rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-[var(--color-text)] transition hover:opacity-90 disabled:opacity-50"
+          title="Atualizar"
+          className="flex items-center gap-1 rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-xs font-medium text-[var(--color-text)] transition hover:opacity-90 disabled:opacity-50"
         >
-          {loading ? '…' : 'Atualizar'}
+          <Icon as={RefreshCw} size={13} className={loading ? 'animate-spin' : undefined} />
+          Atualizar
         </button>
       </div>
 
@@ -54,7 +62,10 @@ export function CcConfigsSidebar({ active, counts, onSelect, onReload, loading }
                     : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                 }`}
               >
-                <span>{tab.label}</span>
+                <span className="flex items-center gap-2">
+                  <Icon as={tab.icon} className={isActive ? undefined : 'text-[var(--color-text-dim)]'} />
+                  {tab.label}
+                </span>
                 <span className="text-xs text-[var(--color-text-dim)]">{counts[tab.id]}</span>
               </button>
             </li>

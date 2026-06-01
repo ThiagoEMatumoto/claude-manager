@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
+import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { RoleSelect } from '@/components/ui/RoleSelect'
@@ -192,10 +194,13 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
         <RoleSelect value={role} onChange={setRole} />
 
         {error && (
-          <div className="mt-3 rounded-md border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-300">
-            <div className="font-medium text-red-400">⚠ Erro</div>
+          <div className="mt-3 rounded-md border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
+            <div className="flex items-center gap-1 font-medium text-[var(--color-danger)]">
+              <Icon as={AlertCircle} size={13} />
+              Erro
+            </div>
             <div className="mt-0.5 break-words">{error}</div>
-            <div className="mt-1 text-[10px] text-red-300/70">
+            <div className="mt-1 text-[10px] text-[var(--color-text-dim)]">
               Verifique a URL/permissões e tente novamente.
             </div>
           </div>

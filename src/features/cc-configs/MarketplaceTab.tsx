@@ -138,7 +138,7 @@ function MarketplaceCard({
       {notice && (
         <div
           className={`mt-2 text-xs ${
-            notice.tone === 'ok' ? 'text-[var(--color-accent)]' : 'text-red-400'
+            notice.tone === 'ok' ? 'text-[var(--color-accent)]' : 'text-[var(--color-danger)]'
           }`}
         >
           {notice.text}

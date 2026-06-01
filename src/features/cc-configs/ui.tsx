@@ -9,9 +9,9 @@ export function Badge({
 }) {
   const tones: Record<string, string> = {
     neutral: 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
-    on: 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]',
+    on: 'bg-[var(--color-success)]/20 text-[var(--color-success)]',
     off: 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
-    warn: 'bg-amber-500/20 text-amber-400',
+    warn: 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]',
   }
   return (
     <span

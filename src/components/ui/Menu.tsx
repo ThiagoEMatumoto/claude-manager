@@ -48,7 +48,7 @@ export function Menu({ open, onClose, items, children }: Props) {
               }}
               className={`block w-full px-3 py-1.5 text-left text-xs transition hover:bg-[var(--color-surface-2)] ${
                 item.danger
-                  ? 'text-red-400 hover:text-red-300'
+                  ? 'text-[var(--color-danger)] hover:text-[var(--color-danger)]'
                   : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
               }`}
             >

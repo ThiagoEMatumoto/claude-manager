@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Download, RefreshCw, X } from 'lucide-react'
 import { updatesApi } from '@/lib/ipc'
+import { Icon } from '@/components/ui/Icon'
 import type { UpdateStatus } from '../../../shared/types/ipc'
 
 export function UpdateToast() {
@@ -26,6 +28,10 @@ export function UpdateToast() {
         color: 'var(--color-text)',
       }}
     >
+      <Icon
+        as={status.state === 'downloaded' ? RefreshCw : Download}
+        className="shrink-0 text-[var(--color-accent)]"
+      />
       <div className="flex-1">{renderBody(status)}</div>
       {status.state === 'downloaded' && (
         <button
@@ -39,10 +45,10 @@ export function UpdateToast() {
       <button
         onClick={() => setDismissed(true)}
         aria-label="Dispensar"
-        className="shrink-0 px-1 text-xs"
+        className="flex shrink-0 items-center px-1"
         style={{ color: 'var(--color-text-dim)' }}
       >
-        ✕
+        <Icon as={X} size={14} />
       </button>
     </div>
   )

@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { ArrowUpRight, FolderInput, Link2, MoreHorizontal } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { EditRepoDialog } from './EditRepoDialog'
 import { Menu } from '@/components/ui/Menu'
+import { Icon } from '@/components/ui/Icon'
 import { SessionsModal } from '@/features/sessions/SessionsModal'
 import { useAppStore } from '@/store/appStore'
 import type { LinkKind, Project, Repo, UpdateRepoInput } from '../../../shared/types/ipc'
@@ -11,10 +15,10 @@ interface Props {
   project: Project
 }
 
-const LINK_BADGE: Record<LinkKind, { icon: string; title: string }> = {
-  inside: { icon: '📁', title: 'Dentro do vault' },
-  symlink: { icon: '🔗', title: 'Symlink para fora do vault' },
-  external: { icon: '↗', title: 'Referência externa' },
+const LINK_BADGE: Record<LinkKind, { icon: ComponentType<LucideProps>; title: string }> = {
+  inside: { icon: FolderInput, title: 'Dentro do vault' },
+  symlink: { icon: Link2, title: 'Symlink para fora do vault' },
+  external: { icon: ArrowUpRight, title: 'Referência externa' },
 }
 
 export function ProjectRepos({ project }: Props) {
@@ -45,7 +49,7 @@ export function ProjectRepos({ project }: Props) {
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-accent)]"
           >
             + repo
           </button>
@@ -81,11 +85,11 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
         <button
           type="button"
           onClick={() => void openSession(repo, project.name, project.icon, project.color)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
           title={`Nova sessão · ${repo.path}`}
         >
-          <span className="text-[10px]" title={LINK_BADGE[repo.linkKind].title}>
-            {LINK_BADGE[repo.linkKind].icon}
+          <span className="shrink-0" title={LINK_BADGE[repo.linkKind].title}>
+            <Icon as={LINK_BADGE[repo.linkKind].icon} size={14} />
           </span>
           <span className="truncate">{repo.label}</span>
         </button>
@@ -115,7 +119,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
             className="shrink-0 rounded px-1 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
             title="Ações do repo"
           >
-            ⋯
+            <Icon as={MoreHorizontal} size={14} />
           </button>
         </Menu>
       </div>

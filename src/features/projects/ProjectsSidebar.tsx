@@ -1,9 +1,12 @@
 import { useState } from 'react'
+import { FolderOpen, MoreHorizontal } from 'lucide-react'
 import { useProjects } from './useProjects'
 import { NewProjectDialog } from './NewProjectDialog'
 import { EditProjectDialog } from './EditProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
 import { Menu } from '@/components/ui/Menu'
+import { Icon } from '@/components/ui/Icon'
+import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { useAppStore } from '@/store/appStore'
 import type { Project, UpdateProjectInput } from '../../../shared/types/ipc'
 
@@ -30,7 +33,7 @@ export function ProjectsSidebar() {
       <div className="flex-1 overflow-y-auto">
         {projects.length === 0 && (
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-            <div className="text-3xl opacity-60">🗂</div>
+            <Icon as={FolderOpen} size={28} className="text-[var(--color-text-dim)] opacity-60" />
             <div className="text-sm font-medium text-[var(--color-text)]">Nenhum projeto ainda</div>
             <div className="text-xs text-[var(--color-text-dim)]">
               Crie um projeto pra agrupar seus repositórios e sessões.
@@ -69,9 +72,9 @@ export function ProjectsSidebar() {
                   >
                     <span
                       className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ background: p.color ?? '#5c5c70' }}
+                      style={{ background: p.color ?? 'var(--color-text-dim)' }}
                     />
-                    {p.icon && <span className="text-sm leading-none">{p.icon}</span>}
+                    <span className="shrink-0">{renderProjectIcon(p.icon)}</span>
                     <span className="truncate">{p.name}</span>
                     {!p.vaultPath && (
                       <span
@@ -151,7 +154,7 @@ function ProjectMenu({
         className="shrink-0 rounded px-1 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
         title={`Ações de "${project.name}"`}
       >
-        ⋯
+        <Icon as={MoreHorizontal} />
       </button>
     </Menu>
   )

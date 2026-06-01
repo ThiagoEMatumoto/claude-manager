@@ -19,8 +19,8 @@ interface Props {
 type StatusFilter = 'all' | 'live' | 'ended'
 
 const STATUS_DOT: Record<SessionSummary['status'], string> = {
-  working: 'bg-green-400',
-  waiting: 'bg-yellow-400',
+  working: 'bg-[var(--color-success)]',
+  waiting: 'bg-[var(--color-warning)]',
   idle: 'bg-[var(--color-accent)]',
   ended: 'bg-[var(--color-text-dim)]',
 }
@@ -75,7 +75,7 @@ export function SessionsModal({
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Sessões · ${projectIcon ? `${projectIcon} ` : ''}${repo.label}`}
+      title={`Sessões · ${repo.label}`}
     >
       <div className="mb-3 flex items-center gap-2">
         <Input
@@ -104,7 +104,7 @@ export function SessionsModal({
             className={`rounded-md px-2 py-1 text-xs transition ${
               filter === f.id
                 ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
-                : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+                : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
             }`}
           >
             {f.label}
@@ -129,7 +129,7 @@ export function SessionsModal({
           {filtered?.map((s) => (
             <li
               key={s.ccSessionId}
-              className="flex items-center justify-between gap-3 rounded-md px-2 py-2.5 hover:bg-[var(--color-surface-2)]/60"
+              className="flex items-center justify-between gap-3 rounded-md px-2 py-2.5 transition hover:bg-[var(--color-surface-2)]/60"
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <span

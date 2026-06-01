@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Blocks, Folder, Settings, TerminalSquare, X } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
+import { Icon } from '@/components/ui/Icon'
+import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { projectsApi } from '@/lib/ipc'
 import type { Project, Repo } from '../../../shared/types/ipc'
 
@@ -12,6 +15,7 @@ interface Props {
 interface Command {
   id: string
   label: string
+  icon: ReactNode
   hint?: string
   group: string
   run: () => void
@@ -71,18 +75,21 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       {
         id: 'area-projects',
         label: 'Ir para Projetos',
+        icon: <Icon as={Folder} />,
         group: 'Navegação',
         run: () => setArea('projects'),
       },
       {
         id: 'area-cc',
         label: 'Ir para Configs do CC',
+        icon: <Icon as={Blocks} />,
         group: 'Navegação',
         run: () => setArea('cc-configs'),
       },
       {
         id: 'open-settings',
         label: 'Abrir Configurações',
+        icon: <Icon as={Settings} />,
         group: 'Ações',
         run: () => onOpenSettings(),
       },
@@ -92,7 +99,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       list.push({
         id: `goto-${p.id}`,
         label: `Ir para projeto: ${p.name}`,
-        hint: p.icon ?? undefined,
+        icon: renderProjectIcon(p.icon),
         group: 'Projetos',
         run: () => {
           setActiveProject(p.id)
@@ -106,6 +113,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
         list.push({
           id: `session-${r.id}`,
           label: `Nova sessão em: ${r.label}`,
+          icon: <Icon as={TerminalSquare} />,
           hint: p.name,
           group: 'Sessões',
           run: () => void openSession(r, p.name, p.icon, p.color),
@@ -119,6 +127,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       list.push({
         id: 'close-pane',
         label: `Fechar pane: ${panes[panes.length - 1]?.repo.label ?? ''}`.trim(),
+        icon: <Icon as={X} />,
         group: 'Ações',
         run: () => closePane(panes[panes.length - 1].paneId),
       })
@@ -216,14 +225,19 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
                   data-idx={idx}
                   onMouseMove={() => setActive(idx)}
                   onClick={() => runAt(idx)}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition ${
                     idx === active
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
                       : 'text-[var(--color-text-dim)]'
                   }`}
                 >
-                  {cmd.hint && <span className="shrink-0 text-xs opacity-70">{cmd.hint}</span>}
+                  <span className="shrink-0 text-[var(--color-text-dim)]">{cmd.icon}</span>
                   <span className="truncate">{cmd.label}</span>
+                  {cmd.hint && (
+                    <span className="ml-auto shrink-0 text-xs text-[var(--color-text-dim)] opacity-70">
+                      {cmd.hint}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

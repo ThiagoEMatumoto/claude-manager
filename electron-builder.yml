@@ -28,4 +28,4 @@ linux:
     - deb
   category: Development
   maintainer: thiagoeijimatumoto@gmail.com
-  icon: build/icon.png
+  icon: build/icons

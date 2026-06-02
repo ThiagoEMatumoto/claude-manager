@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Settings, Palette, Keyboard, Bell } from 'lucide-react'
+import { Settings, Palette, Keyboard, Bell, Info } from 'lucide-react'
+import { AboutTab } from './AboutTab'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { ColorSelect } from '@/components/ui/ColorSelect'
@@ -14,13 +15,14 @@ interface Props {
   onClose: () => void
 }
 
-type TabId = 'general' | 'appearance' | 'shortcuts' | 'notifications'
+type TabId = 'general' | 'appearance' | 'shortcuts' | 'notifications' | 'about'
 
 const TABS: { id: TabId; label: string; icon: typeof Settings }[] = [
   { id: 'general', label: 'Geral', icon: Settings },
   { id: 'appearance', label: 'Aparência', icon: Palette },
   { id: 'shortcuts', label: 'Atalhos', icon: Keyboard },
   { id: 'notifications', label: 'Notificações', icon: Bell },
+  { id: 'about', label: 'Sobre', icon: Info },
 ]
 
 export function SettingsDialog({ open, onClose }: Props) {
@@ -62,6 +64,7 @@ export function SettingsDialog({ open, onClose }: Props) {
           {tab === 'appearance' && <AppearanceTab open={open} />}
           {tab === 'shortcuts' && <ShortcutsTab />}
           {tab === 'notifications' && <NotificationsTab open={open} />}
+          {tab === 'about' && <AboutTab open={open} />}
         </div>
       </div>
     </Dialog>

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input'
 import { sessionsApi } from '@/lib/ipc'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
+import { SpawnSessionDialog } from './SpawnSessionDialog'
 import type { Repo, SessionSummary } from '../../../shared/types/ipc'
 
 interface Props {
@@ -49,6 +50,7 @@ export function SessionsModal({
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
+  const [spawnOpen, setSpawnOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
   const resumeSession = useAppStore((s) => s.resumeSession)
 
@@ -83,17 +85,21 @@ export function SessionsModal({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <Button
-          variant="primary"
-          className="shrink-0"
-          onClick={() => {
-            void openSession(repo, projectName, projectIcon, projectColor)
-            onClose()
-          }}
-        >
+        <Button variant="primary" className="shrink-0" onClick={() => setSpawnOpen(true)}>
           + Nova
         </Button>
       </div>
+
+      <SpawnSessionDialog
+        open={spawnOpen}
+        onClose={() => setSpawnOpen(false)}
+        repo={repo}
+        onConfirm={(name, featureId) => {
+          void openSession(repo, projectName, projectIcon, projectColor, undefined, featureId, name)
+          setSpawnOpen(false)
+          onClose()
+        }}
+      />
 
       <div className="mb-3 flex items-center gap-1">
         {FILTERS.map((f) => (

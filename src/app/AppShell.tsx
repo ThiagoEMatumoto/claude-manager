@@ -14,6 +14,7 @@ import { IconRail } from './IconRail'
 import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { MetricsArea } from '@/features/metrics/MetricsArea'
+import { FeaturesArea } from '@/features/features/FeaturesArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
@@ -487,6 +488,8 @@ export function AppShell() {
   return (
     <div className="flex h-full w-full overflow-hidden">
       <IconRail onOpenSettings={() => setSettingsOpen(true)} />
+
+      {area === 'features' && <FeaturesArea />}
 
       {area === 'cc-configs' && <CcConfigsArea />}
 

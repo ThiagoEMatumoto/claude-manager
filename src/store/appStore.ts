@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
 import type { LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
-export type Area = 'projects' | 'cc-configs' | 'metrics'
+export type Area = 'projects' | 'cc-configs' | 'metrics' | 'features'
 
 export interface ActivePane {
   paneId: string
@@ -149,6 +149,8 @@ interface AppState {
     projectIcon: string | null,
     projectColor: string | null,
     paneId?: string,
+    featureId?: string,
+    name?: string,
   ) => Promise<void>
   resumeSession: (
     repo: Repo,
@@ -234,10 +236,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     void workspaceApi.setActive(id)
   },
 
-  openSession: async (repo, projectName, projectIcon, projectColor, paneId) => {
+  openSession: async (repo, projectName, projectIcon, projectColor, paneId, featureId, name) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
-    const session = await sessionsApi.spawn({ repoId: repo.id })
+    const session = await sessionsApi.spawn({ repoId: repo.id, featureId, name })
     set((s) => ({
       panes: [
         ...s.panes,

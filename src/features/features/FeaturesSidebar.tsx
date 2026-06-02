@@ -1,0 +1,175 @@
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Plus, RefreshCw } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
+import { Input } from '@/components/ui/Input'
+import type { Feature, FeatureStatus, Project } from '../../../shared/types/ipc'
+import { STATUS_META, STATUS_ORDER } from './status'
+
+type StatusFilter = 'all' | FeatureStatus
+
+interface Props {
+  projects: Project[]
+  byProject: Record<string, Feature[]>
+  selectedId: string | null
+  loading: boolean
+  query: string
+  filter: StatusFilter
+  onQuery: (q: string) => void
+  onFilter: (f: StatusFilter) => void
+  onSelect: (id: string) => void
+  onReload: () => void
+  onNew: () => void
+}
+
+const FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'all', label: 'Todas' },
+  ...STATUS_ORDER.map((s) => ({ id: s as StatusFilter, label: STATUS_META[s].label })),
+]
+
+export function FeaturesSidebar({
+  projects,
+  byProject,
+  selectedId,
+  loading,
+  query,
+  filter,
+  onQuery,
+  onFilter,
+  onSelect,
+  onReload,
+  onNew,
+}: Props) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  const q = query.trim().toLowerCase()
+
+  const groups = useMemo(() => {
+    return projects
+      .map((project) => {
+        const all = byProject[project.id] ?? []
+        const features = all.filter((f) => {
+          if (filter !== 'all' && f.status !== filter) return false
+          if (q && !f.title.toLowerCase().includes(q)) return false
+          return true
+        })
+        return { project, features }
+      })
+      .filter((g) => g.features.length > 0)
+  }, [projects, byProject, filter, q])
+
+  function toggle(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+        <div className="text-sm font-semibold tracking-tight">Features</div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onNew}
+            title="Nova feature"
+            className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
+          >
+            <Icon as={Plus} size={13} />
+            Nova
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            disabled={loading}
+            title="Atualizar"
+            className="flex items-center justify-center rounded-md bg-[var(--color-surface-2)] p-1.5 text-[var(--color-text)] transition hover:opacity-90 disabled:opacity-50"
+          >
+            <Icon as={RefreshCw} size={13} className={loading ? 'animate-spin' : undefined} />
+          </button>
+        </div>
+      </div>
+
+      <div className="border-b border-[var(--color-border)] px-3 py-2.5">
+        <Input
+          placeholder="Buscar por título…"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+        />
+        <div className="mt-2 flex flex-wrap gap-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onFilter(f.id)}
+              className={`rounded-full px-2 py-0.5 text-[10px] transition ${
+                filter === f.id
+                  ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                  : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-2">
+        {groups.length === 0 && (
+          <div className="px-4 py-8 text-center text-xs text-[var(--color-text-dim)]">
+            Nenhuma feature.
+          </div>
+        )}
+        {groups.map(({ project, features }) => {
+          const isCollapsed = collapsed.has(project.id)
+          return (
+            <div key={project.id} className="mb-1">
+              <button
+                type="button"
+                onClick={() => toggle(project.id)}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs font-medium text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+              >
+                <Icon as={isCollapsed ? ChevronRight : ChevronDown} size={13} />
+                {project.icon && <span>{project.icon}</span>}
+                <span className="truncate">{project.name}</span>
+                <span className="ml-auto text-[10px]">{features.length}</span>
+              </button>
+              {!isCollapsed && (
+                <ul className="flex flex-col gap-px">
+                  {features.map((f) => {
+                    const active = f.id === selectedId
+                    const meta = STATUS_META[f.status]
+                    return (
+                      <li key={f.id}>
+                        <button
+                          type="button"
+                          onClick={() => onSelect(f.id)}
+                          className={`flex w-full items-center gap-2 px-4 py-1.5 pl-7 text-left text-sm transition ${
+                            active
+                              ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                              : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+                          }`}
+                        >
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: meta.color }}
+                            title={meta.label}
+                          />
+                          <span className="truncate">{f.title}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </aside>
+  )
+}
+
+export type { StatusFilter }

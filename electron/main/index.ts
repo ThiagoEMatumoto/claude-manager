@@ -12,6 +12,7 @@ import { registerGitIpc } from './ipc/git'
 import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
+import { registerMetricsIpc } from './ipc/metrics'
 import {
   registerWorkspaceIpc,
   markWorkspaceRunning,
@@ -85,6 +86,7 @@ app.whenReady().then(() => {
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()
+  registerMetricsIpc()
   registerWindowIpc()
 
   createMainWindow()

@@ -1,4 +1,4 @@
-import { Blocks, Folder, Settings } from 'lucide-react'
+import { BarChart3, Blocks, Folder, Settings } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { Area } from '@/store/appStore'
@@ -14,6 +14,7 @@ interface AreaDef {
 const AREAS: AreaDef[] = [
   { id: 'projects', icon: Folder, label: 'Projetos' },
   { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },
+  { id: 'metrics', icon: BarChart3, label: 'Métricas' },
 ]
 
 interface Props {

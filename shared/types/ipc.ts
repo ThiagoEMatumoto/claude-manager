@@ -301,6 +301,84 @@ export interface PluginActionResult {
   restartRequired: boolean
 }
 
+export type MetricsWindow = '7d' | '30d' | 'all'
+export type SessionType = 'quick_chat' | 'iteration' | 'deep_solo' | 'agent_orchestration'
+
+export interface MetricsTotals {
+  sessions: number
+  turns: number
+  agentCalls: number
+  skillCalls: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+  // cacheRead / (cacheRead + input)
+  cacheHitRate: number
+}
+
+export interface MetricsDayPoint {
+  day: string
+  tokens: number
+  costUsd: number
+  turns: number
+  sessions: number
+}
+
+export interface MetricsSessionRow {
+  ccSessionId: string
+  title: string | null
+  sessionType: SessionType
+  turns: number
+  agentCalls: number
+  costUsd: number
+  lastTs: number | null
+  projectId: string | null
+  projectName: string
+}
+
+export interface MetricsProjectRow {
+  projectId: string | null
+  projectName: string
+  sessions: number
+  turns: number
+  costUsd: number
+  tokens: number
+}
+
+export interface MetricsToolRow {
+  name: string
+  count: number
+}
+
+export interface MetricsTypeBucket {
+  type: SessionType
+  sessions: number
+  turns: number
+  costUsd: number
+}
+
+export interface MetricsSnapshot {
+  window: MetricsWindow
+  generatedAt: number
+  scanned: boolean
+  totals: MetricsTotals
+  perDay: MetricsDayPoint[]
+  perSession: MetricsSessionRow[]
+  perProject: MetricsProjectRow[]
+  sessionTypeDistribution: MetricsTypeBucket[]
+  topTools: MetricsToolRow[]
+  // modelos sem preço → custo parcial (aviso na UI)
+  unknownModels: string[]
+}
+
+export interface MetricsScanProgress {
+  processed: number
+  total: number
+  done: boolean
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -383,6 +461,11 @@ export interface Api {
     get(): Promise<UsageStatus>
     refresh(): Promise<UsageStatus>
     onStatus(handler: (status: UsageStatus) => void): () => void
+  }
+  metrics: {
+    get(window: MetricsWindow): Promise<MetricsSnapshot>
+    refresh(): Promise<MetricsSnapshot>
+    onProgress(handler: (p: MetricsScanProgress) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

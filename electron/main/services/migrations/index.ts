@@ -3,6 +3,8 @@ import * as init from './001_init'
 import * as vault from './002_vault'
 import * as workspacePanes from './003_workspace_panes'
 import * as dockLayout from './004_dock_layout'
+import * as metrics from './005_metrics'
+import * as metricsCwd from './006_metrics_cwd'
 
 interface Migration {
   version: number
@@ -10,7 +12,7 @@ interface Migration {
   up(db: Database.Database): void
 }
 
-const migrations: Migration[] = [init, vault, workspacePanes, dockLayout]
+const migrations: Migration[] = [init, vault, workspacePanes, dockLayout, metrics, metricsCwd]
 
 export function runMigrations(db: Database.Database): void {
   db.exec(`

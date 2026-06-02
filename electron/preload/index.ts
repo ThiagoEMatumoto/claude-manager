@@ -75,6 +75,10 @@ const api: Api = {
   },
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),
+    openExternal: (url: string) => invoke('shell:open-external', url),
+  },
+  app: {
+    getInfo: () => invoke('app:get-info'),
   },
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),

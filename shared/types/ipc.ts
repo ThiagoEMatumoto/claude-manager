@@ -455,6 +455,15 @@ export interface MetricsScanProgress {
   done: boolean
 }
 
+export interface AppInfo {
+  version: string
+  electron: string
+  chrome: string
+  node: string
+  platform: string
+  arch: string
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -489,6 +498,10 @@ export interface Api {
   }
   shell: {
     openPath(path: string): Promise<void>
+    openExternal(url: string): Promise<void>
+  }
+  app: {
+    getInfo(): Promise<AppInfo>
   }
   dialog: {
     openDirectory(): Promise<string | null>

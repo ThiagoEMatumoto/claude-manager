@@ -2,20 +2,27 @@ import { useEffect, useState } from 'react'
 import { Download, RefreshCw, X } from 'lucide-react'
 import { updatesApi } from '@/lib/ipc'
 import { Icon } from '@/components/ui/Icon'
-import type { UpdateStatus } from '../../../shared/types/ipc'
+import type { UpdateFormat, UpdateStatus } from '../../../shared/types/ipc'
 
 export function UpdateToast() {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  // Só o estado 'available' carrega o format; guardamos pra exibir a nota de
+  // Gatekeeper (mac) também no estado 'awaiting-install', que não tem format.
+  const [format, setFormat] = useState<UpdateFormat | undefined>()
 
   useEffect(() => {
     return updatesApi.onStatus((s) => {
       setDismissed(false)
       setStatus(s)
+      if (s.state === 'available') setFormat(s.format)
     })
   }, [])
 
   if (!status || dismissed) return null
+
+  const showGatekeeperNote =
+    format === 'dmg' && (status.state === 'available' || status.state === 'awaiting-install')
 
   return (
     <div
@@ -30,7 +37,14 @@ export function UpdateToast() {
         as={status.state === 'downloaded' || status.state === 'awaiting-install' ? RefreshCw : Download}
         className="shrink-0 text-[var(--color-accent)]"
       />
-      <div className="flex-1">{renderBody(status)}</div>
+      <div className="flex-1">
+        {renderBody(status)}
+        {showGatekeeperNote && (
+          <span className="mt-1 block text-xs" style={{ color: 'var(--color-text-dim)' }}>
+            no mac: clique com o botão direito no app → Abrir, na 1ª vez.
+          </span>
+        )}
+      </div>
       {status.state === 'available' && (
         <button
           onClick={() => void updatesApi.apply()}

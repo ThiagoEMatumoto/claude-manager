@@ -158,7 +158,7 @@ export type GlobalActivityBatch = {
   tokens?: { output: number; context: number }
 }[]
 
-export type UpdateFormat = 'appimage' | 'deb'
+export type UpdateFormat = 'appimage' | 'deb' | 'dmg' | 'nsis' | 'zip'
 
 export interface GithubAsset {
   name: string

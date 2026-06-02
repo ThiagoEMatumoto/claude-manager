@@ -15,6 +15,8 @@ import type {
   UpdateStatus,
   UsageStatus,
   NotificationEvent,
+  MetricsWindow,
+  MetricsScanProgress,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -120,6 +122,11 @@ const api: Api = {
     get: () => invoke('usage:get'),
     refresh: () => invoke('usage:refresh'),
     onStatus: (handler) => subscribe<UsageStatus>('usage:status', handler),
+  },
+  metrics: {
+    get: (window: MetricsWindow) => invoke('metrics:get', window),
+    refresh: () => invoke('metrics:refresh'),
+    onProgress: (handler) => subscribe<MetricsScanProgress>('metrics:progress', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

@@ -13,6 +13,7 @@ import {
 import { IconRail } from './IconRail'
 import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
+import { MetricsArea } from '@/features/metrics/MetricsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
@@ -488,6 +489,8 @@ export function AppShell() {
       <IconRail onOpenSettings={() => setSettingsOpen(true)} />
 
       {area === 'cc-configs' && <CcConfigsArea />}
+
+      {area === 'metrics' && <MetricsArea />}
 
       {/* O bloco de projetos fica sempre montado (dockview/xterm vivo), apenas
           escondido quando outra área está ativa. */}

@@ -16,7 +16,7 @@ import type { SessionActivity, GlobalActivityBatch } from '../../../shared/types
 import { notifyUsageConsumption } from './usage-monitor'
 import { getNotifPrefs, getMainWindow, notify } from './notifications'
 
-const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
+export const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
 const TAIL_BYTES = 64 * 1024
 const DEBOUNCE_MS = 250

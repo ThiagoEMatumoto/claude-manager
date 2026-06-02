@@ -26,6 +26,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const isDev = !app.isPackaged
 
+// No Linux, o compositing por GPU do Chromium falha em várias combinações de
+// driver (ex: nVidia/Wayland) e pinta a janela inteira de preto, mesmo com o DOM
+// renderizado normalmente. Desligar a aceleração de hardware evita isso; o custo
+// é desprezível para um app focado em terminal. Precisa ser chamado antes do ready.
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration()
+}
+
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,

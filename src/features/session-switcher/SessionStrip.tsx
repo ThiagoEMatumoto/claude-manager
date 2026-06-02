@@ -1,0 +1,159 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Maximize2 } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
+import { relativeTime } from '@/lib/time'
+import { useAppStore } from '@/store/appStore'
+import type { LiveSessionInfo } from '../../../shared/types/ipc'
+
+type LiveStatus = LiveSessionInfo['status']
+
+interface Props {
+  onOpenSwitcher: () => void
+}
+
+// Cor do dot por estado, via CSS vars do tema.
+function statusColor(status: LiveStatus): string {
+  switch (status) {
+    case 'working':
+      return 'var(--color-accent)'
+    case 'starting':
+      return 'var(--color-accent)'
+    case 'waiting':
+      return 'var(--color-warning)'
+    case 'idle':
+    case 'ended':
+    default:
+      return 'var(--color-text-dim)'
+  }
+}
+
+function statusLabel(status: LiveStatus): string {
+  switch (status) {
+    case 'working':
+      return 'trabalhando'
+    case 'starting':
+      return 'iniciando'
+    case 'waiting':
+      return 'aguardando você'
+    case 'idle':
+      return 'ocioso'
+    case 'ended':
+    default:
+      return 'encerrada'
+  }
+}
+
+export function SessionStrip({ onOpenSwitcher }: Props) {
+  const liveSessions = useAppStore((s) => s.liveSessions)
+  const panes = useAppStore((s) => s.panes)
+  const focusPaneId = useAppStore((s) => s.focusPaneId)
+  const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
+  const endSession = useAppStore((s) => s.endSession)
+  // Tick pra reavaliar os tempos relativos no tooltip sem novos broadcasts.
+  const [, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  // ccSessionId → paneId das sessões exibidas no split (destaque "aberta").
+  const openByCc = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of panes) {
+      if (p.session.ccSessionId) m.set(p.session.ccSessionId, p.paneId)
+    }
+    return m
+  }, [panes])
+
+  return (
+    <div
+      className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2"
+    >
+      {liveSessions.length === 0 ? (
+        <span className="px-1 text-[11px] text-[var(--color-text-dim)]">
+          Nenhuma sessão viva — clique num repo.
+        </span>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {liveSessions.map((item) => {
+            const paneId = openByCc.get(item.ccSessionId)
+            const isOpen = paneId !== undefined
+            const isFocused = isOpen && paneId === focusPaneId
+            return (
+              <Chip
+                key={item.ccSessionId}
+                item={item}
+                isOpen={isOpen}
+                isFocused={isFocused}
+                onOpen={() => void focusOrOpenSession(item)}
+                onEnd={() => endSession(item.id)}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onOpenSwitcher}
+        title="Abrir seletor de sessões"
+        className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+      >
+        <Icon as={Maximize2} size={13} />
+      </button>
+    </div>
+  )
+}
+
+interface ChipProps {
+  item: LiveSessionInfo
+  isOpen: boolean
+  isFocused: boolean
+  onOpen: () => void
+  onEnd: () => void
+}
+
+function Chip({ item, isOpen, isFocused, onOpen, onEnd }: ChipProps) {
+  const title = (item.title ?? item.name ?? item.repo.label) || item.repo.label
+  const preview = item.lastText?.replace(/\s+/g, ' ').trim()
+  const tooltip = `${statusLabel(item.status)} · ${relativeTime(item.lastActivityAt)}${
+    preview ? `\n${preview}` : ''
+  }`
+
+  return (
+    <div
+      className={`group flex h-6 shrink-0 items-center gap-1.5 rounded border px-2 text-[11px] transition ${
+        isFocused
+          ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] text-[var(--color-text)]'
+          : isOpen
+            ? 'border-[var(--color-border)] bg-[var(--color-surface-2)]/60 text-[var(--color-text)]'
+            : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+      }`}
+      title={tooltip}
+    >
+      <button type="button" onClick={onOpen} className="flex min-w-0 items-center gap-1.5">
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: statusColor(item.status) }}
+        />
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: item.projectColor ?? 'var(--color-border)' }}
+        />
+        <span className="max-w-40 truncate">{title}</span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onEnd()
+        }}
+        title="Encerrar o processo desta sessão"
+        className="shrink-0 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-danger)] group-hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
+  )
+}

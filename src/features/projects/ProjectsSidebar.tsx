@@ -16,6 +16,19 @@ export function ProjectsSidebar() {
   const setActiveProject = useAppStore((s) => s.setActiveProject)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
+  // Expansão independente por projeto (vários abertos ao mesmo tempo). O header
+  // só faz toggle; setActiveProject segue como "último usado"/hint, sem gatear
+  // a visibilidade dos repos.
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set())
+
+  function toggleExpanded(id: string) {
+    setExpandedProjectIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -51,23 +64,27 @@ export function ProjectsSidebar() {
         <ul className="flex flex-col gap-px py-2">
           {projects.map((p) => {
             const active = p.id === activeProjectId
+            const expanded = expandedProjectIds.has(p.id)
             return (
               <li key={p.id}>
                 <div
                   className={`group flex items-center justify-between border-l-2 px-4 py-2 text-sm transition ${
-                    active
+                    active || expanded
                       ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
                       : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                   }`}
                   style={
-                    active
+                    active || expanded
                       ? { borderLeftColor: p.color ?? 'var(--color-accent)' }
                       : undefined
                   }
                 >
                   <button
                     type="button"
-                    onClick={() => setActiveProject(p.id)}
+                    onClick={() => {
+                      setActiveProject(p.id)
+                      toggleExpanded(p.id)
+                    }}
                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                   >
                     <span
@@ -95,7 +112,7 @@ export function ProjectsSidebar() {
                   />
                 </div>
 
-                {active && <ProjectRepos project={p} />}
+                {expanded && <ProjectRepos project={p} />}
               </li>
             )
           })}

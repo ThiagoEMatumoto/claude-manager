@@ -129,6 +129,35 @@ export interface SessionActivity {
   tokens?: { output: number; context: number }
 }
 
+// Snapshot de uma sessão viva (PTY rodando neste app) para a lista global "Agents".
+// Cruza a linha do DB (id numérico/UUID, ccSessionId, repo) com o estado ao vivo
+// dos sessions/<pid>.json e o enriquecimento do JSONL (lastText/tokens).
+export interface LiveSessionInfo {
+  id: string
+  ccSessionId: string
+  name: string | null
+  title: string | null
+  status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
+  repo: Repo
+  projectName: string
+  projectIcon: string | null
+  projectColor: string | null
+  lastActivityAt: number | null
+  lastText: string | null
+  tokens?: { output: number; context: number }
+  isResumable?: boolean
+}
+
+// Batch de atualização de atividade de TODAS as sessões indexadas, emitido pelo
+// watch global. Forma enxuta (sem repo/projeto) — o renderer já tem o snapshot.
+export type GlobalActivityBatch = {
+  ccSessionId: string
+  status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
+  lastActivityAt: number | null
+  lastText?: string | null
+  tokens?: { output: number; context: number }
+}[]
+
 export type UpdateFormat = 'appimage' | 'deb'
 
 export interface GithubAsset {
@@ -299,6 +328,10 @@ export interface Api {
     watchActivity(ccSessionId: string): Promise<void>
     unwatchActivity(ccSessionId: string): Promise<void>
     onActivity(handler: (event: SessionActivity) => void): () => void
+    listLiveGlobal(): Promise<LiveSessionInfo[]>
+    watchGlobalActivity(): void
+    unwatchGlobalActivity(): void
+    onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void
   }
   shell: {
     openPath(path: string): Promise<void>

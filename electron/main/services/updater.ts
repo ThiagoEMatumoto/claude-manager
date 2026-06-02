@@ -20,8 +20,20 @@ interface GithubRelease {
   assets: GithubAsset[]
 }
 
-const isAppImage = !!process.env.APPIMAGE
-const currentFormat: UpdateFormat = isAppImage ? 'appimage' : 'deb'
+type UpdateTarget = { format: UpdateFormat; mode: 'native' | 'assisted'; ext?: string }
+
+// Deriva o alvo de atualização da plataforma corrente:
+// - native  = electron-updater faz tudo (download in-place + quitAndInstall).
+// - assisted = baixa o instalador e abre; o usuário conclui manualmente.
+function resolveUpdateTarget(): UpdateTarget {
+  if (process.platform === 'win32') return { format: 'nsis', mode: 'native' }
+  if (process.platform === 'darwin') return { format: 'dmg', mode: 'assisted', ext: '.dmg' }
+  if (process.env.APPIMAGE) return { format: 'appimage', mode: 'native' }
+  return { format: 'deb', mode: 'assisted', ext: '.deb' }
+}
+
+const updateTarget = resolveUpdateTarget()
+const currentFormat: UpdateFormat = updateTarget.format
 
 let latestRelease: GithubRelease | null = null
 let lastFocusCheck = 0
@@ -70,10 +82,10 @@ async function checkForUpdate(): Promise<void> {
   }
 }
 
-async function applyDebUpdate(): Promise<void> {
-  const asset = latestRelease?.assets.find((a) => a.name.endsWith('.deb'))
+async function applyAssistedUpdate(ext: string): Promise<void> {
+  const asset = latestRelease?.assets.find((a) => a.name.endsWith(ext))
   if (!asset) {
-    broadcast({ state: 'error', message: 'Nenhum instalador .deb encontrado na release.' })
+    broadcast({ state: 'error', message: 'Nenhum instalador encontrado na release.' })
     return
   }
 
@@ -130,15 +142,15 @@ export function initUpdater(): void {
     broadcast({ state: 'error', message: err.message })
   })
 
-  // Roteia por formato: AppImage delega ao electron-updater (download + quitAndInstall);
-  // .deb (ou outro) baixa manualmente e abre o instalador gráfico, pois o electron-updater
-  // não suporta auto-install de .deb.
+  // Roteia por modo: native (nsis/appimage) delega ao electron-updater (download +
+  // quitAndInstall); assisted (deb/dmg) baixa manualmente e abre o instalador gráfico,
+  // pois o electron-updater não suporta auto-install desses formatos.
   ipcMain.handle('updates:apply', async () => {
-    if (isAppImage) {
+    if (updateTarget.mode === 'native') {
       void autoUpdater.checkForUpdates()
       return
     }
-    await applyDebUpdate()
+    await applyAssistedUpdate(updateTarget.ext ?? '')
   })
 
   ipcMain.handle('updates:install', () => {

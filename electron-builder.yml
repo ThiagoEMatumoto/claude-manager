@@ -29,3 +29,15 @@ linux:
   category: Development
   maintainer: thiagoeijimatumoto@gmail.com
   icon: build/icons
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  identity: null
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false

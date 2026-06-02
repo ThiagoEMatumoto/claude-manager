@@ -9,8 +9,32 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --notes "Automated draft for $TAG. Review the Linux, macOS and Windows artifacts before publishing." \
+            || true
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, args: '--linux AppImage deb' }
+          - { os: macos-latest, args: '--mac dmg zip' }
+          - { os: windows-latest, args: '--win nsis' }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +51,6 @@ jobs:
       - run: npm run build
 
       - name: Build and publish
-        run: npx electron-builder --linux AppImage deb --publish always
+        run: npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

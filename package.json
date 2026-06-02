@@ -6,6 +6,7 @@
   "type": "module",
   "author": "Thiago Matumoto",
   "license": "MIT",
+  "homepage": "https://github.com/ThiagoEMatumoto/claude-manager",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -18,7 +19,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "dist": "npm run rebuild:native && electron-vite build && electron-builder",
     "dist:linux": "npm run rebuild:native && electron-vite build && electron-builder --linux AppImage deb",
+    "dist:mac": "npm run rebuild:native && electron-vite build && electron-builder --mac dmg zip",
+    "dist:win": "npm run rebuild:native && electron-vite build && electron-builder --win nsis",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"

@@ -1,4 +1,4 @@
-import { spawn, IPty } from '@homebridge/node-pty-prebuilt-multiarch'
+import { spawn, IPty } from 'node-pty'
 import { EventEmitter } from 'node:events'
 import { existsSync, statSync } from 'node:fs'
 

@@ -40,7 +40,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          # Pinned to 22 (not lts/*, which drifted to Node 24): node-pty-prebuilt-multiarch
+          # v0.14.0 has no win32 prebuild for Node 24 (ABI v137 -> 404 -> source build fails on
+          # Windows), and fix-pty-prebuilds.mjs bridges ABI 127 (Node 22) -> 128 (Electron 32).
+          node-version: '22'
           cache: npm
 
       - run: npm ci

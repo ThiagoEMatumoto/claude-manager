@@ -34,7 +34,13 @@ export function UpdateToast() {
       }}
     >
       <Icon
-        as={status.state === 'downloaded' || status.state === 'awaiting-install' ? RefreshCw : Download}
+        as={
+          status.state === 'downloaded' ||
+          status.state === 'awaiting-install' ||
+          status.state === 'installed'
+            ? RefreshCw
+            : Download
+        }
         className="shrink-0 text-[var(--color-accent)]"
       />
       <div className="flex-1">
@@ -61,6 +67,15 @@ export function UpdateToast() {
           style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
         >
           Reiniciar e instalar
+        </button>
+      )}
+      {status.state === 'installed' && (
+        <button
+          onClick={() => void updatesApi.install()}
+          className="shrink-0 rounded px-2 py-1 text-xs font-medium"
+          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+        >
+          Reiniciar agora
         </button>
       )}
       {status.state === 'error' && (
@@ -92,6 +107,10 @@ function renderBody(status: UpdateStatus) {
       return <span>baixando atualização… ({status.percent}%)</span>
     case 'downloaded':
       return <span>atualização v{status.version} pronta</span>
+    case 'installing':
+      return <span>instalando atualização v{status.version}…</span>
+    case 'installed':
+      return <span>atualização v{status.version} instalada — reinicie pra concluir.</span>
     case 'awaiting-install':
       return <span>instalador aberto — conclua a instalação e reabra o app.</span>
     case 'error':

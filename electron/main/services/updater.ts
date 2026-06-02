@@ -1,12 +1,17 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { createWriteStream } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { createWriteStream, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
+import { promisify } from 'node:util'
 import electronUpdater from 'electron-updater'
 import type { GithubAsset, UpdateFormat, UpdateStatus } from '../../../shared/types/ipc'
 import { notify } from './notifications'
 
 const { autoUpdater } = electronUpdater
+const execFileAsync = promisify(execFile)
+
+const PKEXEC_PATH = '/usr/bin/pkexec'
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 const FOCUS_THROTTLE_MS = 60 * 1000
@@ -37,6 +42,9 @@ const currentFormat: UpdateFormat = updateTarget.format
 
 let latestRelease: GithubRelease | null = null
 let lastFocusCheck = 0
+// Sinaliza que um .deb foi instalado in-place via pkexec e o 'updates:install'
+// deve fazer relaunch+quit (em vez do quitAndInstall do electron-updater).
+let debInstalled = false
 
 function broadcast(status: UpdateStatus): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -119,10 +127,35 @@ async function applyAssistedUpdate(ext: string): Promise<void> {
     })
 
     const version = latestRelease?.tag_name.replace(/^v/, '') ?? app.getVersion()
+
+    if (currentFormat === 'deb' && existsSync(PKEXEC_PATH)) {
+      await installDebWithPkexec(destPath, version)
+      return
+    }
+
     await shell.openPath(destPath)
     broadcast({ state: 'awaiting-install', version })
   } catch (err) {
     broadcast({ state: 'error', message: err instanceof Error ? err.message : 'Erro ao baixar.' })
+  }
+}
+
+// Instala o .deb in-place via prompt gráfico de senha do polkit. `apt-get install`
+// com caminho absoluto resolve dependências e faz upgrade. Em qualquer falha
+// (usuário cancela o prompt, exit≠0) cai no fallback de abrir o arquivo.
+async function installDebWithPkexec(destPath: string, version: string): Promise<void> {
+  broadcast({ state: 'installing', version })
+  try {
+    await execFileAsync(PKEXEC_PATH, ['apt-get', 'install', '-y', destPath], {
+      timeout: 5 * 60 * 1000,
+    })
+    debInstalled = true
+    broadcast({ state: 'installed', version })
+  } catch {
+    // pkexec rejeita por cancelamento do prompt (exit 126/127) ou erro do apt-get.
+    // Degrada pro comportamento atual: abre o .deb pra instalação manual.
+    await shell.openPath(destPath)
+    broadcast({ state: 'awaiting-install', version })
   }
 }
 
@@ -154,6 +187,12 @@ export function initUpdater(): void {
   })
 
   ipcMain.handle('updates:install', () => {
+    // deb já foi instalado in-place via pkexec: só relança o app na versão nova.
+    if (debInstalled) {
+      app.relaunch()
+      app.quit()
+      return
+    }
     autoUpdater.quitAndInstall()
   })
 

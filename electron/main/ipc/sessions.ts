@@ -1,8 +1,11 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { statSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
+import { get as getFeature } from '../services/feature-store'
+import { featureMemory, extractKeySections } from '../services/feature-memory'
 import {
   sessionActivityService,
   findTranscriptPath,
@@ -85,6 +88,32 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
+// Escreve um arquivo temporário com o contexto da feature pra injeção via
+// --append-system-prompt-file. Retorna o path, ou null se a feature não existe.
+// O doc é mantido automaticamente pelo claude-manager → instruímos a sessão a
+// NÃO editar o doc manualmente.
+function writeFeatureContextFile(featureId: string): string | null {
+  const feature = getFeature(featureId)
+  if (!feature) return null
+  const sections = extractKeySections(feature.body ?? '')
+  const header = [
+    `Esta sessão trabalha na feature «${feature.title}».`,
+    'O claude-manager mantém este documento automaticamente — NÃO edite o doc manualmente; apenas trabalhe.',
+    '',
+    `Status atual: ${feature.status}`,
+    feature.objective ? `Objetivo: ${feature.objective}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const content = sections ? `${header}\n\n${sections}\n` : `${header}\n`
+
+  const tmpDir = join(app.getPath('userData'), 'tmp')
+  mkdirSync(tmpDir, { recursive: true })
+  const tmpPath = join(tmpDir, `feat-${feature.id}-${Date.now()}.md`)
+  writeFileSync(tmpPath, content, 'utf8')
+  return tmpPath
+}
+
 // Cria o registro em `sessions`, dispara o PTY com o innerCmd dado e devolve o Session.
 // Spawn novo e resume diferem só no innerCmd (--session-id <novo> vs --resume <existente>).
 function startSession(opts: {
@@ -92,6 +121,7 @@ function startSession(opts: {
   repoId: string
   cwd: string
   innerCmd: string
+  featureId?: string | null
   cols?: number
   rows?: number
 }): Session {
@@ -109,8 +139,8 @@ function startSession(opts: {
   }
   db.prepare(
     `INSERT INTO sessions
-     (id, repo_id, cc_session_id, title, pane_id, status, started_at, ended_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, repo_id, cc_session_id, title, pane_id, status, started_at, ended_at, feature_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.id,
     row.repo_id,
@@ -120,6 +150,7 @@ function startSession(opts: {
     row.status,
     row.started_at,
     row.ended_at,
+    opts.featureId ?? null,
   )
 
   try {
@@ -149,12 +180,32 @@ export function registerSessionIpc(): void {
   if (!listenersAttached) {
     ptyManager.on('data', (e) => broadcast('pty:data', e))
     ptyManager.on('exit', (e) => {
-      getDb()
-        .prepare(
-          "UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'",
-        )
-        .run(e.exitCode === 0 ? 'exited' : 'crashed', Date.now(), e.sessionId)
+      const db = getDb()
+      db.prepare(
+        "UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'",
+      ).run(e.exitCode === 0 ? 'exited' : 'crashed', Date.now(), e.sessionId)
       broadcast('pty:exit', e)
+
+      // Fase 8: sempre dispara o serviço de memória no exit. Ele resolve a feature
+      // (manual > por-branch > fuzzy > auto-cria), persiste sessions.feature_id e
+      // sintetiza — com guarda de atividade própria. featureId null => auto-resolver.
+      try {
+        const link = db
+          .prepare('SELECT feature_id, cc_session_id, repo_id FROM sessions WHERE id = ?')
+          .get(e.sessionId) as
+          | { feature_id: string | null; cc_session_id: string | null; repo_id: string }
+          | undefined
+        if (link) {
+          featureMemory.onSessionExit({
+            sessionId: e.sessionId,
+            ccSessionId: link.cc_session_id,
+            repoId: link.repo_id,
+            featureId: link.feature_id,
+          })
+        }
+      } catch (err) {
+        console.error('[sessions] feature synth trigger failed:', err)
+      }
     })
     listenersAttached = true
   }
@@ -171,13 +222,28 @@ export function registerSessionIpc(): void {
 
     if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
     const claudeCmd = resolveClaudeCommand()
-    const innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
+    let innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
+
+    // Fase 6: se a sessão é vinculada a uma feature, escreve um arquivo temporário
+    // com o contexto (frontmatter-derivado + seções-chave do doc) e anexa via
+    // --append-system-prompt-file. NÃO bloqueia o spawn se algo falhar.
+    if (input.featureId) {
+      try {
+        const promptPath = writeFeatureContextFile(input.featureId)
+        if (promptPath) {
+          innerCmd += ` --append-system-prompt-file ${shquote(promptPath)}`
+        }
+      } catch (err) {
+        console.error('[sessions] feature context injection failed:', err)
+      }
+    }
 
     return startSession({
       ccSessionId: sessionId,
       repoId: input.repoId,
       cwd: repo.path,
       innerCmd,
+      featureId: input.featureId,
       cols: input.cols,
       rows: input.rows,
     })

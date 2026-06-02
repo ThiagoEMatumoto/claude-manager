@@ -13,6 +13,9 @@ import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import { registerMetricsIpc } from './ipc/metrics'
+import { registerFeaturesIpc } from './ipc/features'
+import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
+import { featureMemory } from './services/feature-memory'
 import {
   registerWorkspaceIpc,
   markWorkspaceRunning,
@@ -87,11 +90,13 @@ app.whenReady().then(() => {
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()
   registerMetricsIpc()
+  registerFeaturesIpc()
   registerWindowIpc()
 
   createMainWindow()
   initUpdater()
   startUsageMonitor()
+  startFeatureWatcher()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
@@ -100,6 +105,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   stopUsageMonitor()
+  stopFeatureWatcher()
+  featureMemory.close()
   ptyManager.killAll()
   sessionActivityService.closeAll()
   getDb()

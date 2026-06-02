@@ -17,6 +17,11 @@ import type {
   NotificationEvent,
   MetricsWindow,
   MetricsScanProgress,
+  Feature,
+  CreateFeatureInput,
+  UpdateFeatureInput,
+  SetFeatureReposInput,
+  FeatureSynthError,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -127,6 +132,16 @@ const api: Api = {
     get: (window: MetricsWindow) => invoke('metrics:get', window),
     refresh: () => invoke('metrics:refresh'),
     onProgress: (handler) => subscribe<MetricsScanProgress>('metrics:progress', handler),
+  },
+  features: {
+    list: (projectId?: string) => invoke('features:list', projectId),
+    get: (id: string) => invoke('features:get', id),
+    create: (input: CreateFeatureInput) => invoke('features:create', input),
+    update: (input: UpdateFeatureInput) => invoke('features:update', input),
+    archive: (id: string) => invoke('features:archive', id),
+    setRepos: (input: SetFeatureReposInput) => invoke('features:set-repos', input),
+    onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
+    onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

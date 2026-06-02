@@ -69,8 +69,80 @@ export interface UpdateRepoInput {
 export interface SpawnSessionInput {
   repoId: string
   name?: string
+  featureId?: string
   cols?: number
   rows?: number
+}
+
+export type FeatureStatus = 'pending' | 'in-progress' | 'blocked' | 'done' | 'paused'
+export type FeatureSynthMode = 'auto' | 'manual' | 'threshold'
+
+export interface FeatureRepoLink {
+  repoId: string
+  branch: string | null
+  worktreePath: string | null
+}
+
+// Índice (campos do frontmatter) + o corpo Markdown. O `.md` é a fonte de
+// verdade do corpo; o SQLite re-deriva os campos do frontmatter via watcher.
+export interface Feature {
+  id: string
+  projectId: string
+  slug: string
+  title: string
+  status: FeatureStatus
+  objective: string | null
+  docPath: string
+  synthMode: FeatureSynthMode
+  model: string | null
+  repos: FeatureRepoLink[]
+  createdAt: number
+  updatedAt: number
+  completedAt: number | null
+  archivedAt: number | null
+  // Corpo Markdown do `.md` (sem o frontmatter). Preenchido em `get`; ausente em `list`.
+  body?: string
+}
+
+export interface CreateFeatureInput {
+  projectId: string
+  title: string
+  objective?: string | null
+  status?: FeatureStatus
+  synthMode?: FeatureSynthMode
+  model?: string | null
+  repos?: FeatureRepoLink[]
+  // Seções iniciais do corpo (preenchem o esqueleto de headings).
+  overview?: string
+  businessRules?: string
+  approach?: string
+}
+
+export interface UpdateFeatureInput {
+  id: string
+  title?: string
+  status?: FeatureStatus
+  objective?: string | null
+  synthMode?: FeatureSynthMode
+  model?: string | null
+}
+
+export interface SetFeatureReposInput {
+  id: string
+  repos: FeatureRepoLink[]
+}
+
+export interface FeatureGroup {
+  projectId: string
+  features: Feature[]
+}
+
+// Emitido quando a síntese autônoma (fase 8) falha (timeout, exit≠0, output
+// inválido). O `.md` não é tocado nesse caso; o evento só informa a UI.
+export interface FeatureSynthError {
+  featureId: string
+  message: string
+  at: number
 }
 
 export interface ResumeSessionInput {
@@ -466,6 +538,16 @@ export interface Api {
     get(window: MetricsWindow): Promise<MetricsSnapshot>
     refresh(): Promise<MetricsSnapshot>
     onProgress(handler: (p: MetricsScanProgress) => void): () => void
+  }
+  features: {
+    list(projectId?: string): Promise<Feature[]>
+    get(id: string): Promise<Feature | null>
+    create(input: CreateFeatureInput): Promise<Feature>
+    update(input: UpdateFeatureInput): Promise<Feature>
+    archive(id: string): Promise<void>
+    setRepos(input: SetFeatureReposInput): Promise<Feature>
+    onUpdated(handler: (feature: Feature) => void): () => void
+    onSynthError(handler: (event: FeatureSynthError) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

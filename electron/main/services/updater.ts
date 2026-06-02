@@ -1,12 +1,11 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { execFile } from 'node:child_process'
-import { createWriteStream, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, createWriteStream, existsSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import electronUpdater from 'electron-updater'
 import type { GithubAsset, UpdateFormat, UpdateStatus } from '../../../shared/types/ipc'
-import { notify } from './notifications'
 
 const { autoUpdater } = electronUpdater
 const execFileAsync = promisify(execFile)
@@ -52,6 +51,31 @@ function broadcast(status: UpdateStatus): void {
   }
 }
 
+// Append-only log persistente do fluxo de update. Sobrevive a reinícios e
+// permite diagnosticar falhas do pkexec/apt-get depois do fato (o stderr do
+// apt some quando o app fecha).
+function updaterLog(event: string, detail?: string): void {
+  try {
+    const file = join(app.getPath('userData'), 'logs', 'updater.log')
+    mkdirSync(dirname(file), { recursive: true })
+    const line = `${new Date().toISOString()} [${event}]${detail ? ` ${detail}` : ''}\n`
+    appendFileSync(file, line)
+  } catch {
+    // logging best-effort: nunca derrubar o update por falha de escrita do log.
+  }
+}
+
+// Mantém só as últimas N linhas não-vazias de uma saída (stderr do apt costuma
+// ser verboso); usado tanto pro log quanto pra mensagem amigável de erro.
+function tailLines(text: string, n: number): string {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-n)
+    .join(' ')
+}
+
 // Compara X.Y.Z numericamente. Retorna true se `latest` > `current`.
 function isNewer(latest: string, current: string): boolean {
   const a = latest.split('.').map((n) => parseInt(n, 10) || 0)
@@ -80,11 +104,10 @@ async function checkForUpdate(): Promise<void> {
     if (!isNewer(latestVersion, app.getVersion())) return
 
     latestRelease = release
+    // Só o broadcast: o UpdateToast já mostra "atualização vX disponível /
+    // Atualizar". Disparar notify aqui criava um 2º toast empilhado pro MESMO
+    // evento.
     broadcast({ state: 'available', version: latestVersion, format: currentFormat })
-    notify({
-      title: `Atualização v${latestVersion} disponível`,
-      body: 'Clique para atualizar.',
-    })
   } catch {
     // rede indisponível / API fora — silencioso, tentamos de novo no próximo ciclo.
   }
@@ -140,22 +163,59 @@ async function applyAssistedUpdate(ext: string): Promise<void> {
   }
 }
 
-// Instala o .deb in-place via prompt gráfico de senha do polkit. `apt-get install`
-// com caminho absoluto resolve dependências e faz upgrade. Em qualquer falha
-// (usuário cancela o prompt, exit≠0) cai no fallback de abrir o arquivo.
+// Instala o .deb in-place via prompt gráfico de senha do polkit.
+// `apt-get install <path>` resolve dependências e faz upgrade.
+// - `env DEBIAN_FRONTEND=noninteractive`: pkexec roda /usr/bin/env, que então
+//   exec'a o apt-get com a env setada — evita prompt de conffile (sem tty).
+// - `-o DPkg::Lock::Timeout=120`: aguarda até 120s pelo lock do dpkg em vez de
+//   falhar na hora (contenção comum com unattended-upgrades).
+// Tratamento de saída:
+// - exit 126/127 = pkexec (prompt cancelado / não autorizado) → NÃO é erro de
+//   instalação: volta pro estado disponível, sem abrir a Central.
+// - outro exit≠0 = erro do apt-get → estado de erro com as últimas linhas do
+//   stderr (mensagem amigável se for lock). Nunca abre a Central (inútil aqui).
 async function installDebWithPkexec(destPath: string, version: string): Promise<void> {
   broadcast({ state: 'installing', version })
+  updaterLog('install:start', `version=${version} path=${destPath}`)
   try {
-    await execFileAsync(PKEXEC_PATH, ['apt-get', 'install', '-y', destPath], {
-      timeout: 5 * 60 * 1000,
-    })
+    await execFileAsync(
+      PKEXEC_PATH,
+      [
+        'env',
+        'DEBIAN_FRONTEND=noninteractive',
+        'apt-get',
+        '-o',
+        'DPkg::Lock::Timeout=120',
+        'install',
+        '-y',
+        destPath,
+      ],
+      { timeout: 5 * 60 * 1000 },
+    )
     debInstalled = true
+    updaterLog('install:success', `version=${version}`)
     broadcast({ state: 'installed', version })
-  } catch {
-    // pkexec rejeita por cancelamento do prompt (exit 126/127) ou erro do apt-get.
-    // Degrada pro comportamento atual: abre o .deb pra instalação manual.
-    await shell.openPath(destPath)
-    broadcast({ state: 'awaiting-install', version })
+  } catch (err) {
+    const e = err as { code?: number | string; stdout?: string; stderr?: string }
+    const stderr = e.stderr ?? ''
+    const stdout = e.stdout ?? ''
+    const code = e.code
+
+    // pkexec: 126 = não autorizado / dismissed, 127 = autenticação cancelada.
+    if (code === 126 || code === 127) {
+      updaterLog('install:cancelled', `code=${code}`)
+      broadcast({ state: 'available', version, format: currentFormat })
+      return
+    }
+
+    const tail = tailLines(stderr || stdout, 4)
+    updaterLog('install:error', `code=${code} stderr=${tail}`)
+
+    const message = /could not get lock|dpkg.*lock|lock-frontend/i.test(stderr)
+      ? 'Não foi possível instalar agora: o gerenciador de pacotes está ocupado (atualizações automáticas). Tente novamente em instantes.'
+      : tail || 'Falha ao instalar o pacote.'
+
+    broadcast({ state: 'error', message })
   }
 }
 
@@ -197,6 +257,8 @@ export function initUpdater(): void {
   })
 
   ipcMain.handle('updates:open-release', () => shell.openExternal(RELEASE_PAGE))
+
+  ipcMain.handle('updates:open-downloads', () => shell.openPath(app.getPath('downloads')))
 
   void checkForUpdate()
   setInterval(() => void checkForUpdate(), CHECK_INTERVAL_MS)

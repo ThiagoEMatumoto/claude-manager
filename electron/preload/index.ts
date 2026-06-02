@@ -126,6 +126,7 @@ const api: Api = {
     apply: () => invoke('updates:apply'),
     install: () => invoke('updates:install'),
     openRelease: () => invoke('updates:open-release'),
+    openDownloads: () => invoke('updates:open-downloads'),
   },
   usage: {
     get: () => invoke('usage:get'),

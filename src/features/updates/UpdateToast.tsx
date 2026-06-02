@@ -26,7 +26,7 @@ export function UpdateToast() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex max-w-xs items-center gap-3 rounded-lg border px-3 py-2 text-sm shadow-lg"
+      className="pointer-events-auto flex max-w-xs items-center gap-3 rounded-lg border px-3 py-2 text-sm shadow-lg"
       style={{
         borderColor: 'var(--color-border)',
         background: 'var(--color-bg-elevated, var(--color-surface))',
@@ -79,13 +79,22 @@ export function UpdateToast() {
         </button>
       )}
       {status.state === 'error' && (
-        <button
-          onClick={() => void updatesApi.openRelease()}
-          className="shrink-0 rounded px-2 py-1 text-xs font-medium"
-          style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
-        >
-          Abrir release
-        </button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <button
+            onClick={() => void updatesApi.apply()}
+            className="rounded px-2 py-1 text-xs font-medium"
+            style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+          >
+            Tentar novamente
+          </button>
+          <button
+            onClick={() => void updatesApi.openDownloads()}
+            className="text-[11px] underline"
+            style={{ color: 'var(--color-text-dim)' }}
+          >
+            Abrir pasta do download
+          </button>
+        </div>
       )}
       <button
         onClick={() => setDismissed(true)}

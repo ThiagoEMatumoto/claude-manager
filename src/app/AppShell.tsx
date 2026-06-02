@@ -540,8 +540,10 @@ export function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <SessionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
-      <UpdateToast />
-      <NotificationToast />
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+        <UpdateToast />
+        <NotificationToast />
+      </div>
     </div>
   )
 }

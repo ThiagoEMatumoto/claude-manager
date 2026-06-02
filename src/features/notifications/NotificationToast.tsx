@@ -23,7 +23,7 @@ export function NotificationToast() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex max-w-xs items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-lg"
+      className="pointer-events-auto flex max-w-xs items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-lg"
       style={{
         borderColor: 'var(--color-border)',
         background: 'var(--color-bg-elevated, var(--color-surface))',

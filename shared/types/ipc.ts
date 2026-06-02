@@ -545,6 +545,7 @@ export interface Api {
     apply(): Promise<void>
     install(): Promise<void>
     openRelease(): Promise<void>
+    openDownloads(): Promise<void>
   }
   usage: {
     get(): Promise<UsageStatus>

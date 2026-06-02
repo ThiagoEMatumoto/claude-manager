@@ -241,6 +241,10 @@ export type UpdateStatus =
   | { state: 'available'; version: string; format?: UpdateFormat }
   | { state: 'downloading'; percent: number }
   | { state: 'downloaded'; version: string }
+  // deb: instalação silenciosa via pkexec apt-get em andamento.
+  | { state: 'installing'; version: string }
+  // deb: instalado in-place; só falta relaunch.
+  | { state: 'installed'; version: string }
   | { state: 'awaiting-install'; version: string }
   | { state: 'error'; message: string }
 

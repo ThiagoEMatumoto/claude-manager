@@ -16,6 +16,8 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
+import { SessionStrip } from '@/features/session-switcher/SessionStrip'
+import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
@@ -34,6 +36,7 @@ function requestOpenSettings() {
 function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
   const closePane = useAppStore((s) => s.closePane)
   const openSession = useAppStore((s) => s.openSession)
+  const endSession = useAppStore((s) => s.endSession)
   // Busca a pane no store pelo id do painel (= paneId). Após api.fromJSON do
   // restore, os params serializados no JSON podem estar stale (session/repo são
   // recriados pelo resume), então a fonte da verdade é sempre o store. Fallback
@@ -54,7 +57,8 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       onClose={() => closePane(pane.paneId)}
       onTitleChange={(t) => props.api.setTitle(t)}
       onReopen={() => {
-        closePane(pane.paneId)
+        // closePane não mata mais; kill explícito evita vazar a PTY antiga.
+        endSession(pane.session.id)
         void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
       }}
       onOpenSettings={requestOpenSettings}
@@ -96,8 +100,15 @@ export function AppShell() {
   const retryRestore = useAppStore((s) => s.retryRestore)
   const pendingLayout = useAppStore((s) => s.pendingLayout)
   const clearPendingLayout = useAppStore((s) => s.clearPendingLayout)
+  const focusPaneId = useAppStore((s) => s.focusPaneId)
+  const clearFocusPane = useAppStore((s) => s.clearFocusPane)
+  const gridRequest = useAppStore((s) => s.gridRequest)
+  const clearGridRequest = useAppStore((s) => s.clearGridRequest)
+  const startLiveWatch = useAppStore((s) => s.startLiveWatch)
+  const stopLiveWatch = useAppStore((s) => s.stopLiveWatch)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -240,7 +251,9 @@ export function AppShell() {
     // estão voltando do resume. Após o fromJSON, pendingLayout é limpo e este
     // effect roda de novo — aí os painéis já existem com os ids certos e ele só
     // atualiza params (não duplica).
-    if (pendingLayout || applyingLayout.current) return
+    // gridRequest pendente: o effect de grade é o dono dos painéis (recria em
+    // grade). Não reconciliamos aqui pra não criar no arranjo padrão antes.
+    if (pendingLayout || gridRequest || applyingLayout.current) return
 
     const storeIds = new Set(panes.map((p) => p.paneId))
 
@@ -277,7 +290,76 @@ export function AppShell() {
       })
       nextPosition.current = undefined
     }
-  }, [panes, ready, pendingLayout])
+  }, [panes, ready, pendingLayout, gridRequest])
+
+  // Foca um painel existente quando a lista de sessões pede (clique simples). Roda
+  // após a reconciliação garantir que o painel existe.
+  useEffect(() => {
+    if (!focusPaneId) return
+    const api = apiRef.current
+    if (!api) return
+    const panel = api.getPanel(focusPaneId)
+    if (panel) {
+      panel.api.setActive()
+      panel.focus()
+      clearFocusPane()
+    }
+  }, [focusPaneId, panes, ready, clearFocusPane])
+
+  // Monta a grade imperativa pedida pela multi-seleção ("abrir N em grade"). Espera
+  // todas as panes selecionadas existirem no store; respeita applyingLayout (não
+  // briga com o fromJSON do restore). Remove os painéis fora da seleção e recria os
+  // selecionados em linhas×colunas balanceadas (cols = ceil(sqrt(N))).
+  useEffect(() => {
+    if (!gridRequest || gridRequest.length === 0) return
+    if (applyingLayout.current) return
+    const api = apiRef.current
+    if (!api) return
+    const storeIds = new Set(panes.map((p) => p.paneId))
+    if (!gridRequest.every((id) => storeIds.has(id))) return
+
+    const ids = gridRequest
+    const cols = Math.ceil(Math.sqrt(ids.length))
+    applyingLayout.current = true
+    try {
+      // Limpa todos os painéis atuais; recria só os selecionados em grade.
+      for (const panel of api.panels) {
+        removingFromStore.current.add(panel.id)
+        api.removePanel(panel)
+      }
+      // Mapa linha→primeiro paneId da linha (referência para o split vertical).
+      const rowAnchors: string[] = []
+      ids.forEach((id, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        const pane = panes.find((p) => p.paneId === id)
+        if (!pane) return
+        let position: Parameters<DockviewApi['addPanel']>[0]['position']
+        if (i === 0) {
+          position = undefined
+        } else if (col === 0) {
+          // Início de uma nova linha: split abaixo da âncora da linha anterior.
+          position = { referencePanel: rowAnchors[row - 1], direction: 'below' }
+        } else {
+          // Próxima coluna na mesma linha: split à direita da anterior.
+          position = { referencePanel: ids[i - 1], direction: 'right' }
+        }
+        if (col === 0) rowAnchors[row] = id
+        api.addPanel<PaneParams>({
+          id,
+          component: 'terminal',
+          tabComponent: 'terminal',
+          title: paneTabTitle(pane),
+          params: { pane },
+          position,
+        })
+      })
+    } finally {
+      applyingLayout.current = false
+      clearGridRequest()
+      restoreDone.current = true
+    }
+  }, [gridRequest, panes, ready, clearGridRequest])
 
   // Command palette: Ctrl+K (Cmd+K no mac). preventDefault antes do xterm processar
   // — o attachCustomKeyEventHandler do Terminal só intercepta copy/paste e devolve
@@ -288,6 +370,13 @@ export function AppShell() {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setPaletteOpen((v) => !v)
+        return
+      }
+      // Ctrl+Shift+A: abre o seletor de sessões (overlay). Não troca de área —
+      // o split/xterm continuam montados por trás.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        setSwitcherOpen(true)
       }
     }
     window.addEventListener('keydown', onKey, true)
@@ -302,6 +391,13 @@ export function AppShell() {
     return () => window.removeEventListener('cm:open-settings', onOpen)
   }, [])
 
+  // Dono único da assinatura de sessões vivas (strip + overlay só leem). Snapshot
+  // + stream global no mount; cleanup no unmount (StrictMode-safe no store).
+  useEffect(() => {
+    void startLiveWatch()
+    return () => stopLiveWatch()
+  }, [startLiveWatch, stopLiveWatch])
+
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes
   // combos nunca colidem com o que o claude precisa receber. preventDefault evita
@@ -310,6 +406,39 @@ export function AppShell() {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.metaKey || e.altKey) return
       const api = apiRef.current
+
+      // Ctrl+Tab / Ctrl+Shift+Tab: cicla o foco entre os panes abertos (dockview),
+      // com wrap-around. Se o Electron capturar o Tab antes, o fallback Ctrl+1..9
+      // abaixo cobre a ciclagem direta.
+      if (e.key === 'Tab') {
+        const panels = api?.panels ?? []
+        if (panels.length > 0) {
+          e.preventDefault()
+          const activeId = api?.activePanel?.id
+          const idx = panels.findIndex((p) => p.id === activeId)
+          const base = idx < 0 ? 0 : idx
+          const next = e.shiftKey
+            ? (base - 1 + panels.length) % panels.length
+            : (base + 1) % panels.length
+          const target = panels[next]
+          target.api.setActive()
+          target.focus()
+        }
+        return
+      }
+
+      // Ctrl+1..9: foca o n-ésimo pane diretamente (fallback caso Ctrl+Tab seja
+      // interceptado pelo SO/Electron).
+      if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
+        const panels = api?.panels ?? []
+        const target = panels[Number(e.key) - 1]
+        if (target) {
+          e.preventDefault()
+          target.api.setActive()
+          target.focus()
+        }
+        return
+      }
 
       // Ctrl+W: fecha o painel ativo.
       if (e.key === 'w' && !e.shiftKey) {
@@ -384,6 +513,7 @@ export function AppShell() {
             </button>
           </div>
         )}
+        <SessionStrip onOpenSwitcher={() => setSwitcherOpen(true)} />
         <div className="relative min-h-0 flex-1">
           {panes.length === 0 && <EmptyMain />}
           <DockviewReact
@@ -403,6 +533,7 @@ export function AppShell() {
         onClose={() => setPaletteOpen(false)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+      <SessionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
       <UpdateToast />
       <NotificationToast />
     </div>

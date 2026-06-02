@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
-import type { PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
+import type { LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
 export type Area = 'projects' | 'cc-configs'
 
@@ -20,6 +20,12 @@ let restoreStarted = false
 // Reserva síncrona de ccSessionIds em resume — fecha a corrida entre o check de
 // duplicata e o `await` do spawn (duas chamadas concorrentes passariam o check).
 const resuming = new Set<string>()
+
+// Dono único da assinatura do stream global de atividade (strip + overlay leem o
+// mesmo `liveSessions`). `offGlobalActivity` guarda o unsubscribe do onGlobalActivity;
+// `liveWatchStarted` guarda contra o duplo-mount do StrictMode.
+let offGlobalActivity: (() => void) | null = null
+let liveWatchStarted = false
 
 // Persiste um snapshot enxuto (suficiente pra resume sem lookups), com debounce
 // pra não gravar a cada teclada de spawn/close em sequência.
@@ -85,20 +91,57 @@ async function restoreFromSnapshots(
   await Promise.all(Array.from({ length: Math.min(limit, snapshots.length) }, worker))
 }
 
+// Reconstrói uma ActivePane a partir de uma sessão LIVE da lista global. Como o
+// item vem de runningIds() (PTY viva no main), abrir = RE-ATTACH: criamos a pane
+// apontando pro session.id existente e o Terminal replica o backlog. NÃO fazemos
+// spawn/resume — isso criaria um segundo processo claude pra mesma conversa.
+function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane {
+  return {
+    paneId,
+    session: {
+      id: item.id,
+      repoId: item.repo.id,
+      ccSessionId: item.ccSessionId,
+      title: item.title ?? item.name,
+      paneId,
+      status: 'running',
+      startedAt: item.lastActivityAt ?? Date.now(),
+      endedAt: null,
+    },
+    repo: item.repo,
+    projectName: item.projectName,
+    projectIcon: item.projectIcon,
+    projectColor: item.projectColor,
+  }
+}
+
 interface AppState {
   area: Area
   activeProjectId: string | null
   panes: ActivePane[]
+  // Todas as sessões vivas (PTYs no main), atualizadas pelo stream global. Dono
+  // único da assinatura — strip e overlay só leem. Snapshot via listLiveGlobal,
+  // merge incremental via onGlobalActivity, refetch nas mutações de pane.
+  liveSessions: LiveSessionInfo[]
   restoreBlocked: boolean
   // Layout do dockview a aplicar (api.fromJSON) UMA vez, após as panes do restore
   // existirem no store. O AppShell consome e chama clearPendingLayout.
   pendingLayout: string | null
+  // Pedido de foco num painel existente (clique simples na lista de sessões). O
+  // AppShell consome (api.getPanel(id)?.focus()) e chama clearFocusPane.
+  focusPaneId: string | null
+  // Pedido de montagem de grade imperativa (multi-seleção "abrir N em grade"). O
+  // AppShell consome quando todas as panes listadas existem, monta linhas×colunas
+  // via addPanel e chama clearGridRequest. paneIds na ordem desejada da grade.
+  gridRequest: string[] | null
 
   setArea: (area: Area) => void
   initActiveProject: () => Promise<void>
   restoreWorkspace: () => Promise<void>
   retryRestore: () => Promise<void>
   clearPendingLayout: () => void
+  clearFocusPane: () => void
+  clearGridRequest: () => void
   setActiveProject: (id: string | null) => void
   openSession: (
     repo: Repo,
@@ -116,14 +159,32 @@ interface AppState {
     paneId?: string,
   ) => Promise<void>
   closePane: (paneId: string) => void
+  // Kill EXPLÍCITO: mata a PTY e remove a pane correspondente da view (se houver).
+  endSession: (sessionId: string) => void
+  // Clique simples na lista: foca a pane se já exibida; senão resume/abre (sem
+  // destruir as panes existentes) e vai pra área de projetos.
+  focusOrOpenSession: (item: LiveSessionInfo) => Promise<void>
+  // Multi-seleção: garante as N selecionadas em panes, substitui a view por
+  // exatamente essas N e monta a grade (via gridRequest), indo pra projetos.
+  openSessionsInGrid: (items: LiveSessionInfo[]) => Promise<void>
+  // Assina (snapshot + stream) e desassina o conjunto de sessões vivas. Chamados
+  // uma vez no mount/unmount do AppShell.
+  startLiveWatch: () => Promise<void>
+  stopLiveWatch: () => void
+  // Re-busca o snapshot de sessões vivas (entrada/saída de sessão). Preserva o
+  // status mais fresco já recebido pelo stream pra entradas que persistem.
+  refreshLiveSessions: () => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
   area: 'projects',
   activeProjectId: null,
   panes: [],
+  liveSessions: [],
   restoreBlocked: false,
   pendingLayout: null,
+  focusPaneId: null,
+  gridRequest: null,
 
   setArea: (area) => set({ area }),
 
@@ -165,6 +226,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearPendingLayout: () => set({ pendingLayout: null }),
+  clearFocusPane: () => set({ focusPaneId: null }),
+  clearGridRequest: () => set({ gridRequest: null }),
 
   setActiveProject: (id) => {
     set({ activeProjectId: id })
@@ -189,6 +252,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ],
     }))
     schedulePersist(get().panes)
+    void get().refreshLiveSessions()
   },
 
   resumeSession: async (repo, projectName, projectIcon, projectColor, ccSessionId, paneId) => {
@@ -213,15 +277,118 @@ export const useAppStore = create<AppState>((set, get) => ({
         ],
       }))
       schedulePersist(get().panes)
+      void get().refreshLiveSessions()
     } finally {
       resuming.delete(ccSessionId)
     }
   },
 
+  // Detach, NÃO mata: só tira da view + persiste. A PTY sobrevive no main
+  // (background). Kill explícito é endSession.
   closePane: (paneId) => {
-    const pane = get().panes.find((p) => p.paneId === paneId)
-    if (pane) void sessionsApi.kill(pane.session.id)
     set((s) => ({ panes: s.panes.filter((p) => p.paneId !== paneId) }))
     schedulePersist(get().panes)
+    void get().refreshLiveSessions()
+  },
+
+  endSession: (sessionId) => {
+    void sessionsApi.kill(sessionId)
+    set((s) => ({ panes: s.panes.filter((p) => p.session.id !== sessionId) }))
+    schedulePersist(get().panes)
+    void get().refreshLiveSessions()
+  },
+
+  focusOrOpenSession: async (item) => {
+    const existing = get().panes.find((p) => p.session.ccSessionId === item.ccSessionId)
+    if (existing) {
+      set({ focusPaneId: existing.paneId, area: 'projects' })
+      return
+    }
+    // Item da lista é sempre LIVE — re-attacha à PTY existente (sem segundo claude).
+    const paneId = `pane-${Date.now()}`
+    const pane = paneFromLiveSession(item, paneId)
+    set((s) => ({ panes: [...s.panes, pane], area: 'projects', focusPaneId: paneId }))
+    schedulePersist(get().panes)
+    void get().refreshLiveSessions()
+  },
+
+  openSessionsInGrid: async (items) => {
+    // Items são sempre LIVE (runningIds). Reusa a pane se já exibida; senão
+    // re-attacha à PTY viva. Substitui a view por exatamente as N selecionadas
+    // (as não-selecionadas saem da view; PTY segue viva no main). gridRequest
+    // dispara o arranjo em grade no AppShell. Date.now() é fixo no tick, então
+    // desambiguamos o paneId com item.id (UUID único da sessão).
+    const current = get().panes
+    const wanted: ActivePane[] = items.map(
+      (item) =>
+        current.find((p) => p.session.ccSessionId === item.ccSessionId) ??
+        paneFromLiveSession(item, `pane-${Date.now()}-${item.id}`),
+    )
+    set({
+      panes: wanted,
+      area: 'projects',
+      gridRequest: wanted.map((p) => p.paneId),
+    })
+    schedulePersist(get().panes)
+    void get().refreshLiveSessions()
+  },
+
+  startLiveWatch: async () => {
+    // StrictMode monta o effect 2x; só uma assinatura real (a outra é no-op).
+    if (liveWatchStarted) return
+    liveWatchStarted = true
+    const list = await sessionsApi.listLiveGlobal()
+    set({ liveSessions: list })
+    sessionsApi.watchGlobalActivity()
+    offGlobalActivity = sessionsApi.onGlobalActivity((batch) => {
+      // Merge incremental por ccSessionId: atualiza só entradas existentes,
+      // ignora ids desconhecidos (o snapshot/refetch é quem adiciona/remove).
+      const byId = new Map(batch.map((b) => [b.ccSessionId, b]))
+      set((s) => ({
+        liveSessions: s.liveSessions.map((sess) => {
+          const u = byId.get(sess.ccSessionId)
+          if (!u) return sess
+          return {
+            ...sess,
+            status: u.status,
+            lastActivityAt: u.lastActivityAt,
+            lastText: u.lastText !== undefined ? u.lastText : sess.lastText,
+            tokens: u.tokens ?? sess.tokens,
+          }
+        }),
+      }))
+    })
+  },
+
+  stopLiveWatch: () => {
+    if (offGlobalActivity) {
+      offGlobalActivity()
+      offGlobalActivity = null
+    }
+    sessionsApi.unwatchGlobalActivity()
+    liveWatchStarted = false
+    set({ liveSessions: [] })
+  },
+
+  refreshLiveSessions: async () => {
+    // Só refetcha se o watch está ativo (evita popular fora do ciclo de vida).
+    if (!liveWatchStarted) return
+    const list = await sessionsApi.listLiveGlobal()
+    // Preserva o status/atividade mais fresco do stream pras entradas que já
+    // existiam — o snapshot pode estar atrás de um broadcast recente.
+    const prev = new Map(get().liveSessions.map((s) => [s.ccSessionId, s]))
+    set({
+      liveSessions: list.map((sess) => {
+        const p = prev.get(sess.ccSessionId)
+        if (!p) return sess
+        return {
+          ...sess,
+          status: p.status,
+          lastActivityAt: p.lastActivityAt ?? sess.lastActivityAt,
+          lastText: p.lastText ?? sess.lastText,
+          tokens: p.tokens ?? sess.tokens,
+        }
+      }),
+    })
   },
 }))

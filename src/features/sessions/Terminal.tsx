@@ -12,6 +12,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
+import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
@@ -82,7 +83,8 @@ export function Terminal({
   onReopen,
   onOpenSettings,
 }: Props) {
-  const { exited, exitCode, error, write, kill, resize, setDataHandler } = useSession(session.id)
+  const { exited, exitCode, error, write, resize, setDataHandler } = useSession(session.id)
+  const endSession = useAppStore((s) => s.endSession)
   const hostRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -394,12 +396,12 @@ export function Terminal({
           )}
           <button
             type="button"
-            onClick={kill}
+            onClick={() => endSession(session.id)}
             disabled={exited}
             title="Encerrar o processo (claude) nesta sessão"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] disabled:opacity-40"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
           >
-            kill
+            Encerrar
           </button>
           <button
             type="button"

@@ -12,7 +12,7 @@ import {
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
-import type { SessionActivity } from '../../../shared/types/ipc'
+import type { SessionActivity, GlobalActivityBatch } from '../../../shared/types/ipc'
 import { notifyUsageConsumption } from './usage-monitor'
 import { getNotifPrefs, getMainWindow, notify } from './notifications'
 
@@ -120,7 +120,7 @@ export function findTranscriptPath(ccSessionId: string): string | null {
 // milhares de linhas e reparsear tudo a cada mudança seria custoso. A primeira linha
 // do tail pode estar partida (cortada no meio) ou em escrita parcial — o parser ignora
 // linhas que não desserializam.
-function readTail(path: string): Promise<string> {
+export function readTail(path: string): Promise<string> {
   return new Promise((resolve) => {
     openCb(path, 'r', (errOpen, fd) => {
       if (errOpen) return resolve('')
@@ -200,7 +200,7 @@ interface TranscriptEnrichment {
 
 // Enriquecimento secundário: lastText, tokens e aiTitle (fallback do name).
 // Status e updatedAt vêm da fonte primária (sessions/<pid>.json).
-function deriveEnrichment(tail: string): TranscriptEnrichment {
+export function deriveEnrichment(tail: string): TranscriptEnrichment {
   const lines = tail.split('\n')
   const parsed: TranscriptLine[] = []
   for (const line of lines) {
@@ -252,6 +252,8 @@ class SessionActivityService extends EventEmitter {
   // sessionId -> último status efetivo, pra detectar a transição busy→não-busy
   // (fim de consumo) e disparar o fetch de usage só na borda, não a cada tick.
   private lastEffectiveStatus = new Map<string, SessionActivity['status']>()
+  // Modo global: a lista "Agents" assina o stream de TODAS as sessões indexadas.
+  private globalWatch = false
   private dirWatcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
 
@@ -269,18 +271,42 @@ class SessionActivityService extends EventEmitter {
 
   unwatch(ccSessionId: string): void {
     this.watched.delete(ccSessionId)
-    if (this.watched.size === 0 && this.dirWatcher) {
+    this.maybeCloseDirWatcher()
+  }
+
+  // Modo global: espelha o padrão watch/unwatch per-ccSessionId, mas observa
+  // TODAS as sessões indexadas. Reusa o mesmo dirWatcher/debounce.
+  watchGlobal(): void {
+    if (this.globalWatch) return
+    this.globalWatch = true
+    this.ensureDirWatcher()
+    // Snapshot inicial imediato (índice já pode estar populado).
+    this.rebuildIndex()
+    this.broadcastGlobal()
+  }
+
+  unwatchGlobal(): void {
+    this.globalWatch = false
+    this.maybeCloseDirWatcher()
+  }
+
+  // Fecha o dirWatcher só quando nada mais o usa (nenhum watch per-session e
+  // nenhum watch global).
+  private maybeCloseDirWatcher(): void {
+    if (this.watched.size > 0 || this.globalWatch) return
+    if (this.dirWatcher) {
       void this.dirWatcher.close()
       this.dirWatcher = null
-      if (this.timer) {
-        clearTimeout(this.timer)
-        this.timer = null
-      }
+    }
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
     }
   }
 
   closeAll(): void {
     for (const id of [...this.watched.keys()]) this.unwatch(id)
+    this.unwatchGlobal()
   }
 
   private ensureDirWatcher(): void {
@@ -308,6 +334,35 @@ class SessionActivityService extends EventEmitter {
     this.rebuildIndex()
     this.detectConsumption()
     for (const id of this.watched.keys()) void this.emitFor(id)
+    if (this.globalWatch) this.broadcastGlobal()
+  }
+
+  // Emite o batch global com TODAS as sessões indexadas. lastText/tokens vêm do
+  // tail do JSONL (mesma derivação do emitFor), sob demanda por sessão.
+  private async broadcastGlobal(): Promise<void> {
+    const batch: GlobalActivityBatch = []
+    for (const [ccSessionId, entry] of this.index) {
+      const status = this.effectiveStatus(entry)
+      let lastText: string | null = null
+      let tokens: SessionActivity['tokens']
+      const transcriptPath = findTranscriptPath(ccSessionId)
+      if (transcriptPath) {
+        const tail = await readTail(transcriptPath)
+        if (tail) {
+          const enrichment = deriveEnrichment(tail)
+          lastText = enrichment.lastText
+          tokens = enrichment.tokens
+        }
+      }
+      batch.push({
+        ccSessionId,
+        status,
+        lastActivityAt: entry.updatedAt,
+        lastText,
+        tokens,
+      })
+    }
+    broadcast('session:activity:global', batch)
   }
 
   // Status efetivo de uma entry do índice (mesma regra do emitFor, sem o

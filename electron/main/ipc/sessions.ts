@@ -8,6 +8,8 @@ import {
   findTranscriptPath,
   buildSessionsFileIndex,
   readTranscriptTitle,
+  readTail,
+  deriveEnrichment,
   isPidAlive,
   mapStatus,
 } from '../services/session-activity'
@@ -16,6 +18,9 @@ import type {
   SpawnSessionInput,
   ResumeSessionInput,
   SessionSummary,
+  LiveSessionInfo,
+  Repo,
+  LinkKind,
 } from '../../../shared/types/ipc'
 
 interface SessionRow {
@@ -254,6 +259,113 @@ export function registerSessionIpc(): void {
     return summaries
   })
 
+  ipcMain.handle('sessions:list-live-global', async (): Promise<LiveSessionInfo[]> => {
+    const db = getDb()
+    const liveIndex = buildSessionsFileIndex()
+    const out: LiveSessionInfo[] = []
+
+    // runningIds() = sessions.id (UUID) das PTYs vivas neste app. Para cada uma,
+    // JOIN sessions→repos→projects (mesmo padrão de columns de projects.ts).
+    for (const sessionId of ptyManager.runningIds()) {
+      const row = db
+        .prepare(
+          `SELECT
+             s.cc_session_id AS cc_session_id,
+             s.title AS session_title,
+             r.id AS repo_id, r.project_id AS repo_project_id, r.label AS repo_label,
+             r.path AS repo_path, r.role AS repo_role, r.link_kind AS repo_link_kind,
+             r.source AS repo_source, r.position AS repo_position, r.created_at AS repo_created_at,
+             p.name AS project_name, p.icon AS project_icon, p.color AS project_color
+           FROM sessions s
+           JOIN repos r ON r.id = s.repo_id
+           JOIN projects p ON p.id = r.project_id
+           WHERE s.id = ? AND s.cc_session_id IS NOT NULL`,
+        )
+        .get(sessionId) as
+        | {
+            cc_session_id: string
+            session_title: string | null
+            repo_id: string
+            repo_project_id: string
+            repo_label: string
+            repo_path: string
+            repo_role: string | null
+            repo_link_kind: string
+            repo_source: string | null
+            repo_position: number
+            repo_created_at: number
+            project_name: string
+            project_icon: string | null
+            project_color: string | null
+          }
+        | undefined
+
+      if (!row) continue
+      const ccSessionId = row.cc_session_id
+
+      const repo: Repo = {
+        id: row.repo_id,
+        projectId: row.repo_project_id,
+        label: row.repo_label,
+        path: row.repo_path,
+        role: row.repo_role,
+        linkKind: row.repo_link_kind as LinkKind,
+        source: row.repo_source,
+        position: row.repo_position,
+        createdAt: row.repo_created_at,
+      }
+
+      const transcript = findTranscriptPath(ccSessionId)
+      const indexed = liveIndex.get(ccSessionId)
+      const isLive = !!indexed && isPidAlive(indexed.pid)
+
+      let status: LiveSessionInfo['status']
+      let name: string | null
+      let lastActivityAt: number | null
+      if (isLive) {
+        status = mapStatus(indexed!.status)
+        name = indexed!.name ?? (transcript ? readTranscriptTitle(transcript) : null) ?? row.session_title
+        lastActivityAt = indexed!.updatedAt
+      } else {
+        status = 'ended'
+        name = (transcript ? readTranscriptTitle(transcript) : null) ?? row.session_title
+        lastActivityAt = null
+      }
+
+      let title: string | null = null
+      let lastText: string | null = null
+      let tokens: LiveSessionInfo['tokens']
+      if (transcript) {
+        const tail = await readTail(transcript)
+        if (tail) {
+          const enrichment = deriveEnrichment(tail)
+          title = enrichment.title
+          lastText = enrichment.lastText
+          tokens = enrichment.tokens
+        }
+      }
+
+      out.push({
+        id: sessionId,
+        ccSessionId,
+        name,
+        title,
+        status,
+        repo,
+        projectName: row.project_name,
+        projectIcon: row.project_icon,
+        projectColor: row.project_color,
+        lastActivityAt,
+        lastText,
+        tokens,
+        isResumable: transcript !== null,
+      })
+    }
+
+    out.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+    return out
+  })
+
   ipcMain.handle('sessions:get-backlog', (_e, sessionId: string) => {
     return ptyManager.getBacklog(sessionId)
   })
@@ -295,5 +407,13 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('session:activity:unwatch', (_e, ccSessionId: string) => {
     sessionActivityService.unwatch(ccSessionId)
+  })
+
+  ipcMain.handle('session:activity:watch-global', () => {
+    sessionActivityService.watchGlobal()
+  })
+
+  ipcMain.handle('session:activity:unwatch-global', () => {
+    sessionActivityService.unwatchGlobal()
   })
 }

@@ -10,6 +10,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   SessionActivity,
+  GlobalActivityBatch,
   PaneSnapshot,
   UpdateStatus,
   UsageStatus,
@@ -55,6 +56,15 @@ const api: Api = {
     watchActivity: (ccSessionId) => invoke('session:activity:watch', ccSessionId),
     unwatchActivity: (ccSessionId) => invoke('session:activity:unwatch', ccSessionId),
     onActivity: (handler) => subscribe<SessionActivity>('session:activity', handler),
+    listLiveGlobal: () => invoke('sessions:list-live-global'),
+    watchGlobalActivity: () => {
+      void invoke('session:activity:watch-global')
+    },
+    unwatchGlobalActivity: () => {
+      void invoke('session:activity:unwatch-global')
+    },
+    onGlobalActivity: (handler) =>
+      subscribe<GlobalActivityBatch>('session:activity:global', handler),
   },
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),

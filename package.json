@@ -17,7 +17,8 @@
     "dev": "electron-vite dev -- --no-sandbox",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist:linux": "electron-vite build && electron-builder --linux AppImage deb",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "dist:linux": "npm run rebuild:native && electron-vite build && electron-builder --linux AppImage deb",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
@@ -47,6 +48,7 @@
     "@tailwindcss/oxide-win32-x64-msvc": "^4.0.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "@tailwindcss/vite": "^4.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.16.0",

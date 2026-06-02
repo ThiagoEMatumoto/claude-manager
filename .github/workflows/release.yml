@@ -21,6 +21,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Rebuild native modules against Electron ABI
+        run: npm run rebuild:native
+
       - run: npm run build
 
       - name: Build and publish

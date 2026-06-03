@@ -1,8 +1,15 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { execFile } from 'node:child_process'
-import { appendFileSync, createWriteStream, existsSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
-import { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import electronUpdater from 'electron-updater'
 import type { GithubAsset, UpdateFormat, UpdateStatus } from '../../../shared/types/ipc'
@@ -113,6 +120,66 @@ async function checkForUpdate(): Promise<void> {
   }
 }
 
+// Baixa o asset inteiro em memória e grava de forma atômica em disco. Usamos
+// arrayBuffer (98MB cabe folgado) em vez de stream `on('data')`+`pipe` porque o
+// esquema anterior produzia o arquivo com TAMANHO correto mas BYTES corrompidos
+// (consumir os dados em dois caminhos — o listener de progresso e o pipe — abria
+// margem pra corrupção). arrayBuffer entrega os bytes exatos da resposta.
+async function downloadAssetToFile(url: string, destPath: string): Promise<void> {
+  const res = await fetch(url, { headers: { 'User-Agent': 'claude-manager' } })
+  if (!res.ok) throw new Error(`download falhou: HTTP ${res.status}`)
+  // Progresso indeterminado: o download é uma compra única em memória.
+  broadcast({ state: 'downloading', percent: 0 })
+  const buf = Buffer.from(await res.arrayBuffer())
+  writeFileSync(destPath, buf)
+  broadcast({ state: 'downloading', percent: 100 })
+}
+
+// sha512 do arquivo em base64 — mesmo formato do `latest-linux.yml` (electron-updater).
+function sha512Base64(filePath: string): string {
+  return createHash('sha512').update(readFileSync(filePath)).digest('base64')
+}
+
+// Lê o sha512 esperado do manifest `latest-linux.yml` da release. O manifest é um
+// YAML plano (files: [{ url, sha512, size }]); fazemos parse via regex em vez de
+// depender de uma lib de YAML transitiva. Retorna null se o manifest ou a entrada
+// do .deb não forem encontrados (nesse caso seguimos sem verificação — fail-open
+// só na AUSÊNCIA do dado, nunca no mismatch).
+async function fetchExpectedSha512(debName: string): Promise<string | null> {
+  const manifest = latestRelease?.assets.find((a) => a.name === 'latest-linux.yml')
+  if (!manifest) return null
+  try {
+    const res = await fetch(manifest.browser_download_url, {
+      headers: { 'User-Agent': 'claude-manager' },
+    })
+    if (!res.ok) return null
+    const text = await res.text()
+    return parseSha512FromManifest(text, debName)
+  } catch {
+    return null
+  }
+}
+
+// Extrai o sha512 do arquivo cujo `url` bate com `debName`. O bloco no yml é:
+//   - url: claude-manager_0.6.4_amd64.deb
+//     sha512: <base64>
+//     size: 97957504
+export function parseSha512FromManifest(yml: string, debName: string): string | null {
+  const lines = yml.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const urlMatch = lines[i].match(/url:\s*(\S+)/)
+    if (!urlMatch || urlMatch[1] !== debName) continue
+    // sha512 costuma vir na linha seguinte, mas varremos algumas pra robustez.
+    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+      // Para no próximo item da lista pra não pegar o sha512 de outro arquivo.
+      if (/^\s*-\s/.test(lines[j])) break
+      const shaMatch = lines[j].match(/sha512:\s*(\S+)/)
+      if (shaMatch) return shaMatch[1]
+    }
+  }
+  return null
+}
+
 async function applyAssistedUpdate(ext: string): Promise<void> {
   const asset = latestRelease?.assets.find((a) => a.name.endsWith(ext))
   if (!asset) {
@@ -121,35 +188,55 @@ async function applyAssistedUpdate(ext: string): Promise<void> {
   }
 
   try {
-    const res = await fetch(asset.browser_download_url, {
-      headers: { 'User-Agent': 'claude-manager' },
-    })
-    if (!res.ok || !res.body) {
-      broadcast({ state: 'error', message: 'Falha ao baixar o instalador.' })
-      return
+    const destPath = join(app.getPath('downloads'), asset.name)
+    const version = latestRelease?.tag_name.replace(/^v/, '') ?? app.getVersion()
+    const verifyChecksum = currentFormat === 'deb'
+
+    const expected = verifyChecksum ? await fetchExpectedSha512(asset.name) : null
+    if (verifyChecksum && !expected) {
+      // Sem manifest/sha512 disponível: seguimos (não bloqueia em release antiga
+      // sem latest-linux.yml), mas registramos pra diagnóstico.
+      updaterLog('verify:skip', `no sha512 for ${asset.name} in latest-linux.yml`)
     }
 
-    const total = Number(res.headers.get('content-length')) || 0
-    const destPath = join(app.getPath('downloads'), asset.name)
-    const out = createWriteStream(destPath)
-    let received = 0
+    // Tenta baixar (e, se houver sha512 esperado, verificar). Em mismatch,
+    // re-baixa 1 vez. NUNCA instala um arquivo que falha no checksum.
+    let verified = false
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await downloadAssetToFile(asset.browser_download_url, destPath)
 
-    const body = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0])
-    body.on('data', (chunk: Buffer) => {
-      received += chunk.length
-      if (total > 0) {
-        broadcast({ state: 'downloading', percent: Math.round((received / total) * 100) })
+      if (!expected) {
+        verified = true
+        break
       }
-    })
 
-    await new Promise<void>((resolve, reject) => {
-      body.pipe(out)
-      out.on('finish', resolve)
-      out.on('error', reject)
-      body.on('error', reject)
-    })
+      const actual = sha512Base64(destPath)
+      if (actual === expected) {
+        updaterLog('verify:ok', `${asset.name} attempt=${attempt}`)
+        verified = true
+        break
+      }
 
-    const version = latestRelease?.tag_name.replace(/^v/, '') ?? app.getVersion()
+      updaterLog(
+        'verify:mismatch',
+        `${asset.name} attempt=${attempt} expected=${expected} actual=${actual}`,
+      )
+      // Remove o arquivo corrompido antes de re-tentar / desistir.
+      try {
+        rmSync(destPath, { force: true })
+      } catch {
+        // best-effort.
+      }
+    }
+
+    if (!verified) {
+      updaterLog('verify:failed', `${asset.name} download corrompido após 2 tentativas`)
+      broadcast({
+        state: 'error',
+        message: 'Download corrompido (checksum não confere). Tente novamente.',
+      })
+      return
+    }
 
     if (currentFormat === 'deb' && existsSync(PKEXEC_PATH)) {
       await installDebWithPkexec(destPath, version)
@@ -209,7 +296,12 @@ async function installDebWithPkexec(destPath: string, version: string): Promise<
     }
 
     const tail = tailLines(stderr || stdout, 4)
-    updaterLog('install:error', `code=${code} stderr=${tail}`)
+    // O erro real do dpkg/lzma costuma sair no STDOUT do apt-get (não no stderr).
+    // Logamos os dois pra diagnosticar corrupção de pacote depois do fato.
+    updaterLog(
+      'install:error',
+      `code=${code} stdout=${tailLines(stdout, 6)} stderr=${tailLines(stderr, 6)}`,
+    )
 
     const message = /could not get lock|dpkg.*lock|lock-frontend/i.test(stderr)
       ? 'Não foi possível instalar agora: o gerenciador de pacotes está ocupado (atualizações automáticas). Tente novamente em instantes.'

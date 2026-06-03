@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, ChevronRight, Circle, Clock, Loader, Moon, X, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -151,6 +151,11 @@ export function Terminal({
 
   // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
   const displayTitle = activity?.name ?? title ?? repoLabel
+  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
+  // título aparece após o '·' no breadcrumb — evita repetir a pasta (Projeto · Repo).
+  // Prefixo do projeto só agrega quando difere do título exibido — senão repetiria a
+  // pasta (ex.: "claude-manager · claude-manager" em projeto de repo único).
+  const showProjectBreadcrumb = projectName != null && projectName !== displayTitle
 
   // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
   // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
@@ -405,16 +410,16 @@ export function Terminal({
         style={projectColor ? { borderLeftColor: projectColor } : undefined}
       >
         <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {projectName && (
-              <span className="flex items-center gap-1 text-[var(--color-text-dim)]">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: projectColor ?? 'var(--color-border)' }}
-                />
+              <span className="flex shrink-0 items-center gap-1.5 text-[var(--color-text-dim)]">
                 <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>
-                <span>{projectName}</span>
-                <Icon as={ChevronRight} size={12} className="text-[var(--color-border)]" />
+                {showProjectBreadcrumb && (
+                  <>
+                    <span className="max-w-32 truncate">{projectName}</span>
+                    <span className="text-[var(--color-border)]">·</span>
+                  </>
+                )}
               </span>
             )}
             {editing ? (
@@ -503,21 +508,20 @@ export function Terminal({
           )}
           <button
             type="button"
-            onClick={() => endSession(session.id)}
-            disabled={exited}
-            title="Encerrar o processo (claude) nesta sessão"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
+            onClick={onClose}
+            title="Minimizar — mantém a sessão rodando em background, acessível no strip de sessões"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
           >
-            Encerrar
+            Minimizar
           </button>
           <button
             type="button"
-            onClick={onClose}
-            title="Fechar a pane"
-            aria-label="Fechar a pane"
-            className="flex items-center rounded border border-[var(--color-border)] px-2 py-0.5 leading-none hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)]"
+            onClick={() => endSession(session.id)}
+            disabled={exited}
+            title="Encerrar o processo claude e fechar a sessão (some do strip)"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
           >
-            <Icon as={X} size={14} />
+            Encerrar
           </button>
         </div>
       </div>

@@ -1,7 +1,21 @@
 import { useState } from 'react'
-import { ArrowUpRight, FolderInput, Link2, MoreHorizontal } from 'lucide-react'
+import { ArrowUpRight, FolderInput, GripVertical, Link2, MoreHorizontal } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { EditRepoDialog } from './EditRepoDialog'
@@ -22,8 +36,17 @@ const LINK_BADGE: Record<LinkKind, { icon: ComponentType<LucideProps>; title: st
 }
 
 export function ProjectRepos({ project }: Props) {
-  const { repos, create, update, remove } = useRepos(project.id)
+  const { repos, create, update, remove, reorder } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      void reorder(String(active.id), String(over.id))
+    }
+  }
 
   return (
     <div className="border-l border-[var(--color-border)]/50 bg-[var(--color-bg)]/40 pl-4">
@@ -40,11 +63,21 @@ export function ProjectRepos({ project }: Props) {
         </div>
       ) : (
         <>
-          <ul className="flex flex-col gap-px py-1">
-            {repos.map((r) => (
-              <RepoRow key={r.id} repo={r} project={project} onUpdate={update} onRemove={remove} />
-            ))}
-          </ul>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={repos.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+              <ul className="flex flex-col gap-px py-1">
+                {repos.map((r) => (
+                  <RepoRow
+                    key={r.id}
+                    repo={r}
+                    project={project}
+                    onUpdate={update}
+                    onRemove={remove}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
 
           <button
             type="button"
@@ -78,10 +111,28 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: repo.id,
+  })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  }
 
   return (
-    <li className="text-xs">
+    <li ref={setNodeRef} style={style} className="text-xs">
       <div className="group flex items-center justify-between gap-1 px-1 py-1.5">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          title="Arrastar para reordenar"
+          className="shrink-0 cursor-grab touch-none rounded text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100 active:cursor-grabbing"
+        >
+          <Icon as={GripVertical} size={12} />
+        </button>
+
         <button
           type="button"
           onClick={() => void openSession(repo, project.name, project.icon, project.color)}

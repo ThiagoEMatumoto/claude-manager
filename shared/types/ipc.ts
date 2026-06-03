@@ -9,6 +9,7 @@ export interface Project {
   color: string | null
   icon: string | null
   vaultPath: string | null
+  position: number
   createdAt: number
   updatedAt: number
 }
@@ -64,6 +65,11 @@ export interface UpdateRepoInput {
   id: string
   label?: string
   role?: string | null
+}
+
+export interface ReorderReposInput {
+  projectId: string
+  repoIds: string[]
 }
 
 export interface SpawnSessionInput {
@@ -478,10 +484,12 @@ export interface Api {
     create(input: CreateProjectInput): Promise<Project>
     update(input: UpdateProjectInput): Promise<Project>
     delete(id: string): Promise<void>
+    reorder(ids: string[]): Promise<void>
     listRepos(projectId: string): Promise<Repo[]>
     createRepo(input: CreateRepoInput): Promise<Repo>
     updateRepo(input: UpdateRepoInput): Promise<Repo>
     deleteRepo(id: string): Promise<void>
+    reorderRepos(input: ReorderReposInput): Promise<void>
   }
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>

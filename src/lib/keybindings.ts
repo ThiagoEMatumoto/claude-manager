@@ -113,6 +113,15 @@ export const COMMANDS: Command[] = [
     editable: false,
   },
 
+  // Terminal
+  {
+    id: 'terminal.newline',
+    label: 'Nova linha (multiline)',
+    context: 'Terminal',
+    defaultCombo: { shift: true, key: 'Enter' },
+    editable: true,
+  },
+
   // Terminal (fixo, display)
   {
     id: 'terminal.copy',

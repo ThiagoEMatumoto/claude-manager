@@ -12,6 +12,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
+import { matchCombo, resolveCombo } from '@/lib/keybindings'
+import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
@@ -267,10 +269,12 @@ export function Terminal({
         return false
       }
 
-      // Multiline: Shift+Enter / Alt+Enter inserem nova linha em vez de submeter.
-      // O xterm manda `\r` puro (igual ao Enter) para ambos; o claude só quebra linha
-      // quando recebe ESC+CR (o mesmo que `/terminal-setup` configura no emulador nativo).
-      if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
+      // Multiline: combo configurável (default Shift+Enter) + Alt+Enter fixo como alternativa.
+      // O xterm manda `\r` puro (igual ao Enter); o claude só quebra linha quando recebe
+      // ESC+CR (o mesmo que `/terminal-setup` configura no emulador nativo).
+      // Lê overrides via getState() pra rebind valer sem recriar o xterm.
+      const kbOverrides = useKeybindingsStore.getState().overrides
+      if (matchCombo(e, resolveCombo('terminal.newline', kbOverrides)) || (e.key === 'Enter' && e.altKey)) {
         write('\x1b\r')
         return false
       }

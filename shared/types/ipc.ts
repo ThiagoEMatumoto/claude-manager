@@ -392,6 +392,10 @@ export interface MetricsTotals {
   costUsd: number
   // cacheRead / (cacheRead + input)
   cacheHitRate: number
+  // parallelRounds / agentRounds (0 se agentRounds==0)
+  parallelizationRatio: number
+  // agentCalls / (agentCalls + inlineExploreCalls) (0 se denom==0)
+  inlineDelegationRatio: number
 }
 
 export interface MetricsDayPoint {
@@ -444,6 +448,8 @@ export interface MetricsSnapshot {
   perSession: MetricsSessionRow[]
   perProject: MetricsProjectRow[]
   sessionTypeDistribution: MetricsTypeBucket[]
+  // distribuição de subagent_type sobre os tool_use Agent (desc por count)
+  subagentTypeDistribution: { type: string; count: number }[]
   topTools: MetricsToolRow[]
   // modelos sem preço → custo parcial (aviso na UI)
   unknownModels: string[]

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { arrayMove } from '@dnd-kit/sortable'
 import { projectsApi } from '@/lib/ipc'
 import type {
   CreateProjectInput,
@@ -46,7 +47,22 @@ export function useProjects() {
     [refresh],
   )
 
-  return { projects, loading, refresh, create, update, remove }
+  // Reordena otimisticamente (sem flicker) e persiste; o DB é a fonte de verdade
+  // no próximo refresh.
+  const reorder = useCallback(async (activeId: string, overId: string) => {
+    let nextIds: string[] = []
+    setProjects((prev) => {
+      const from = prev.findIndex((p) => p.id === activeId)
+      const to = prev.findIndex((p) => p.id === overId)
+      if (from < 0 || to < 0) return prev
+      const next = arrayMove(prev, from, to)
+      nextIds = next.map((p) => p.id)
+      return next
+    })
+    if (nextIds.length > 0) await projectsApi.reorder(nextIds)
+  }, [])
+
+  return { projects, loading, refresh, create, update, remove, reorder }
 }
 
 export function useRepos(projectId: string | null) {
@@ -92,5 +108,22 @@ export function useRepos(projectId: string | null) {
     [refresh],
   )
 
-  return { repos, loading, refresh, create, update, remove }
+  const reorder = useCallback(
+    async (activeId: string, overId: string) => {
+      if (!projectId) return
+      let nextIds: string[] = []
+      setRepos((prev) => {
+        const from = prev.findIndex((r) => r.id === activeId)
+        const to = prev.findIndex((r) => r.id === overId)
+        if (from < 0 || to < 0) return prev
+        const next = arrayMove(prev, from, to)
+        nextIds = next.map((r) => r.id)
+        return next
+      })
+      if (nextIds.length > 0) await projectsApi.reorderRepos({ projectId, repoIds: nextIds })
+    },
+    [projectId],
+  )
+
+  return { repos, loading, refresh, create, update, remove, reorder }
 }

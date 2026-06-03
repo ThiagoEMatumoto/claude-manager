@@ -43,7 +43,7 @@ export function FeatureList({
   )
 }
 
-function FeatureCard({
+export function FeatureCard({
   feature,
   reposById,
   sessions,

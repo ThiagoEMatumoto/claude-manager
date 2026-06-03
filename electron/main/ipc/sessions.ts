@@ -114,6 +114,40 @@ function writeFeatureContextFile(featureId: string): string | null {
   return tmpPath
 }
 
+// Injeta um comando inicial no REPL do claude assim que o TUI sobe. Como não há
+// sinal explícito de "pronto", esperamos o PRIMEIRO `data` do PTY daquela sessão
+// (o banner inicial) e, após um debounce curto, escrevemos `cmd + '\r'`. One-shot:
+// remove o listener antes de escrever, então nunca dispara duas vezes.
+function injectInitialCommandOnFirstData(sessionId: string, command: string): void {
+  const cmd = command.trim()
+  if (!cmd) return
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  const onData = (e: { sessionId: string }) => {
+    if (e.sessionId !== sessionId) return
+    if (timer) return // já agendado pelo primeiro data
+    timer = setTimeout(() => {
+      ptyManager.off('data', onData)
+      try {
+        ptyManager.write(sessionId, cmd + '\r')
+      } catch {
+        // PTY já encerrou antes do debounce — nada a fazer.
+      }
+    }, 400)
+  }
+
+  // Se a PTY sair antes de injetar, descarta o listener pendente.
+  const onExit = (e: { sessionId: string }) => {
+    if (e.sessionId !== sessionId) return
+    if (timer) clearTimeout(timer)
+    ptyManager.off('data', onData)
+    ptyManager.off('exit', onExit)
+  }
+
+  ptyManager.on('data', onData)
+  ptyManager.on('exit', onExit)
+}
+
 // Cria o registro em `sessions`, dispara o PTY com o innerCmd dado e devolve o Session.
 // Spawn novo e resume diferem só no innerCmd (--session-id <novo> vs --resume <existente>).
 function startSession(opts: {
@@ -122,6 +156,7 @@ function startSession(opts: {
   cwd: string
   innerCmd: string
   featureId?: string | null
+  initialCommand?: string
   cols?: number
   rows?: number
 }): Session {
@@ -169,6 +204,10 @@ function startSession(opts: {
       row.id,
     )
     throw err
+  }
+
+  if (opts.initialCommand) {
+    injectInitialCommandOnFirstData(row.id, opts.initialCommand)
   }
 
   return toSession(row)
@@ -244,6 +283,7 @@ export function registerSessionIpc(): void {
       cwd: repo.path,
       innerCmd,
       featureId: input.featureId,
+      initialCommand: input.initialCommand,
       cols: input.cols,
       rows: input.rows,
     })

@@ -118,6 +118,7 @@ const api: Api = {
   },
   ccConfigs: {
     read: () => invoke('cc:read-configs'),
+    listLauncherItems: () => invoke('cc:list-launcher-items'),
   },
   ccPlugins: {
     list: () => invoke('cc:plugins:list'),
@@ -144,6 +145,8 @@ const api: Api = {
   },
   features: {
     list: (projectId?: string) => invoke('features:list', projectId),
+    listWithStats: (opts?: { includeArchived?: boolean }) =>
+      invoke('features:list-with-stats', opts),
     get: (id: string) => invoke('features:get', id),
     create: (input: CreateFeatureInput) => invoke('features:create', input),
     update: (input: UpdateFeatureInput) => invoke('features:update', input),

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Blocks, Folder, Settings, TerminalSquare, X } from 'lucide-react'
+import { Blocks, Folder, Rocket, Settings, SlashSquare, Sparkles, TerminalSquare, X } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { projectsApi } from '@/lib/ipc'
-import type { Project, Repo } from '../../../shared/types/ipc'
+import { launcherCommandText, loadLauncherItems } from './launcher'
+import type { LauncherItem, Project, Repo } from '../../../shared/types/ipc'
 
 interface Props {
   open: boolean
@@ -19,6 +20,8 @@ interface Command {
   hint?: string
   group: string
   run: () => void
+  // Quando true, executar NÃO fecha a palette (ex.: avançar de passo no launcher).
+  keepOpen?: boolean
 }
 
 // Substring match case/acento-insensível, simples e previsível.
@@ -45,6 +48,11 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
   const [projects, setProjects] = useState<Project[]>([])
   // Repos de todos os projetos, carregados lazy quando a palette abre.
   const [reposByProject, setReposByProject] = useState<Record<string, Repo[]>>({})
+  // Modo launcher: 'root' = palette normal; 'pick-item' = escolher skill/command;
+  // 'pick-repo' = escolher o repo onde lançar o item já escolhido.
+  const [mode, setMode] = useState<'root' | 'pick-item' | 'pick-repo'>('root')
+  const [launcherItems, setLauncherItems] = useState<LauncherItem[]>([])
+  const [chosenItem, setChosenItem] = useState<LauncherItem | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -52,6 +60,8 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
     if (!open) return
     setQuery('')
     setActive(0)
+    setMode('root')
+    setChosenItem(null)
     inputRef.current?.focus()
 
     let cancelled = false
@@ -64,14 +74,73 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       )
       if (cancelled) return
       setReposByProject(Object.fromEntries(entries))
+      const items = await loadLauncherItems()
+      if (cancelled) return
+      setLauncherItems(items)
     })()
     return () => {
       cancelled = true
     }
   }, [open])
 
+  // Trocar de modo limpa a busca e reposiciona o cursor.
+  function enterMode(next: 'root' | 'pick-item' | 'pick-repo') {
+    setMode(next)
+    setQuery('')
+    setActive(0)
+    inputRef.current?.focus()
+  }
+
   const commands = useMemo<Command[]>(() => {
+    // Passo 1 do launcher: escolher a skill/command a injetar.
+    if (mode === 'pick-item') {
+      return launcherItems.map<Command>((it) => ({
+        id: `launch-item-${it.kind}-${it.origin}-${it.name}`,
+        label: it.kind === 'command' ? `/${it.name}` : it.name,
+        icon: <Icon as={it.kind === 'command' ? SlashSquare : Sparkles} />,
+        hint: it.origin === 'user' ? 'user' : it.origin,
+        group: it.kind === 'command' ? 'Comandos' : 'Skills',
+        run: () => {
+          setChosenItem(it)
+          enterMode('pick-repo')
+        },
+      }))
+    }
+
+    // Passo 2 do launcher: escolher o repo onde lançar o item já escolhido.
+    if (mode === 'pick-repo') {
+      const list: Command[] = []
+      const text = chosenItem ? launcherCommandText(chosenItem) : ''
+      for (const p of projects) {
+        for (const r of reposByProject[p.id] ?? []) {
+          list.push({
+            id: `launch-repo-${r.id}`,
+            label: `Lançar ${text} em: ${r.label}`,
+            icon: <Icon as={Rocket} />,
+            hint: p.name,
+            group: 'Lançar em',
+            run: () => {
+              if (chosenItem) {
+                void openSession(r, p.name, p.icon, p.color, undefined, undefined, undefined, text)
+              }
+            },
+          })
+        }
+      }
+      return list
+    }
+
     const list: Command[] = [
+      {
+        id: 'launcher',
+        label: 'Lançar com comando…',
+        icon: <Icon as={Rocket} />,
+        hint: 'skill ou /command',
+        group: 'Ações',
+        // Não fecha a palette: avança pro passo de escolha de item.
+        run: () => enterMode('pick-item'),
+        keepOpen: true,
+      },
       {
         id: 'area-projects',
         label: 'Ir para Projetos',
@@ -134,7 +203,18 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
     }
 
     return list
-  }, [projects, reposByProject, setArea, setActiveProject, openSession, closePane, onOpenSettings])
+  }, [
+    mode,
+    launcherItems,
+    chosenItem,
+    projects,
+    reposByProject,
+    setArea,
+    setActiveProject,
+    openSession,
+    closePane,
+    onOpenSettings,
+  ])
 
   const filtered = useMemo(
     () => commands.filter((c) => matches(query, c.label)),
@@ -156,8 +236,20 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
   function runAt(idx: number) {
     const cmd = filtered[idx]
     if (!cmd) return
-    onClose()
+    if (!cmd.keepOpen) onClose()
     cmd.run()
+  }
+
+  // Volta um passo no fluxo launcher; no modo root, fecha a palette.
+  function stepBack() {
+    if (mode === 'pick-repo') {
+      setChosenItem(null)
+      enterMode('pick-item')
+    } else if (mode === 'pick-item') {
+      enterMode('root')
+    } else {
+      onClose()
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -172,7 +264,11 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       runAt(active)
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      onClose()
+      stepBack()
+    } else if (e.key === 'Backspace' && query === '' && mode !== 'root') {
+      // Backspace com busca vazia recua o passo do launcher.
+      e.preventDefault()
+      stepBack()
     }
   }
 
@@ -201,7 +297,13 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Buscar ações, projetos, repos…"
+            placeholder={
+              mode === 'pick-item'
+                ? 'Buscar skill ou /command para lançar…'
+                : mode === 'pick-repo'
+                  ? `Escolher repo para lançar ${chosenItem ? launcherCommandText(chosenItem) : ''}…`
+                  : 'Buscar ações, projetos, repos…'
+            }
             className="w-full bg-transparent py-3 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)]"
           />
         </div>

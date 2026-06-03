@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { featuresApi } from '@/lib/ipc'
-import type { Feature } from '../../shared/types/ipc'
+import type { Feature, FeatureWithStats } from '../../shared/types/ipc'
 
 // Dono único da assinatura de onUpdated — assinada uma vez (StrictMode-safe).
 let offUpdated: (() => void) | null = null
@@ -18,6 +18,9 @@ interface FeaturesState {
   // Índice (sem corpo). A fonte da lista da sidebar/cards.
   features: Feature[]
   byProject: Record<string, Feature[]>
+  // Features com contagem de sessões (inclui arquivadas) — fonte do board.
+  withStats: FeatureWithStats[]
+  sessionCounts: Map<string, number>
   // Feature aberta no painel de doc, COM corpo (via get).
   selectedId: string | null
   selectedDoc: Feature | null
@@ -26,6 +29,7 @@ interface FeaturesState {
   error: string | null
 
   load: () => Promise<void>
+  loadStats: () => Promise<void>
   refresh: () => Promise<void>
   select: (id: string | null) => Promise<void>
   startUpdatedWatch: () => void
@@ -35,6 +39,8 @@ interface FeaturesState {
 export const useFeaturesStore = create<FeaturesState>((set, get) => ({
   features: [],
   byProject: {},
+  withStats: [],
+  sessionCounts: new Map(),
   selectedId: null,
   selectedDoc: null,
   loading: false,
@@ -46,8 +52,20 @@ export const useFeaturesStore = create<FeaturesState>((set, get) => ({
     try {
       const features = await featuresApi.list()
       set({ features, byProject: groupByProject(features), loading: false })
+      // Stats (com arquivadas) em paralelo — alimenta board e contagem de sessões.
+      void get().loadStats()
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  },
+
+  loadStats: async () => {
+    try {
+      const withStats = await featuresApi.listWithStats({ includeArchived: true })
+      const sessionCounts = new Map(withStats.map((f) => [f.id, f.sessionCount]))
+      set({ withStats, sessionCounts })
+    } catch {
+      // Stats são best-effort: a lista da sidebar continua funcionando sem eles.
     }
   },
 
@@ -89,6 +107,8 @@ export const useFeaturesStore = create<FeaturesState>((set, get) => ({
       if (get().selectedId === feature.id) {
         void get().select(feature.id)
       }
+      // Recalcula stats (contagem de sessões / coluna archived do board).
+      void get().loadStats()
     })
   },
 

@@ -113,7 +113,7 @@ export const COMMANDS: Command[] = [
     editable: false,
   },
 
-  // Terminal — zoom de fonte (editável)
+  // Terminal — zoom de fonte + nova linha (editáveis)
   {
     id: 'terminal.zoomIn',
     label: 'Aumentar fonte',
@@ -133,6 +133,13 @@ export const COMMANDS: Command[] = [
     label: 'Resetar fonte',
     context: 'Terminal',
     defaultCombo: { mod: true, key: '0' },
+    editable: true,
+  },
+  {
+    id: 'terminal.newline',
+    label: 'Nova linha (multiline)',
+    context: 'Terminal',
+    defaultCombo: { shift: true, key: 'Enter' },
     editable: true,
   },
 

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Clock } from 'lucide-react'
 import { usageApi } from '@/lib/ipc'
+import { Icon } from '@/components/ui/Icon'
 import type { UsageStatus, UsageWindow } from '../../../shared/types/ipc'
 
 function barColor(util: number): string {
@@ -53,6 +55,13 @@ function Indicator({
           style={{ width: `${util}%`, background: barColor(util) }}
         />
       </span>
+      <span
+        className="flex items-center gap-0.5 text-[10px] tabular-nums"
+        style={{ color: 'var(--color-text-dim)' }}
+      >
+        <Icon as={Clock} size={10} />
+        {formatCountdown(window.resetsAt)}
+      </span>
     </div>
   )
 }
@@ -67,6 +76,9 @@ function Note({ text }: { text: string }) {
 
 export function UsageWidget() {
   const [status, setStatus] = useState<UsageStatus | null>(null)
+  // Tick puramente pra re-renderizar e manter o countdown de reset vivo entre os
+  // polls do status (que só chegam a cada ~60s). 30s = granularidade de minutos ok.
+  const [, setTick] = useState(0)
 
   useEffect(() => {
     const unsub = usageApi.onStatus(setStatus)
@@ -74,7 +86,11 @@ export function UsageWidget() {
     // poll do main em vez de forçar fetch — forçar a cada foco estourava o rate
     // limit do endpoint.
     void usageApi.get().then(setStatus)
-    return unsub
+    const tick = setInterval(() => setTick((t) => t + 1), 30_000)
+    return () => {
+      unsub()
+      clearInterval(tick)
+    }
   }, [])
 
   if (!status) return <Note text="—" />

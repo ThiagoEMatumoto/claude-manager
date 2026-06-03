@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useMetricsStore } from '@/store/metricsStore'
 import type { MetricsWindow } from '../../../shared/types/ipc'
 import { AgentOrchestrationMetrics } from './AgentOrchestrationMetrics'
+import { PerSessionTable } from './PerSessionTable'
 import { ProjectBreakdown } from './ProjectBreakdown'
 import { SessionTypeHistogram } from './SessionTypeHistogram'
 import { TopToolsList } from './TopToolsList'
@@ -171,8 +172,13 @@ export function MetricsArea() {
             <Panel title="Orquestração de agentes">
               <AgentOrchestrationMetrics
                 totals={snapshot.totals}
+                previousTotals={snapshot.previousTotals}
                 subagentTypeDistribution={snapshot.subagentTypeDistribution}
               />
+            </Panel>
+
+            <Panel title="Sessões">
+              <PerSessionTable rows={snapshot.perSession} />
             </Panel>
 
             <Panel title="Por projeto">

@@ -49,11 +49,21 @@ interface SessionAgg {
   tools: Record<string, number>
   perDay: Record<string, PerDayBucket>
   unknownModels: Set<string>
+  agentRounds: number
+  parallelRounds: number
+  inlineExploreCalls: number
+  subagentTypeCounts: Record<string, number>
 }
+
+// Ferramentas inline de exploração (denominador do inline-delegation ratio).
+const INLINE_EXPLORE_TOOLS = ['Read', 'Grep', 'Glob', 'Bash']
 
 interface ContentItem {
   type?: string
   name?: string
+  input?: {
+    subagent_type?: string
+  }
 }
 
 interface Usage {
@@ -98,6 +108,10 @@ interface CacheRow {
   tools_json: string
   per_day_json: string
   scanned_at: number
+  agent_rounds: number
+  parallel_rounds: number
+  inline_explore_calls: number
+  subagent_type_counts_json: string
 }
 
 // Precedência exata (espelha ops-hub):
@@ -164,6 +178,10 @@ async function parseTranscript(path: string): Promise<SessionAgg> {
     tools: {},
     perDay: {},
     unknownModels: new Set(),
+    agentRounds: 0,
+    parallelRounds: 0,
+    inlineExploreCalls: 0,
+    subagentTypeCounts: {},
   }
 
   const rl = createInterface({
@@ -205,13 +223,23 @@ async function parseTranscript(path: string): Promise<SessionAgg> {
 
     // Tools + agent/skill calls a partir de content[].
     if (Array.isArray(msg.content)) {
+      // Agent tool_use desta message (para agentRounds/parallelRounds).
+      let agentInMessage = 0
       for (const item of msg.content) {
         if (item?.type !== 'tool_use' || typeof item.name !== 'string') continue
         const toolName = item.name
         agg.tools[toolName] = (agg.tools[toolName] ?? 0) + 1
-        if (toolName === 'Agent') agg.agentCalls += 1
-        else if (toolName === 'Skill') agg.skillCalls += 1
+        if (toolName === 'Agent') {
+          agg.agentCalls += 1
+          agentInMessage += 1
+          const subagentType =
+            typeof item.input?.subagent_type === 'string' ? item.input.subagent_type : 'unknown'
+          agg.subagentTypeCounts[subagentType] =
+            (agg.subagentTypeCounts[subagentType] ?? 0) + 1
+        } else if (toolName === 'Skill') agg.skillCalls += 1
       }
+      if (agentInMessage >= 1) agg.agentRounds += 1
+      if (agentInMessage >= 2) agg.parallelRounds += 1
     }
 
     // Tokens + custo a partir de usage × price table.
@@ -252,6 +280,11 @@ async function parseTranscript(path: string): Promise<SessionAgg> {
     }
   }
 
+  // Deriva inlineExploreCalls do dict de tools já acumulado.
+  for (const tool of INLINE_EXPLORE_TOOLS) {
+    agg.inlineExploreCalls += agg.tools[tool] ?? 0
+  }
+
   return agg
 }
 
@@ -273,8 +306,9 @@ export async function scan(): Promise<void> {
        (transcript_path, cc_session_id, cwd, mtime_ms, size_bytes, first_ts, last_ts,
         turns, agent_calls, skill_calls, session_type,
         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
-        models_json, tools_json, per_day_json, scanned_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        models_json, tools_json, per_day_json, scanned_at,
+        agent_rounds, parallel_rounds, inline_explore_calls, subagent_type_counts_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   let processed = 0
@@ -317,6 +351,10 @@ export async function scan(): Promise<void> {
           JSON.stringify(agg.tools),
           JSON.stringify(agg.perDay),
           Date.now(),
+          agg.agentRounds,
+          agg.parallelRounds,
+          agg.inlineExploreCalls,
+          JSON.stringify(agg.subagentTypeCounts),
         )
       } catch {
         // arquivo ilegível — pula sem derrubar o scan inteiro.
@@ -421,7 +459,14 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     cacheWriteTokens: 0,
     costUsd: 0,
     cacheHitRate: 0,
+    parallelizationRatio: 0,
+    inlineDelegationRatio: 0,
   }
+  // Acumuladores das métricas de orquestração (somados sobre as sessões da janela).
+  let totalAgentRounds = 0
+  let totalParallelRounds = 0
+  let totalInlineExploreCalls = 0
+  const subagentTypeMap = new Map<string, number>()
   const perDayMap = new Map<string, MetricsDayPoint>()
   const perSession: MetricsSessionRow[] = []
   const perProjectMap = new Map<string, MetricsProjectRow>()
@@ -502,6 +547,19 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
       // tools_json corrompido — ignora.
     }
 
+    // orquestração: rounds + inline explore + distribuição de subagent_type.
+    totalAgentRounds += row.agent_rounds
+    totalParallelRounds += row.parallel_rounds
+    totalInlineExploreCalls += row.inline_explore_calls
+    try {
+      const counts = JSON.parse(row.subagent_type_counts_json) as Record<string, number>
+      for (const [type, count] of Object.entries(counts)) {
+        subagentTypeMap.set(type, (subagentTypeMap.get(type) ?? 0) + count)
+      }
+    } catch {
+      // subagent_type_counts_json corrompido — ignora.
+    }
+
     // per_day.
     try {
       const perDay = JSON.parse(row.per_day_json) as Record<string, PerDayBucket>
@@ -523,6 +581,15 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
   const cacheBase = totals.cacheReadTokens + totals.inputTokens
   totals.cacheHitRate = cacheBase > 0 ? totals.cacheReadTokens / cacheBase : 0
 
+  totals.parallelizationRatio =
+    totalAgentRounds > 0 ? totalParallelRounds / totalAgentRounds : 0
+  const delegationBase = totals.agentCalls + totalInlineExploreCalls
+  totals.inlineDelegationRatio = delegationBase > 0 ? totals.agentCalls / delegationBase : 0
+
+  const subagentTypeDistribution = [...subagentTypeMap.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count)
+
   const perDay = [...perDayMap.values()].sort((a, b) => a.day.localeCompare(b.day))
   const perProject = [...perProjectMap.values()].sort((a, b) => b.costUsd - a.costUsd)
   const sessionTypeDistribution = [...typeMap.values()]
@@ -541,6 +608,7 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     perSession,
     perProject,
     sessionTypeDistribution,
+    subagentTypeDistribution,
     topTools,
     unknownModels: [...unknownModels],
   }

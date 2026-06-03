@@ -6,6 +6,7 @@ import * as dockLayout from './004_dock_layout'
 import * as metrics from './005_metrics'
 import * as metricsCwd from './006_metrics_cwd'
 import * as features from './007_features'
+import * as metricsOrchestration from './008_metrics_orchestration'
 
 interface Migration {
   version: number
@@ -21,6 +22,7 @@ const migrations: Migration[] = [
   metrics,
   metricsCwd,
   features,
+  metricsOrchestration,
 ]
 
 export function runMigrations(db: Database.Database): void {

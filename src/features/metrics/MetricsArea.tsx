@@ -3,6 +3,7 @@ import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMetricsStore } from '@/store/metricsStore'
 import type { MetricsWindow } from '../../../shared/types/ipc'
+import { AgentOrchestrationMetrics } from './AgentOrchestrationMetrics'
 import { ProjectBreakdown } from './ProjectBreakdown'
 import { SessionTypeHistogram } from './SessionTypeHistogram'
 import { TopToolsList } from './TopToolsList'
@@ -166,6 +167,13 @@ export function MetricsArea() {
                 <TopToolsList tools={snapshot.topTools} />
               </Panel>
             </div>
+
+            <Panel title="Orquestração de agentes">
+              <AgentOrchestrationMetrics
+                totals={snapshot.totals}
+                subagentTypeDistribution={snapshot.subagentTypeDistribution}
+              />
+            </Panel>
 
             <Panel title="Por projeto">
               <ProjectBreakdown rows={snapshot.perProject} />

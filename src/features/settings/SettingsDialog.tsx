@@ -6,7 +6,15 @@ import { Button } from '@/components/ui/Button'
 import { ColorSelect } from '@/components/ui/ColorSelect'
 import { dialogApi, prefsApi, vaultApi } from '@/lib/ipc'
 import type { NotificationPrefs } from '../../../shared/types/ipc'
-import { SHORTCUTS, type ShortcutContext } from '@/lib/shortcuts'
+import {
+  COMMANDS,
+  formatCombo,
+  resolveCombo,
+  type Combo,
+  type Command,
+  type ShortcutContext,
+} from '@/lib/keybindings'
+import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
@@ -184,32 +192,131 @@ function AppearanceTab({ open }: { open: boolean }) {
   )
 }
 
+// Igualdade de Combo pra detecção de conflito (mesma chave canônica que o matcher usa).
+function comboKey(c: Combo): string {
+  const k = c.code ? `code:${c.code}` : c.key ? `key:${c.key.toLowerCase()}` : ''
+  return `${c.mod ? 1 : 0}${c.shift ? 1 : 0}${c.alt ? 1 : 0}|${k}`
+}
+
+// Constrói um Combo a partir de um keydown (mesma lógica de prioridade do matcher:
+// Backslash vira code; o resto vira key). Retorna null para press só-de-modificador.
+function comboFromEvent(e: KeyboardEvent): Combo | null {
+  const key = e.key
+  if (key === 'Control' || key === 'Meta' || key === 'Shift' || key === 'Alt') return null
+  const combo: Combo = {}
+  if (e.ctrlKey || e.metaKey) combo.mod = true
+  if (e.shiftKey) combo.shift = true
+  if (e.altKey) combo.alt = true
+  if (e.code === 'Backslash') combo.code = 'Backslash'
+  else combo.key = key
+  return combo
+}
+
 function ShortcutsTab() {
   const contexts: ShortcutContext[] = ['Global', 'Workspace', 'Terminal']
+  const overrides = useKeybindingsStore((s) => s.overrides)
+  const setOverride = useKeybindingsStore((s) => s.setOverride)
+  const reset = useKeybindingsStore((s) => s.reset)
+
+  const [capturingId, setCapturingId] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<{ id: string; message: string } | null>(null)
+
+  // Em modo captura, escuta o próximo keydown e grava o override (ou avisa conflito).
+  useEffect(() => {
+    if (!capturingId) return
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') {
+        setCapturingId(null)
+        return
+      }
+      const combo = comboFromEvent(e)
+      if (!combo) return // só modificador: continua capturando
+      const newKey = comboKey(combo)
+      const clashing = COMMANDS.find(
+        (c) =>
+          c.editable &&
+          c.id !== capturingId &&
+          comboKey(resolveCombo(c.id, overrides)) === newKey,
+      )
+      if (clashing) {
+        setConflict({ id: capturingId, message: `Conflito com "${clashing.label}"` })
+        setCapturingId(null)
+        return
+      }
+      void setOverride(capturingId, combo)
+      setConflict(null)
+      setCapturingId(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [capturingId, overrides, setOverride])
+
+  function renderRow(cmd: Command) {
+    const combo = resolveCombo(cmd.id, overrides)
+    const hasOverride = cmd.id in overrides
+    const capturing = capturingId === cmd.id
+    return (
+      <div
+        key={cmd.id}
+        className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--color-bg)]/40"
+      >
+        <span className="min-w-0 flex-1 text-[var(--color-text)]">
+          {cmd.label}
+          {!cmd.editable && (
+            <span className="ml-2 text-xs text-[var(--color-text-dim)]">(fixo)</span>
+          )}
+          {conflict?.id === cmd.id && (
+            <span className="ml-2 text-xs text-[var(--color-danger,#ef4444)]">
+              {conflict.message}
+            </span>
+          )}
+        </span>
+        <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-dim)]">
+          {capturing ? 'Pressione…' : formatCombo(combo)}
+        </kbd>
+        {cmd.editable && (
+          <div className="flex shrink-0 gap-1">
+            <Button
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                setConflict(null)
+                setCapturingId(capturing ? null : cmd.id)
+              }}
+            >
+              {capturing ? 'Cancelar' : 'Editar'}
+            </Button>
+            {hasOverride && (
+              <Button
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  setConflict(null)
+                  void reset(cmd.id)
+                }}
+              >
+                Restaurar
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
       {contexts.map((ctx) => {
-        const items = SHORTCUTS.filter((s) => s.context === ctx)
+        const items = COMMANDS.filter((c) => c.context === ctx)
         if (items.length === 0) return null
         return (
           <div key={ctx}>
             <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
               {ctx}
             </div>
-            <div className="space-y-1">
-              {items.map((s) => (
-                <div
-                  key={s.combo + s.label}
-                  className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-[var(--color-bg)]/40"
-                >
-                  <span className="text-[var(--color-text)]">{s.label}</span>
-                  <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-dim)]">
-                    {s.combo}
-                  </kbd>
-                </div>
-              ))}
-            </div>
+            <div className="space-y-1">{items.map(renderRow)}</div>
           </div>
         )
       })}

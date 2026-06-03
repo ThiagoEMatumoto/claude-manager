@@ -25,12 +25,18 @@ const updateRepoSchema = z.object({
   role: z.string().nullable().optional(),
 })
 
+const reorderReposSchema = z.object({
+  projectId: z.string().min(1),
+  repoIds: z.array(z.string().min(1)),
+})
+
 interface ProjectRow {
   id: string
   name: string
   color: string | null
   icon: string | null
   vault_path: string | null
+  position: number
   created_at: number
   updated_at: number
 }
@@ -53,6 +59,7 @@ const toProject = (row: ProjectRow): Project => ({
   color: row.color,
   icon: row.icon,
   vaultPath: row.vault_path,
+  position: row.position,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -72,31 +79,50 @@ const toRepo = (row: RepoRow): Repo => ({
 export function registerProjectIpc(): void {
   ipcMain.handle('projects:list', () => {
     const rows = getDb()
-      .prepare('SELECT * FROM projects ORDER BY updated_at DESC')
+      .prepare('SELECT * FROM projects ORDER BY position ASC, updated_at DESC')
       .all() as ProjectRow[]
     return rows.map(toProject)
   })
 
   ipcMain.handle('projects:create', (_e, input: CreateProjectInput) => {
+    const db = getDb()
     const now = Date.now()
+    const maxPos = db
+      .prepare('SELECT COALESCE(MAX(position), -1) as max FROM projects')
+      .get() as { max: number }
     const row: ProjectRow = {
       id: randomUUID(),
       name: input.name,
       color: input.color ?? null,
       icon: input.icon ?? null,
       vault_path: input.vaultPath ?? null,
+      position: maxPos.max + 1,
       created_at: now,
       updated_at: now,
     }
     if (row.vault_path) {
       mkdirSync(row.vault_path, { recursive: true })
     }
-    getDb()
-      .prepare(
-        'INSERT INTO projects (id, name, color, icon, vault_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      )
-      .run(row.id, row.name, row.color, row.icon, row.vault_path, row.created_at, row.updated_at)
+    db.prepare(
+      'INSERT INTO projects (id, name, color, icon, vault_path, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      row.id,
+      row.name,
+      row.color,
+      row.icon,
+      row.vault_path,
+      row.position,
+      row.created_at,
+      row.updated_at,
+    )
     return toProject(row)
+  })
+
+  ipcMain.handle('projects:reorder', (_e, raw: unknown) => {
+    const ids = z.array(z.string().min(1)).parse(raw)
+    const db = getDb()
+    const setPos = db.prepare('UPDATE projects SET position = ? WHERE id = ?')
+    db.transaction(() => ids.forEach((id, i) => setPos.run(i, id)))()
   })
 
   ipcMain.handle('projects:update', (_e, raw: unknown) => {
@@ -217,5 +243,14 @@ export function registerProjectIpc(): void {
     }
 
     db.prepare('DELETE FROM repos WHERE id = ?').run(id)
+  })
+
+  ipcMain.handle('projects:repos:reorder', (_e, raw: unknown) => {
+    const input = reorderReposSchema.parse(raw)
+    const db = getDb()
+    const setPos = db.prepare(
+      'UPDATE repos SET position = ? WHERE id = ? AND project_id = ?',
+    )
+    db.transaction(() => input.repoIds.forEach((id, i) => setPos.run(i, id, input.projectId)))()
   })
 }

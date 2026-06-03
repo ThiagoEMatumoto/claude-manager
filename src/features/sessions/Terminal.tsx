@@ -14,6 +14,7 @@ import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
+import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
 interface Props {
@@ -88,6 +89,7 @@ export function Terminal({
   const hostRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const fontSize = useTerminalPrefsStore((s) => s.fontSize)
   // Heurístico de "claude não encontrado": registramos se algum byte chegou do PTY.
   // Se o processo saiu rápido com código != 0 e nunca emitiu nada, provavelmente o
   // comando não foi resolvido (ENOENT) em vez de uma sessão de verdade ter morrido.
@@ -198,7 +200,7 @@ export function Terminal({
     const term = new Xterm({
       theme: THEME,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
-      fontSize: 13,
+      fontSize: useTerminalPrefsStore.getState().fontSize,
       cursorBlink: true,
       allowProposedApi: true,
     })
@@ -306,6 +308,17 @@ export function Terminal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
+
+  // Zoom ao vivo: atualiza a fonte do xterm já montado quando o store muda, sem
+  // recriar o terminal (a criação lê o tamanho via getState()).
+  useEffect(() => {
+    const term = xtermRef.current
+    const fit = fitRef.current
+    if (!term || !fit) return
+    term.options.fontSize = fontSize
+    fit.fit()
+    resize(term.cols, term.rows)
+  }, [fontSize, resize])
 
   return (
     <div className="flex h-full flex-col">

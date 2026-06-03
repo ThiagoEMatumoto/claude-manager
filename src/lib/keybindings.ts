@@ -113,6 +113,29 @@ export const COMMANDS: Command[] = [
     editable: false,
   },
 
+  // Terminal — zoom de fonte (editável)
+  {
+    id: 'terminal.zoomIn',
+    label: 'Aumentar fonte',
+    context: 'Terminal',
+    defaultCombo: { mod: true, key: '=' },
+    editable: true,
+  },
+  {
+    id: 'terminal.zoomOut',
+    label: 'Diminuir fonte',
+    context: 'Terminal',
+    defaultCombo: { mod: true, key: '-' },
+    editable: true,
+  },
+  {
+    id: 'terminal.zoomReset',
+    label: 'Resetar fonte',
+    context: 'Terminal',
+    defaultCombo: { mod: true, key: '0' },
+    editable: true,
+  },
+
   // Terminal (fixo, display)
   {
     id: 'terminal.copy',

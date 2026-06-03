@@ -26,6 +26,7 @@ import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
+import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 
 interface PaneParams {
   pane: ActivePane
@@ -374,6 +375,7 @@ export function AppShell() {
   // Carrega os overrides de keybinding persistidos uma vez no boot.
   useEffect(() => {
     void loadKeybindings()
+    void useTerminalPrefsStore.getState().load()
   }, [loadKeybindings])
 
   useEffect(() => {
@@ -491,6 +493,24 @@ export function AppShell() {
           nextPosition.current = 'tab'
           void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
         }
+      }
+
+      // Zoom da fonte do terminal (fontSize compartilhado por todos os panes). O
+      // preventDefault evita o zoom nativo do Electron. Combos configuráveis na aba Atalhos.
+      if (matchCombo(e, resolveCombo('terminal.zoomIn', overrides))) {
+        e.preventDefault()
+        void useTerminalPrefsStore.getState().zoomIn()
+        return
+      }
+      if (matchCombo(e, resolveCombo('terminal.zoomOut', overrides))) {
+        e.preventDefault()
+        void useTerminalPrefsStore.getState().zoomOut()
+        return
+      }
+      if (matchCombo(e, resolveCombo('terminal.zoomReset', overrides))) {
+        e.preventDefault()
+        void useTerminalPrefsStore.getState().resetZoom()
+        return
       }
     }
     window.addEventListener('keydown', onKey)

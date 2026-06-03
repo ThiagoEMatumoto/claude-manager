@@ -143,6 +143,13 @@ export const COMMANDS: Command[] = [
     editable: true,
   },
   {
+    id: 'terminal.compose',
+    label: 'Compor prompt (editor)',
+    context: 'Terminal',
+    defaultCombo: { mod: true, shift: true, key: 'e' },
+    editable: true,
+  },
+  {
     id: 'terminal.search',
     label: 'Buscar no terminal',
     context: 'Terminal',

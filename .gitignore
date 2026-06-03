@@ -3,6 +3,9 @@ node_modules
 out
 dist
 release
+.cm-drive
+test-results
+playwright-report
 *.log
 *.db
 *.db-shm

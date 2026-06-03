@@ -78,7 +78,7 @@ function TerminalTab(props: IDockviewPanelHeaderProps<PaneParams>) {
   return (
     <div className="flex items-center">
       <span
-        className="ml-2 h-2 w-2 shrink-0 rounded-full"
+        className="ml-2 mr-1.5 h-2 w-2 shrink-0 rounded-full"
         style={{ background: color ?? 'var(--color-border)' }}
       />
       <DockviewDefaultTab {...props} />

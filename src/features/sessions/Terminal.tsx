@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Circle, Clock, Loader, Moon, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -153,9 +153,10 @@ export function Terminal({
   const displayTitle = activity?.name ?? title ?? repoLabel
   // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
   // título aparece após o '·' no breadcrumb — evita repetir a pasta (Projeto · Repo).
-  // Prefixo do projeto só agrega quando difere do título exibido — senão repetiria a
-  // pasta (ex.: "claude-manager · claude-manager" em projeto de repo único).
-  const showProjectBreadcrumb = projectName != null && projectName !== displayTitle
+  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
+  // título é exibido no header — a aba do dockview já mostra o nome da sessão, então
+  // sem nome custom o header mostra só o projeto + path (evita o nome repetido).
+  const isNamed = (activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel
 
   // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
   // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
@@ -412,42 +413,60 @@ export function Terminal({
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center gap-2">
             {projectName && (
-              <span className="flex shrink-0 items-center gap-1.5 text-[var(--color-text-dim)]">
+              <span className="flex shrink-0 items-center gap-1.5 font-medium text-[var(--color-text-dim)]">
                 <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>
-                {showProjectBreadcrumb && (
-                  <>
-                    <span className="max-w-32 truncate">{projectName}</span>
-                    <span className="text-[var(--color-border)]">·</span>
-                  </>
-                )}
+                <span className="max-w-40 truncate">{projectName}</span>
               </span>
             )}
             {editing ? (
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename()
-                  if (e.key === 'Escape') setEditing(false)
-                }}
-                placeholder={repoLabel}
-                className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
-              />
+              <>
+                {projectName && <span className="text-[var(--color-border)]">·</span>}
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') setEditing(false)
+                  }}
+                  placeholder={repoLabel}
+                  className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
+                />
+              </>
+            ) : isNamed || !projectName ? (
+              // Nome custom (ou sem projeto pra contextualizar): mostra o título, clicável pra renomear.
+              <>
+                {projectName && <span className="text-[var(--color-border)]">·</span>}
+                <button
+                  type="button"
+                  disabled={!canRename}
+                  onClick={() => {
+                    setDraft(activity?.name ?? title ?? '')
+                    setEditing(true)
+                  }}
+                  className="truncate font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
+                  title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
+                >
+                  {displayTitle}
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                disabled={!canRename}
-                onClick={() => {
-                  setDraft(activity?.name ?? title ?? '')
-                  setEditing(true)
-                }}
-                className="font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
-                title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
-              >
-                {displayTitle}
-              </button>
+              // Sem nome custom: a aba já mostra o nome da pasta — aqui só um lápis discreto pra nomear.
+              canRename && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft('')
+                    setEditing(true)
+                  }}
+                  className="shrink-0 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+                  title="Nomear esta sessão"
+                  aria-label="Nomear esta sessão"
+                >
+                  <Icon as={Pencil} size={12} />
+                </button>
+              )
             )}
           </div>
           <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>

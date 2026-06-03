@@ -34,8 +34,15 @@ export function captureLogs(app: ElectronApplication, page: Page): LogCapture {
   const write = (tag: string, msg: string) =>
     stream.write(`[${new Date().toISOString()}] ${tag} ${msg}\n`)
 
+  // Header garante que o arquivo nunca fica vazio (prova de que a captura rodou)
+  // e marca o início pra correlacionar com os screenshots.
+  write('capture', 'started')
+
   page.on('console', (m) => write(`console.${m.type()}`, m.text()))
-  page.on('pageerror', (e) => write('pageerror', e.message))
+  page.on('pageerror', (e) => write('pageerror', e.stack ?? e.message))
+  page.on('requestfailed', (r) =>
+    write('requestfailed', `${r.failure()?.errorText ?? '?'} ${r.url()}`),
+  )
 
   const proc = app.process()
   proc.stdout?.on('data', (d) => write('main.stdout', String(d).trimEnd()))

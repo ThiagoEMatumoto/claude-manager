@@ -65,6 +65,10 @@ function activityStatusView(status: SessionActivity['status'] | undefined): Stat
   }
 }
 
+// Colar conteúdo multilinha manda vários `\r` ⇒ o claude auto-submete cada linha
+// (footgun). Conteúdo grande/multilinha passa por uma confirmação antes de colar.
+const needsPasteConfirm = (t: string) => t.includes('\n') || t.length > 200
+
 function formatRelative(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
   if (s < 60) return `há ${s}s`
@@ -109,6 +113,7 @@ export function Terminal({
   const [now, setNow] = useState(() => Date.now())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [pastePreview, setPastePreview] = useState<string | null>(null)
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -171,7 +176,9 @@ export function Terminal({
 
   async function paste() {
     const text = await navigator.clipboard.readText()
-    if (text) write(text)
+    if (!text) return
+    if (needsPasteConfirm(text)) setPastePreview(text)
+    else xtermRef.current?.paste(text) // respeita bracketed-paste, não auto-submete
   }
 
   function commitRename() {
@@ -198,6 +205,19 @@ export function Terminal({
       window.removeEventListener('keydown', onKey)
     }
   }, [menu])
+
+  // Esc cancela a confirmação de colagem.
+  useEffect(() => {
+    if (pastePreview == null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPastePreview(null)
+        xtermRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pastePreview])
 
   useEffect(() => {
     const host = hostRef.current
@@ -313,6 +333,18 @@ export function Terminal({
     }
     host.addEventListener('contextmenu', onContextMenu)
 
+    // Intercepta o paste nativo (Ctrl+V) em captura: conteúdo grande/multilinha
+    // abre a confirmação em vez de colar direto; o resto cola nativamente (já bracketed).
+    const onPaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text') ?? ''
+      if (text && needsPasteConfirm(text)) {
+        e.preventDefault()
+        e.stopPropagation()
+        setPastePreview(text)
+      }
+    }
+    host.addEventListener('paste', onPaste, true)
+
     const observer = new ResizeObserver(() => {
       if (!xtermRef.current || !fitRef.current) return
       fitRef.current.fit()
@@ -324,6 +356,7 @@ export function Terminal({
     // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
       host.removeEventListener('contextmenu', onContextMenu)
+      host.removeEventListener('paste', onPaste, true)
       observer.disconnect()
       setDataHandler(null)
       term.dispose()
@@ -565,6 +598,48 @@ export function Terminal({
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {pastePreview != null && (
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex max-h-full w-full max-w-md flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4 text-xs shadow-2xl">
+              <div className="font-medium text-[var(--color-text)]">
+                Colar {pastePreview.split('\n').length} linha
+                {pastePreview.split('\n').length === 1 ? '' : 's'}?
+              </div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[var(--color-text-dim)]">
+                {pastePreview.split('\n').slice(0, 12).join('\n').slice(0, 600)}
+                {(pastePreview.split('\n').length > 12 || pastePreview.length > 600) && '\n…'}
+              </pre>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPastePreview(null)
+                    xtermRef.current?.focus()
+                  }}
+                  className="rounded border border-[var(--color-border)] px-3 py-1 text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = pastePreview
+                    setPastePreview(null)
+                    xtermRef.current?.paste(t)
+                    xtermRef.current?.focus()
+                  }}
+                  className="rounded border border-[var(--color-accent)] bg-[var(--color-accent)] px-3 py-1 font-medium text-[var(--color-bg)] hover:opacity-90"
+                >
+                  Colar
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

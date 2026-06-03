@@ -114,6 +114,7 @@ export function Terminal({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [pastePreview, setPastePreview] = useState<string | null>(null)
+  const [multilineActive, setMultilineActive] = useState(false)
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -140,6 +141,13 @@ export function Terminal({
     const id = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
+
+  // Backstop do indicador de multilinha: se o claude começou a processar (= submeteu)
+  // ou a sessão saiu, o badge não faz mais sentido — zera mesmo sem o Enter ter passado
+  // pelo handler do xterm (ex: submit por outro caminho).
+  useEffect(() => {
+    if (activity?.status === 'working' || exited) setMultilineActive(false)
+  }, [activity?.status, exited])
 
   // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
   const displayTitle = activity?.name ?? title ?? repoLabel
@@ -304,6 +312,7 @@ export function Terminal({
       // Lê overrides via getState() pra rebind valer sem recriar o xterm.
       const kbOverrides = useKeybindingsStore.getState().overrides
       if (matchCombo(e, resolveCombo('terminal.newline', kbOverrides)) || (e.key === 'Enter' && e.altKey)) {
+        setMultilineActive(true)
         write('\x1b\r')
         return false
       }
@@ -320,6 +329,9 @@ export function Terminal({
         xtermRef.current?.clear()
         return false
       }
+
+      // Enter puro = submit no claude: zera o indicador de multilinha. NÃO interceptamos.
+      if (e.key === 'Enter' && !e.shiftKey && !e.altKey) setMultilineActive(false)
 
       // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
       return true
@@ -459,6 +471,14 @@ export function Terminal({
               {activity?.title && (
                 <span className="max-w-40 truncate text-[10px] text-[var(--color-text-dim)]">
                   {activity.title}
+                </span>
+              )}
+              {multilineActive && activity?.status !== 'working' && (
+                <span
+                  title="Modo multilinha — Enter envia, Shift+Enter quebra linha"
+                  className="flex items-center gap-1 rounded border border-[var(--color-accent)]/40 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]"
+                >
+                  ⇧⏎ multilinha
                 </span>
               )}
             </div>

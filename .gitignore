@@ -3,6 +3,7 @@ node_modules
 out
 dist
 release
+.cm-drive
 *.log
 *.db
 *.db-shm

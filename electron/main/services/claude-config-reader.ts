@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
   AgentInfo,
+  CommandInfo,
   HookInfo,
   McpInfo,
   PluginInfo,
@@ -259,6 +260,49 @@ export async function readSkills(): Promise<SkillInfo[]> {
   const skills = [...(await readUserSkills()), ...fromPlugins.flat()]
   skills.sort((a, b) => a.name.localeCompare(b.name))
   return skills
+}
+
+// Slash commands user-level: ~/.claude/commands/*.md (um command por arquivo).
+async function readUserCommands(): Promise<CommandInfo[]> {
+  try {
+    const dir = join(CLAUDE_DIR, 'commands')
+    const entries = await readdir(dir, { withFileTypes: true })
+    const commands: CommandInfo[] = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+      let name = entry.name.replace(/\.md$/, '')
+      let description = ''
+      try {
+        const fm = parseFrontmatter(await readFile(join(dir, entry.name), 'utf8'))
+        if (fm.name) name = fm.name
+        description = fm.description || ''
+      } catch {
+        // sem frontmatter legível: mantém o nome do arquivo
+      }
+      commands.push({ name, description, origin: 'user' })
+    }
+    return commands
+  } catch {
+    return []
+  }
+}
+
+// Agrega commands user-level + de cada plugin instalado (origin = pluginId).
+export async function readCommands(): Promise<CommandInfo[]> {
+  const installed = await readInstalledPlugins()
+  const fromPlugins = await Promise.all(
+    installed.map(async ({ id, installPath }) => {
+      const { commands } = await readPluginComponents(installPath)
+      return commands.map<CommandInfo>((c) => ({
+        name: c.name,
+        description: c.description ?? '',
+        origin: id,
+      }))
+    }),
+  )
+  const commands = [...(await readUserCommands()), ...fromPlugins.flat()]
+  commands.sort((a, b) => a.name.localeCompare(b.name))
+  return commands
 }
 
 function classifyMcpKind(raw: unknown): string {

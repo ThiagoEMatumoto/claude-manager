@@ -4,6 +4,7 @@ import { getDb } from '../services/db'
 import { featureMemory } from '../services/feature-memory'
 import type {
   Feature,
+  FeatureWithStats,
   CreateFeatureInput,
   UpdateFeatureInput,
   SetFeatureReposInput,
@@ -20,6 +21,13 @@ export function registerFeaturesIpc(): void {
   ipcMain.handle('features:list', (_e, projectId?: string): Feature[] => {
     return featureStore.list(projectId)
   })
+
+  ipcMain.handle(
+    'features:list-with-stats',
+    (_e, opts?: { includeArchived?: boolean }): FeatureWithStats[] => {
+      return featureStore.listWithStats(opts)
+    },
+  )
 
   ipcMain.handle('features:get', (_e, id: string): Feature | null => {
     return featureStore.get(id)

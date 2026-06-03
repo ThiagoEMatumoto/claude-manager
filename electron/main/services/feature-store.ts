@@ -10,6 +10,7 @@ import type {
   FeatureRepoLink,
   FeatureStatus,
   FeatureSynthMode,
+  FeatureWithStats,
   CreateFeatureInput,
   UpdateFeatureInput,
 } from '../../../shared/types/ipc'
@@ -313,18 +314,54 @@ export function create(input: CreateFeatureInput): Feature {
   return { ...feature, body }
 }
 
-export function list(projectId?: string): Feature[] {
+interface ListOpts {
+  projectId?: string
+  includeArchived?: boolean
+}
+
+// Carrega as rows do índice. Por padrão exclui arquivadas (archived_at IS NULL),
+// preservando o comportamento histórico de list(); includeArchived as inclui
+// (usado pela coluna "archived" do board).
+function listRows(opts: ListOpts): FeatureRow[] {
   const db = getDb()
-  const rows = (
-    projectId
-      ? db
-          .prepare(
-            'SELECT * FROM features WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC',
-          )
-          .all(projectId)
-      : db.prepare('SELECT * FROM features WHERE archived_at IS NULL ORDER BY updated_at DESC').all()
-  ) as FeatureRow[]
-  return rows.map((row) => rowToFeature(row, loadRepos(row.id)))
+  const where: string[] = []
+  const params: unknown[] = []
+  if (opts.projectId) {
+    where.push('project_id = ?')
+    params.push(opts.projectId)
+  }
+  if (!opts.includeArchived) {
+    where.push('archived_at IS NULL')
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  return db
+    .prepare(`SELECT * FROM features ${clause} ORDER BY updated_at DESC`)
+    .all(...params) as FeatureRow[]
+}
+
+export function list(projectId?: string): Feature[] {
+  return listRows({ projectId }).map((row) => rowToFeature(row, loadRepos(row.id)))
+}
+
+// Agrega a contagem de sessões ligadas (sessions.feature_id) num único GROUP BY,
+// evitando N+1. Retorna o mapa featureId -> count.
+function sessionCounts(): Map<string, number> {
+  const rows = getDb()
+    .prepare(
+      'SELECT feature_id, COUNT(*) AS n FROM sessions WHERE feature_id IS NOT NULL GROUP BY feature_id',
+    )
+    .all() as Array<{ feature_id: string; n: number }>
+  return new Map(rows.map((r) => [r.feature_id, r.n]))
+}
+
+// list() enriquecido com sessionCount real. includeArchived traz as arquivadas
+// (coluna do board). Sem corpo — é índice, igual a list().
+export function listWithStats(opts?: { includeArchived?: boolean }): FeatureWithStats[] {
+  const counts = sessionCounts()
+  return listRows({ includeArchived: opts?.includeArchived }).map((row) => ({
+    ...rowToFeature(row, loadRepos(row.id)),
+    sessionCount: counts.get(row.id) ?? 0,
+  }))
 }
 
 export function get(id: string): Feature | null {

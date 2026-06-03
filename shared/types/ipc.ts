@@ -76,6 +76,10 @@ export interface SpawnSessionInput {
   repoId: string
   name?: string
   featureId?: string
+  // Comando inicial injetado no REPL do claude após o spawn (ex.: '/review' ou
+  // o nome de uma skill). Escrito no PTY no primeiro `data` da sessão, não como
+  // flag de CLI — slash commands são input interativo do REPL.
+  initialCommand?: string
   cols?: number
   rows?: number
 }
@@ -108,6 +112,12 @@ export interface Feature {
   archivedAt: number | null
   // Corpo Markdown do `.md` (sem o frontmatter). Preenchido em `get`; ausente em `list`.
   body?: string
+}
+
+// Feature do índice + contagem real de sessões ligadas (sessions.feature_id).
+// Usado pelo board; sem corpo, igual a list().
+export interface FeatureWithStats extends Feature {
+  sessionCount: number
 }
 
 export interface CreateFeatureInput {
@@ -318,6 +328,21 @@ export interface SkillInfo {
   name: string
   description: string
   origin: string
+}
+
+// Item lançável pela command palette: uma skill ou um slash command, de origin
+// 'user' ou pluginId. O `kind` decide a injeção no REPL ('/'+name p/ command).
+export interface CommandInfo {
+  name: string
+  description: string
+  origin: string
+}
+
+export interface LauncherItem {
+  name: string
+  description: string
+  origin: string
+  kind: 'skill' | 'command'
 }
 
 export interface McpInfo {
@@ -557,6 +582,7 @@ export interface Api {
   }
   ccConfigs: {
     read(): Promise<ClaudeConfigs>
+    listLauncherItems(): Promise<LauncherItem[]>
   }
   ccPlugins: {
     list(): Promise<ManagedPluginInfo[]>
@@ -583,6 +609,7 @@ export interface Api {
   }
   features: {
     list(projectId?: string): Promise<Feature[]>
+    listWithStats(opts?: { includeArchived?: boolean }): Promise<FeatureWithStats[]>
     get(id: string): Promise<Feature | null>
     create(input: CreateFeatureInput): Promise<Feature>
     update(input: UpdateFeatureInput): Promise<Feature>

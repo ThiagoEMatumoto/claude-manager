@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
+import { LayoutList, Columns3 } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { projectsApi, featuresApi } from '@/lib/ipc'
 import { useFeaturesStore } from '@/store/featuresStore'
 import type { CreateFeatureInput, Project, Repo } from '../../../shared/types/ipc'
+import { FeatureBoard } from './FeatureBoard'
 import { FeatureDoc } from './FeatureDoc'
 import { FeatureList } from './FeatureList'
 import { FeaturesSidebar, type StatusFilter } from './FeaturesSidebar'
 import { NewFeatureDialog } from './NewFeatureDialog'
 import { useFeatures } from './useFeatures'
 
+type ViewMode = 'list' | 'board'
+
 export function FeaturesArea() {
   useFeatures()
   const features = useFeaturesStore((s) => s.features)
   const byProject = useFeaturesStore((s) => s.byProject)
+  const withStats = useFeaturesStore((s) => s.withStats)
+  const sessionCounts = useFeaturesStore((s) => s.sessionCounts)
   const selectedId = useFeaturesStore((s) => s.selectedId)
   const selectedDoc = useFeaturesStore((s) => s.selectedDoc)
   const loading = useFeaturesStore((s) => s.loading)
@@ -26,6 +33,7 @@ export function FeaturesArea() {
   const [creating, setCreating] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
+  const [view, setView] = useState<ViewMode>('list')
 
   useEffect(() => {
     void projectsApi.list().then(setProjects)
@@ -44,10 +52,6 @@ export function FeaturesArea() {
 
   const reposById = useMemo(() => new Map(repos.map((r) => [r.id, r])), [repos])
 
-  // Contagem de sessões ligadas por feature ainda não exposta no contrato — 0 por
-  // ora (a UI já mostra o número quando > 0). Mapa vazio mantém a interface.
-  const sessionCounts = useMemo(() => new Map<string, number>(), [])
-
   const q = query.trim().toLowerCase()
   const listed = useMemo(() => {
     return features.filter((f) => {
@@ -56,6 +60,13 @@ export function FeaturesArea() {
       return true
     })
   }, [features, filter, q])
+
+  // Board: usa a lista com stats (inclui arquivadas). Filtro de status do board é
+  // por coluna, então só aplica a busca textual aqui.
+  const boardFeatures = useMemo(() => {
+    if (!q) return withStats
+    return withStats.filter((f) => f.title.toLowerCase().includes(q))
+  }, [withStats, q])
 
   async function handleCreate(input: CreateFeatureInput) {
     const created = await featuresApi.create(input)
@@ -114,14 +125,31 @@ export function FeaturesArea() {
         {selectedId ? (
           <FeatureDoc feature={selectedDoc} loading={docLoading} reposById={reposById} />
         ) : (
-          <div className="flex-1 overflow-y-auto p-5">
-            <FeatureList
-              features={listed}
-              reposById={reposById}
-              sessionCounts={sessionCounts}
-              selectedId={selectedId}
-              onSelect={(id) => void select(id)}
-            />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex items-center justify-end gap-1 border-b border-[var(--color-border)] px-4 py-2">
+              <ViewToggle value={view} onChange={setView} />
+            </div>
+            {view === 'board' ? (
+              <div className="flex-1 overflow-hidden p-5">
+                <FeatureBoard
+                  features={boardFeatures}
+                  reposById={reposById}
+                  sessionCounts={sessionCounts}
+                  selectedId={selectedId}
+                  onSelect={(id) => void select(id)}
+                />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-5">
+                <FeatureList
+                  features={listed}
+                  reposById={reposById}
+                  sessionCounts={sessionCounts}
+                  selectedId={selectedId}
+                  onSelect={(id) => void select(id)}
+                />
+              </div>
+            )}
           </div>
         )}
         </div>
@@ -134,5 +162,38 @@ export function FeaturesArea() {
         onCreate={handleCreate}
       />
     </>
+  )
+}
+
+function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
+  return (
+    <div className="inline-flex rounded-md border border-[var(--color-border)] p-0.5">
+      <button
+        type="button"
+        onClick={() => onChange('list')}
+        title="Lista"
+        className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition ${
+          value === 'list'
+            ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+            : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+        }`}
+      >
+        <Icon as={LayoutList} size={13} />
+        Lista
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('board')}
+        title="Board"
+        className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition ${
+          value === 'board'
+            ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+            : 'text-[var(--color-text-dim)] hover:text-[var(--color-text)]'
+        }`}
+      >
+        <Icon as={Columns3} size={13} />
+        Board
+      </button>
+    </div>
   )
 }

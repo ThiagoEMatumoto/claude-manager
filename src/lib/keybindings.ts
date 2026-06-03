@@ -149,6 +149,13 @@ export const COMMANDS: Command[] = [
     defaultCombo: { mod: true, key: 'f' },
     editable: true,
   },
+  {
+    id: 'terminal.clear',
+    label: 'Limpar terminal',
+    context: 'Terminal',
+    defaultCombo: { mod: true, shift: true, key: 'k' },
+    editable: true,
+  },
 
   // Terminal (fixo, display)
   {

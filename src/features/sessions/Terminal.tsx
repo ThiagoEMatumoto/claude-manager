@@ -93,6 +93,7 @@ export function Terminal({
   const fitRef = useRef<FitAddon | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const fontSize = useTerminalPrefsStore((s) => s.fontSize)
+  const scrollback = useTerminalPrefsStore((s) => s.scrollback)
   // Heurístico de "claude não encontrado": registramos se algum byte chegou do PTY.
   // Se o processo saiu rápido com código != 0 e nunca emitiu nada, provavelmente o
   // comando não foi resolvido (ENOENT) em vez de uma sessão de verdade ter morrido.
@@ -206,6 +207,7 @@ export function Terminal({
       theme: THEME,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
       fontSize: useTerminalPrefsStore.getState().fontSize,
+      scrollback: useTerminalPrefsStore.getState().scrollback,
       cursorBlink: true,
       allowProposedApi: true,
     })
@@ -293,6 +295,12 @@ export function Terminal({
         return false
       }
 
+      // Limpar terminal: combo configurável (default Ctrl+Shift+K).
+      if (matchCombo(e, resolveCombo('terminal.clear', useKeybindingsStore.getState().overrides))) {
+        xtermRef.current?.clear()
+        return false
+      }
+
       // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
       return true
     })
@@ -336,6 +344,14 @@ export function Terminal({
     fit.fit()
     resize(term.cols, term.rows)
   }, [fontSize, resize])
+
+  // Scrollback ao vivo: atualiza o histórico do xterm já montado quando o store muda,
+  // sem recriar o terminal (a criação lê o valor via getState()).
+  useEffect(() => {
+    const term = xtermRef.current
+    if (!term) return
+    term.options.scrollback = scrollback
+  }, [scrollback])
 
   return (
     <div className="flex h-full flex-col">
@@ -580,6 +596,16 @@ export function Terminal({
             className="block w-full px-3 py-1 text-left hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
           >
             Colar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              xtermRef.current?.clear()
+              setMenu(null)
+            }}
+            className="block w-full px-3 py-1 text-left hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+          >
+            Limpar
           </button>
         </div>
       )}

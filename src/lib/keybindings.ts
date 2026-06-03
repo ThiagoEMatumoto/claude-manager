@@ -142,6 +142,13 @@ export const COMMANDS: Command[] = [
     defaultCombo: { shift: true, key: 'Enter' },
     editable: true,
   },
+  {
+    id: 'terminal.search',
+    label: 'Buscar no terminal',
+    context: 'Terminal',
+    defaultCombo: { mod: true, key: 'f' },
+    editable: true,
+  },
 
   // Terminal (fixo, display)
   {

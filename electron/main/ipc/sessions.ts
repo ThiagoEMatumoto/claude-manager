@@ -127,7 +127,11 @@ function injectInitialCommandOnFirstData(sessionId: string, command: string): vo
     if (e.sessionId !== sessionId) return
     if (timer) return // já agendado pelo primeiro data
     timer = setTimeout(() => {
+      // Remove AMBOS os listeners: a sessão segue viva após injetar, e deixar
+      // o `exit` pendurado acumularia listeners no emitter singleton a cada
+      // lançamento (MaxListenersExceededWarning após ~10 sessões vivas).
       ptyManager.off('data', onData)
+      ptyManager.off('exit', onExit)
       try {
         ptyManager.write(sessionId, cmd + '\r')
       } catch {

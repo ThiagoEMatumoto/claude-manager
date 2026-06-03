@@ -100,6 +100,7 @@ const api: Api = {
       invoke('repo:move-into-vault', { source, vaultPath, label }),
     symlinkIntoVault: (source: string, vaultPath: string, label: string) =>
       invoke('repo:symlink-into-vault', { source, vaultPath, label }),
+    removeSymlink: (target: string) => invoke('repo:remove-symlink', { target }),
     cloneUrl: (url: string, vaultPath: string) =>
       invoke('repo:clone-url', { url, vaultPath }),
   },

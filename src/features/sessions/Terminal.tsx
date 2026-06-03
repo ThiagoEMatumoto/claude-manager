@@ -267,6 +267,14 @@ export function Terminal({
         return false
       }
 
+      // Multiline: Shift+Enter / Alt+Enter inserem nova linha em vez de submeter.
+      // O xterm manda `\r` puro (igual ao Enter) para ambos; o claude só quebra linha
+      // quando recebe ESC+CR (o mesmo que `/terminal-setup` configura no emulador nativo).
+      if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
+        write('\x1b\r')
+        return false
+      }
+
       // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
       return true
     })

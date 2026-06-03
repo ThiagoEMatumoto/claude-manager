@@ -8,13 +8,46 @@ import {
   YAxis,
 } from 'recharts'
 import type { MetricsTotals } from '../../../shared/types/ipc'
+import { ORCH_KPI } from '../../../shared/metrics-targets'
+import { computeDelta, formatDelta, formatPct, kpiStatus } from './orchestration-kpi'
 
 const AXIS_COLOR = 'var(--color-text-dim)'
 
-function Card({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function KpiCard({
+  label,
+  value,
+  target,
+  baseline,
+  previous,
+}: {
+  label: string
+  value: number
+  target: number
+  baseline: number
+  previous?: number
+}) {
+  const status = kpiStatus(value, target)
+  const valueColor = status === 'above' ? 'var(--color-success)' : 'var(--color-danger)'
+  const delta = computeDelta(value, previous)
+
+  const deltaColor =
+    delta == null
+      ? undefined
+      : delta.dir === 'up'
+        ? 'var(--color-success)'
+        : delta.dir === 'down'
+          ? 'var(--color-danger)'
+          : 'var(--color-text-dim)'
+  const deltaArrow = delta == null ? '' : delta.dir === 'up' ? '▲' : delta.dir === 'down' ? '▼' : '—'
+
+  const scale = Math.max(target * 1.5, value, 0.001)
+  const fillPct = Math.min(value / scale, 1) * 100
+  const targetPct = Math.min(target / scale, 1) * 100
+  const baselinePct = Math.min(baseline / scale, 1) * 100
+
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border p-4"
+      className="flex flex-col gap-2 rounded-lg border p-4"
       style={{
         borderColor: 'var(--color-border)',
         background: 'var(--color-surface)',
@@ -23,23 +56,60 @@ function Card({ label, value, hint }: { label: string; value: string; hint?: str
       <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-dim)' }}>
         {label}
       </span>
-      <span className="text-2xl font-semibold tabular-nums" style={{ color: 'var(--color-text)' }}>
-        {value}
-      </span>
-      {hint && (
-        <span className="text-[11px]" style={{ color: 'var(--color-text-dim)' }}>
-          {hint}
+
+      <div className="flex items-baseline gap-2">
+        <span
+          data-testid="kpi-value"
+          className="text-2xl font-semibold tabular-nums"
+          style={{ color: valueColor }}
+        >
+          {formatPct(value)}
         </span>
-      )}
+        {delta && (
+          <span
+            data-testid="kpi-delta"
+            className="text-[11px] font-medium tabular-nums"
+            style={{ color: deltaColor }}
+          >
+            {deltaArrow} {formatDelta(delta)}
+          </span>
+        )}
+      </div>
+
+      <div
+        className="relative h-1.5 w-full overflow-hidden rounded-full"
+        style={{ background: 'var(--color-surface-2)' }}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{ width: `${fillPct}%`, background: valueColor }}
+        />
+        <div
+          data-testid="kpi-baseline-marker"
+          className="absolute inset-y-0 w-px"
+          style={{ left: `${baselinePct}%`, background: 'var(--color-text-dim)' }}
+        />
+        <div
+          data-testid="kpi-target-marker"
+          className="absolute inset-y-0 w-px"
+          style={{ left: `${targetPct}%`, background: 'var(--color-text)' }}
+        />
+      </div>
+
+      <span data-testid="kpi-target" className="text-[11px]" style={{ color: 'var(--color-text-dim)' }}>
+        Meta &gt; {formatPct(target)}
+      </span>
     </div>
   )
 }
 
 export function AgentOrchestrationMetrics({
   totals,
+  previousTotals,
   subagentTypeDistribution,
 }: {
   totals: MetricsTotals
+  previousTotals?: MetricsTotals
   subagentTypeDistribution: { type: string; count: number }[]
 }) {
   const hasData = subagentTypeDistribution.length > 0
@@ -47,15 +117,19 @@ export function AgentOrchestrationMetrics({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3">
-        <Card
-          label="Paralelização"
-          value={`${(totals.parallelizationRatio * 100).toFixed(1)}%`}
-          hint="rounds com 2+ agents / rounds com agent"
+        <KpiCard
+          label={ORCH_KPI.parallelization.label}
+          value={totals.parallelizationRatio}
+          target={ORCH_KPI.parallelization.target}
+          baseline={ORCH_KPI.parallelization.baseline}
+          previous={previousTotals?.parallelizationRatio}
         />
-        <Card
-          label="Delegação"
-          value={`${(totals.inlineDelegationRatio * 100).toFixed(1)}%`}
-          hint="agent calls / (agent + explore inline)"
+        <KpiCard
+          label={ORCH_KPI.delegation.label}
+          value={totals.inlineDelegationRatio}
+          target={ORCH_KPI.delegation.target}
+          baseline={ORCH_KPI.delegation.baseline}
+          previous={previousTotals?.inlineDelegationRatio}
         />
       </div>
 

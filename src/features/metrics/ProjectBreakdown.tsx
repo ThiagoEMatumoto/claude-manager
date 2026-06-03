@@ -1,12 +1,5 @@
 import type { MetricsProjectRow } from '../../../shared/types/ipc'
-
-function fmtInt(n: number): string {
-  return n.toLocaleString('pt-BR')
-}
-
-function fmtUsd(n: number): string {
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
+import { fmtInt, fmtUsd } from './format'
 
 export function ProjectBreakdown({ rows }: { rows: MetricsProjectRow[] }) {
   if (rows.length === 0) {

@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, ChevronRight, Circle, Clock, Loader, Moon, X, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -151,6 +151,12 @@ export function Terminal({
 
   // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
   const displayTitle = activity?.name ?? title ?? repoLabel
+  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
+  // título aparece após o '·' no breadcrumb — evita repetir a pasta (Projeto · Repo).
+  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
+  // título é exibido no header — a aba do dockview já mostra o nome da sessão, então
+  // sem nome custom o header mostra só o projeto + path (evita o nome repetido).
+  const isNamed = (activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel
 
   // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
   // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
@@ -405,44 +411,62 @@ export function Terminal({
         style={projectColor ? { borderLeftColor: projectColor } : undefined}
       >
         <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {projectName && (
-              <span className="flex items-center gap-1 text-[var(--color-text-dim)]">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: projectColor ?? 'var(--color-border)' }}
-                />
+              <span className="flex shrink-0 items-center gap-1.5 font-medium text-[var(--color-text-dim)]">
                 <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>
-                <span>{projectName}</span>
-                <Icon as={ChevronRight} size={12} className="text-[var(--color-border)]" />
+                <span className="max-w-40 truncate">{projectName}</span>
               </span>
             )}
             {editing ? (
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename()
-                  if (e.key === 'Escape') setEditing(false)
-                }}
-                placeholder={repoLabel}
-                className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
-              />
+              <>
+                {projectName && <span className="text-[var(--color-border)]">·</span>}
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') setEditing(false)
+                  }}
+                  placeholder={repoLabel}
+                  className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
+                />
+              </>
+            ) : isNamed || !projectName ? (
+              // Nome custom (ou sem projeto pra contextualizar): mostra o título, clicável pra renomear.
+              <>
+                {projectName && <span className="text-[var(--color-border)]">·</span>}
+                <button
+                  type="button"
+                  disabled={!canRename}
+                  onClick={() => {
+                    setDraft(activity?.name ?? title ?? '')
+                    setEditing(true)
+                  }}
+                  className="truncate font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
+                  title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
+                >
+                  {displayTitle}
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                disabled={!canRename}
-                onClick={() => {
-                  setDraft(activity?.name ?? title ?? '')
-                  setEditing(true)
-                }}
-                className="font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
-                title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
-              >
-                {displayTitle}
-              </button>
+              // Sem nome custom: a aba já mostra o nome da pasta — aqui só um lápis discreto pra nomear.
+              canRename && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft('')
+                    setEditing(true)
+                  }}
+                  className="shrink-0 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+                  title="Nomear esta sessão"
+                  aria-label="Nomear esta sessão"
+                >
+                  <Icon as={Pencil} size={12} />
+                </button>
+              )
             )}
           </div>
           <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
@@ -503,21 +527,20 @@ export function Terminal({
           )}
           <button
             type="button"
-            onClick={() => endSession(session.id)}
-            disabled={exited}
-            title="Encerrar o processo (claude) nesta sessão"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
+            onClick={onClose}
+            title="Minimizar — mantém a sessão rodando em background, acessível no strip de sessões"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
           >
-            Encerrar
+            Minimizar
           </button>
           <button
             type="button"
-            onClick={onClose}
-            title="Fechar a pane"
-            aria-label="Fechar a pane"
-            className="flex items-center rounded border border-[var(--color-border)] px-2 py-0.5 leading-none hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)]"
+            onClick={() => endSession(session.id)}
+            disabled={exited}
+            title="Encerrar o processo claude e fechar a sessão (some do strip)"
+            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
           >
-            <Icon as={X} size={14} />
+            Encerrar
           </button>
         </div>
       </div>

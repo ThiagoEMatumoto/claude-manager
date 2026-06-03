@@ -1,5 +1,6 @@
+import type { ComponentType } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Maximize2 } from 'lucide-react'
+import { Circle, Loader, Maximize2, Zap, type LucideProps } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
@@ -11,19 +12,19 @@ interface Props {
   onOpenSwitcher: () => void
 }
 
-// Cor do dot por estado, via CSS vars do tema.
-function statusColor(status: LiveStatus): string {
+// Ícone por estado: a FORMA carrega o status (spin trabalhando, raio aguardando,
+// círculo ocioso) e a COR carrega o projeto — um glifo só, sem dots redundantes.
+function statusIcon(status: LiveStatus): { icon: ComponentType<LucideProps>; spin: boolean } {
   switch (status) {
     case 'working':
-      return 'var(--color-accent)'
     case 'starting':
-      return 'var(--color-accent)'
+      return { icon: Loader, spin: true }
     case 'waiting':
-      return 'var(--color-warning)'
+      return { icon: Zap, spin: false }
     case 'idle':
     case 'ended':
     default:
-      return 'var(--color-text-dim)'
+      return { icon: Circle, spin: false }
   }
 }
 
@@ -76,7 +77,9 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
         </span>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {liveSessions.map((item) => {
+          {liveSessions
+            .filter((item) => item.status !== 'ended')
+            .map((item) => {
             const paneId = openByCc.get(item.ccSessionId)
             const isOpen = paneId !== undefined
             const isFocused = isOpen && paneId === focusPaneId
@@ -120,6 +123,7 @@ function Chip({ item, isOpen, isFocused, onOpen, onEnd }: ChipProps) {
   const tooltip = `${statusLabel(item.status)} · ${relativeTime(item.lastActivityAt)}${
     preview ? `\n${preview}` : ''
   }`
+  const { icon, spin } = statusIcon(item.status)
 
   return (
     <div
@@ -132,14 +136,12 @@ function Chip({ item, isOpen, isFocused, onOpen, onEnd }: ChipProps) {
       }`}
       title={tooltip}
     >
-      <button type="button" onClick={onOpen} className="flex min-w-0 items-center gap-1.5">
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: statusColor(item.status) }}
-        />
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: item.projectColor ?? 'var(--color-border)' }}
+      <button type="button" onClick={onOpen} className="flex min-w-0 items-center gap-2">
+        <Icon
+          as={icon}
+          size={12}
+          className={spin ? 'shrink-0 animate-spin' : 'shrink-0'}
+          style={{ color: item.projectColor ?? 'var(--color-border)' }}
         />
         <span className="max-w-40 truncate">{title}</span>
       </button>

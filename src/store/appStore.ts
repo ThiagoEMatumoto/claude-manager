@@ -295,7 +295,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   endSession: (sessionId) => {
     void sessionsApi.kill(sessionId)
-    set((s) => ({ panes: s.panes.filter((p) => p.session.id !== sessionId) }))
+    // Remoção otimista da sessão viva também: o kill é assíncrono, então o
+    // refreshLiveSessions abaixo pegaria a PTY ainda na corrida e a reintroduziria
+    // como 'ended'. Tirar de liveSessions aqui faz o chip do strip sumir junto com
+    // a pane — Encerrar fecha sessão e aba de uma vez.
+    set((s) => ({
+      panes: s.panes.filter((p) => p.session.id !== sessionId),
+      liveSessions: s.liveSessions.filter((x) => x.id !== sessionId),
+    }))
     schedulePersist(get().panes)
     void get().refreshLiveSessions()
   },

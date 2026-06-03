@@ -15,6 +15,13 @@ import {
 } from './feature-store'
 import { findTranscriptPath } from './session-activity'
 import { runClaude } from './claude-cli'
+import {
+  isProtectedBranch,
+  normalizeBranch,
+  pickWorkBranch,
+  fuzzyScore,
+  decideRegistration,
+} from './feature-heuristics'
 
 const SYNTH_TIMEOUT_MS = 90_000
 const DEBOUNCE_MS = 4_000
@@ -24,51 +31,7 @@ const MAX_DIGEST_ENTRIES = 40
 const SYNTH_MODEL_KEY = 'synth_model'
 const SYNTH_MODE_KEY = 'synth_mode'
 
-const PROTECTED_BRANCHES = new Set(['main', 'master', 'staging', 'develop'])
-const BRANCH_PREFIX_RE = /^(?:feat|fix|chore|refactor|feature)\//i
-const FUZZY_THRESHOLD = 0.5
 const MAX_AUTO_OBJECTIVE_CHARS = 600
-
-function isProtectedBranch(branch: string): boolean {
-  return PROTECTED_BRANCHES.has(branch.trim().toLowerCase())
-}
-
-// Branch "real" (não-vazia, não detached). Retorna null caso contrário.
-function normalizeBranch(branch: string | null | undefined): string | null {
-  const b = branch?.trim()
-  if (!b || b === 'HEAD' || b === '(detached)') return null
-  return b
-}
-
-// "feat/penalty-clause-s4" -> "Penalty clause s4"
-function humanizeBranch(branch: string): string {
-  const stripped = branch.replace(BRANCH_PREFIX_RE, '')
-  const words = stripped.replace(/[-_/]+/g, ' ').trim()
-  if (!words) return branch
-  return words.charAt(0).toUpperCase() + words.slice(1)
-}
-
-// Score simples sem lib: substring forte + overlap de tokens normalizado.
-function tokenize(s: string): string[] {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .split(' ')
-    .filter((t) => t.length > 1)
-}
-
-function fuzzyScore(prompt: string, title: string): number {
-  const p = prompt.toLowerCase().trim()
-  const t = title.toLowerCase().trim()
-  if (!p || !t) return 0
-  if (p.includes(t) || t.includes(p)) return 1
-  const pt = new Set(tokenize(prompt))
-  const tt = tokenize(title)
-  if (pt.size === 0 || tt.length === 0) return 0
-  const matched = tt.filter((tok) => pt.has(tok)).length
-  // normaliza pelo número de tokens do título (o alvo mais curto).
-  return matched / tt.length
-}
 
 // Modo de síntese global (app_prefs); 'threshold' como default seguro.
 function globalSynthMode(): FeatureSynthMode {
@@ -164,12 +127,14 @@ function buildDigest(path: string): Digest {
   const assistantNotes: string[] = []
   const filesTouched = new Set<string>()
   const refs = new Set<string>()
-  let gitBranch: string | null = null
+  const branchesSeen: string[] = []
   let userTurns = 0
   let editCount = 0
 
   for (const l of lines) {
-    if (l.gitBranch && !gitBranch) gitBranch = l.gitBranch
+    if (l.gitBranch && branchesSeen[branchesSeen.length - 1] !== l.gitBranch) {
+      branchesSeen.push(l.gitBranch)
+    }
     const role = l.message?.role
     const content = l.message?.content
 
@@ -204,7 +169,7 @@ function buildDigest(path: string): Digest {
     userPrompts: userPrompts.slice(-MAX_DIGEST_ENTRIES),
     assistantNotes: assistantNotes.slice(-MAX_DIGEST_ENTRIES),
     filesTouched: [...filesTouched],
-    gitBranch,
+    gitBranch: pickWorkBranch(branchesSeen),
     refs: [...refs].slice(0, 20),
     userTurns,
     editCount,
@@ -322,6 +287,11 @@ class FeatureMemoryService {
     const { featureId, kind } = resolution
     console.log(`[feature-memory] session ${info.sessionId} ${kind} -> feature ${featureId}`)
 
+    // Observabilidade: a UI recarrega a lista assim que a feature é criada/linkada
+    // (antes só havia console.log no main — o usuário nunca via que registrou).
+    const feat = getFeature(featureId)
+    if (feat) broadcast('feature:updated', feat)
+
     const existing = this.timers.get(featureId)
     if (existing) clearTimeout(existing)
     this.timers.set(
@@ -331,6 +301,19 @@ class FeatureMemoryService {
         void this.synthesize(featureId, ccSessionId)
       }, DEBOUNCE_MS),
     )
+  }
+
+  // Backfill: resolve + cria/linka uma sessão JÁ encerrada, SEM agendar síntese LLM
+  // (o backfill só registra; a síntese fica sob demanda). Retorna o resultado para
+  // contagem, ou null se a sessão não rende feature (atividade insuficiente, etc).
+  registerOnly(info: SessionExitInfo): { featureId: string; kind: LinkKind } | null {
+    if (!info.ccSessionId) return null
+    try {
+      return this.resolveFeature(info, info.ccSessionId)
+    } catch (err) {
+      console.error('[feature-memory] backfill resolve falhou:', err)
+      return null
+    }
   }
 
   // Resolve (ou cria) a feature a vincular à sessão e persiste sessions.feature_id.
@@ -347,52 +330,53 @@ class FeatureMemoryService {
       // feature manual sumiu — cai pra auto-resolução.
     }
 
-    // 2. Guarda de atividade substantiva (respeita synth_mode global; 'auto' pula).
+    // 2. Distila o transcript. `digest.gitBranch` já é a branch de TRABALHO (última
+    // não-protegida vista — pegar a primeira/main era a causa de 0 registros).
     const transcriptPath = findTranscriptPath(ccSessionId)
     if (!transcriptPath) return null
     const digest = buildDigest(transcriptPath)
-    if (globalSynthMode() !== 'auto') {
-      if (digest.userTurns < 2 || digest.editCount === 0) return null
-    }
 
     const branch = normalizeBranch(digest.gitBranch)
+    const workBranch = branch && !isProtectedBranch(branch) ? branch : null
     const firstPrompt = digest.userPrompts[0] ?? null
-
-    // 3a. Por branch (não-protegida).
-    if (branch && !isProtectedBranch(branch)) {
-      const byBranch = findFeatureByRepoBranch(info.repoId, branch)
-      if (byBranch) {
-        this.persistLink(info.sessionId, byBranch.id)
-        return { featureId: byBranch.id, kind: 'auto-linked' }
-      }
-    }
 
     const projectId = getProjectIdForRepo(info.repoId)
     if (!projectId) return null
 
-    // 3b. Fuzzy por objetivo (1º prompt vs títulos das features ativas do projeto).
+    // Candidatos a vínculo: por branch de trabalho e por fuzzy de objetivo.
+    const byBranch = workBranch ? findFeatureByRepoBranch(info.repoId, workBranch) : null
+    let fuzzyMatch: { featureId: string; score: number } | null = null
     if (firstPrompt) {
-      const candidates = listActiveFeaturesByProject(projectId)
-      let best: { feature: Feature; score: number } | null = null
-      for (const f of candidates) {
+      for (const f of listActiveFeaturesByProject(projectId)) {
         const score = fuzzyScore(firstPrompt, f.title)
-        if (!best || score > best.score) best = { feature: f, score }
-      }
-      if (best && best.score >= FUZZY_THRESHOLD) {
-        this.persistLink(info.sessionId, best.feature.id)
-        return { featureId: best.feature.id, kind: 'auto-linked' }
+        if (!fuzzyMatch || score > fuzzyMatch.score) fuzzyMatch = { featureId: f.id, score }
       }
     }
 
-    // 3c. Auto-criar — SÓ com branch não-protegida e não-vazia.
-    if (!branch || isProtectedBranch(branch)) return null
+    const decision = decideRegistration({
+      synthMode: globalSynthMode(),
+      userTurns: digest.userTurns,
+      editCount: digest.editCount,
+      workBranch,
+      firstPrompt,
+      byBranchFeatureId: byBranch?.id ?? null,
+      fuzzyMatch,
+    })
+
+    if (decision.action === 'skip') return null
+    if (decision.action === 'link') {
+      this.persistLink(info.sessionId, decision.featureId)
+      return { featureId: decision.featureId, kind: 'auto-linked' }
+    }
+
+    // create: título já decidido (pela branch ou pelo objetivo).
     const repoPath = getRepoPath(info.repoId)
     const created = createFeature({
       projectId,
-      title: humanizeBranch(branch),
+      title: decision.title,
       status: 'in-progress',
       objective: firstPrompt ? firstPrompt.slice(0, MAX_AUTO_OBJECTIVE_CHARS) : null,
-      repos: [{ repoId: info.repoId, branch, worktreePath: repoPath }],
+      repos: [{ repoId: info.repoId, branch: workBranch ?? branch ?? 'main', worktreePath: repoPath }],
     })
     // create() já fez markSelfWrite no `.md`; nada extra a fazer aqui.
     this.persistLink(info.sessionId, created.id)

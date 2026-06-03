@@ -149,6 +149,7 @@ const api: Api = {
     update: (input: UpdateFeatureInput) => invoke('features:update', input),
     archive: (id: string) => invoke('features:archive', id),
     setRepos: (input: SetFeatureReposInput) => invoke('features:set-repos', input),
+    backfill: () => invoke('features:backfill'),
     onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
     onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),
   },

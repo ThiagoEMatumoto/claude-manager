@@ -15,6 +15,7 @@ import {
   type ShortcutContext,
 } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
+import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
@@ -81,10 +82,13 @@ export function SettingsDialog({ open, onClose }: Props) {
 
 function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
+  const scrollback = useTerminalPrefsStore((s) => s.scrollback)
+  const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
 
   useEffect(() => {
     if (!open) return
     void vaultApi.getRoot().then(setRoot)
+    void useTerminalPrefsStore.getState().load()
   }, [open])
 
   async function changeRoot() {
@@ -96,19 +100,47 @@ function GeneralTab({ open }: { open: boolean }) {
   }
 
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-xs text-[var(--color-text-dim)]">Pasta-raiz dos projetos</span>
-        <button
-          type="button"
-          onClick={changeRoot}
-          className="text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
-        >
-          Trocar
-        </button>
+    <div className="space-y-4">
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-[var(--color-text-dim)]">Pasta-raiz dos projetos</span>
+          <button
+            type="button"
+            onClick={changeRoot}
+            className="text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+          >
+            Trocar
+          </button>
+        </div>
+        <div className="truncate text-sm text-[var(--color-text)]" title={root || undefined}>
+          {root || <span className="text-[var(--color-text-dim)]">carregando…</span>}
+        </div>
       </div>
-      <div className="truncate text-sm text-[var(--color-text)]" title={root || undefined}>
-        {root || <span className="text-[var(--color-text-dim)]">carregando…</span>}
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Terminal
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Linhas de histórico (scrollback)</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Quantas linhas o terminal mantém roláveis (200–50000).
+            </div>
+          </div>
+          <input
+            type="number"
+            min={200}
+            max={50000}
+            step={500}
+            value={scrollback}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              if (Number.isFinite(n)) void setScrollback(n)
+            }}
+            className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
       </div>
     </div>
   )

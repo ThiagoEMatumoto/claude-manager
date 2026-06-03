@@ -1,10 +1,13 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import * as featureStore from '../services/feature-store'
+import { getDb } from '../services/db'
+import { featureMemory } from '../services/feature-memory'
 import type {
   Feature,
   CreateFeatureInput,
   UpdateFeatureInput,
   SetFeatureReposInput,
+  FeatureBackfillResult,
 } from '../../../shared/types/ipc'
 
 function broadcast(channel: string, payload: unknown): void {
@@ -44,5 +47,42 @@ export function registerFeaturesIpc(): void {
     const feature = featureStore.setRepos(input.id, input.repos)
     broadcast('feature:updated', feature)
     return feature
+  })
+
+  // Backfill retroativo: reprocessa sessões já encerradas e ainda não vinculadas,
+  // criando/linkando as features perdidas (sem síntese LLM). Em ordem cronológica
+  // pra que features criadas cedo capturem sessões posteriores (branch/fuzzy).
+  ipcMain.handle('features:backfill', (): FeatureBackfillResult => {
+    const rows = getDb()
+      .prepare(
+        `SELECT id, cc_session_id, repo_id, feature_id FROM sessions
+          WHERE status IN ('exited','closed_by_user')
+            AND cc_session_id IS NOT NULL
+            AND feature_id IS NULL
+          ORDER BY started_at ASC`,
+      )
+      .all() as Array<{
+      id: string
+      cc_session_id: string
+      repo_id: string
+      feature_id: string | null
+    }>
+
+    let created = 0
+    let linked = 0
+    let skipped = 0
+    for (const r of rows) {
+      const res = featureMemory.registerOnly({
+        sessionId: r.id,
+        ccSessionId: r.cc_session_id,
+        repoId: r.repo_id,
+        featureId: r.feature_id,
+      })
+      if (!res) skipped++
+      else if (res.kind === 'auto-created') created++
+      else linked++
+    }
+    broadcast('feature:updated', { backfill: true })
+    return { created, linked, skipped }
   })
 }

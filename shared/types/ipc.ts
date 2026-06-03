@@ -151,6 +151,13 @@ export interface FeatureSynthError {
   at: number
 }
 
+// Resultado do backfill retroativo (reprocessamento de sessões já encerradas).
+export interface FeatureBackfillResult {
+  created: number
+  linked: number
+  skipped: number
+}
+
 export interface ResumeSessionInput {
   repoId: string
   ccSessionId: string
@@ -581,6 +588,7 @@ export interface Api {
     update(input: UpdateFeatureInput): Promise<Feature>
     archive(id: string): Promise<void>
     setRepos(input: SetFeatureReposInput): Promise<Feature>
+    backfill(): Promise<FeatureBackfillResult>
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void
   }

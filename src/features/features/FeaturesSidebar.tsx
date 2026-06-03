@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Plus, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, History, Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
 import type { Feature, FeatureStatus, Project } from '../../../shared/types/ipc'
@@ -19,6 +19,8 @@ interface Props {
   onSelect: (id: string) => void
   onReload: () => void
   onNew: () => void
+  onBackfill: () => void
+  backfilling: boolean
 }
 
 const FILTERS: { id: StatusFilter; label: string }[] = [
@@ -38,6 +40,8 @@ export function FeaturesSidebar({
   onSelect,
   onReload,
   onNew,
+  onBackfill,
+  backfilling,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
@@ -79,6 +83,15 @@ export function FeaturesSidebar({
           >
             <Icon as={Plus} size={13} />
             Nova
+          </button>
+          <button
+            type="button"
+            onClick={onBackfill}
+            disabled={backfilling}
+            title="Importar features de sessões anteriores (reprocessa as sessões já encerradas)"
+            className="flex items-center justify-center rounded-md bg-[var(--color-surface-2)] p-1.5 text-[var(--color-text)] transition hover:opacity-90 disabled:opacity-50"
+          >
+            <Icon as={History} size={13} className={backfilling ? 'animate-spin' : undefined} />
           </button>
           <button
             type="button"

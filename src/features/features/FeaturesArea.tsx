@@ -24,6 +24,8 @@ export function FeaturesArea() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [creating, setCreating] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
 
   useEffect(() => {
     void projectsApi.list().then(setProjects)
@@ -61,6 +63,22 @@ export function FeaturesArea() {
     void select(created.id)
   }
 
+  async function handleBackfill() {
+    setBackfilling(true)
+    setBackfillMsg(null)
+    try {
+      const res = await featuresApi.backfill()
+      await refresh()
+      setBackfillMsg(
+        `Backfill: ${res.created} criada(s), ${res.linked} vinculada(s), ${res.skipped} ignorada(s).`,
+      )
+    } catch {
+      setBackfillMsg('Falha ao importar features de sessões anteriores.')
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
   return (
     <>
       <FeaturesSidebar
@@ -75,9 +93,24 @@ export function FeaturesArea() {
         onSelect={(id) => void select(id)}
         onReload={() => void refresh()}
         onNew={() => setCreating(true)}
+        onBackfill={() => void handleBackfill()}
+        backfilling={backfilling}
       />
 
-      <main className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {backfillMsg && (
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs text-[var(--color-text)]">
+            <span>{backfillMsg}</span>
+            <button
+              type="button"
+              onClick={() => setBackfillMsg(null)}
+              className="rounded px-1 text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        <div className="flex flex-1 overflow-hidden">
         {selectedId ? (
           <FeatureDoc feature={selectedDoc} loading={docLoading} reposById={reposById} />
         ) : (
@@ -91,6 +124,7 @@ export function FeaturesArea() {
             />
           </div>
         )}
+        </div>
       </main>
 
       <NewFeatureDialog

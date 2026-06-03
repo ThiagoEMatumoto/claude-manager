@@ -24,6 +24,8 @@ import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
 import { workspaceApi } from '@/lib/ipc'
+import { matchCombo, resolveCombo } from '@/lib/keybindings'
+import { useKeybindingsStore } from '@/lib/keybindings-store'
 
 interface PaneParams {
   pane: ActivePane
@@ -111,6 +113,8 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const overrides = useKeybindingsStore((s) => s.overrides)
+  const loadKeybindings = useKeybindingsStore((s) => s.load)
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -367,23 +371,28 @@ export function AppShell() {
   // — o attachCustomKeyEventHandler do Terminal só intercepta copy/paste e devolve
   // o resto, então este listener global (capture) ganha a tecla antes do claude.
   // O 'k' nunca é um combo crítico do claude, então o app pode ter prioridade aqui.
+  // Carrega os overrides de keybinding persistidos uma vez no boot.
+  useEffect(() => {
+    void loadKeybindings()
+  }, [loadKeybindings])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+      if (matchCombo(e, resolveCombo('palette.toggle', overrides))) {
         e.preventDefault()
         setPaletteOpen((v) => !v)
         return
       }
       // Ctrl+Shift+A: abre o seletor de sessões (overlay). Não troca de área —
       // o split/xterm continuam montados por trás.
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
+      if (matchCombo(e, resolveCombo('switcher.open', overrides))) {
         e.preventDefault()
         setSwitcherOpen(true)
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  }, [overrides])
 
   // Abre Configurações sob demanda (ex: error state do Terminal, renderizado pelo
   // dockview fora desta árvore — ver requestOpenSettings).
@@ -406,20 +415,21 @@ export function AppShell() {
   // o default do Electron (ex: Ctrl+W fecharia a janela).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.metaKey || e.altKey) return
       const api = apiRef.current
 
-      // Ctrl+Tab / Ctrl+Shift+Tab: cicla o foco entre os panes abertos (dockview),
-      // com wrap-around. Se o Electron capturar o Tab antes, o fallback Ctrl+1..9
-      // abaixo cobre a ciclagem direta.
-      if (e.key === 'Tab') {
+      // Ctrl+Tab (pane.next) / Ctrl+Shift+Tab (pane.prev): cicla o foco entre os
+      // panes abertos (dockview), com wrap-around. Se o Electron capturar o Tab
+      // antes, o fallback Ctrl+1..9 abaixo cobre a ciclagem direta.
+      const isNext = matchCombo(e, resolveCombo('pane.next', overrides))
+      const isPrev = matchCombo(e, resolveCombo('pane.prev', overrides))
+      if (isNext || isPrev) {
         const panels = api?.panels ?? []
         if (panels.length > 0) {
           e.preventDefault()
           const activeId = api?.activePanel?.id
           const idx = panels.findIndex((p) => p.id === activeId)
           const base = idx < 0 ? 0 : idx
-          const next = e.shiftKey
+          const next = isPrev
             ? (base - 1 + panels.length) % panels.length
             : (base + 1) % panels.length
           const target = panels[next]
@@ -429,9 +439,9 @@ export function AppShell() {
         return
       }
 
-      // Ctrl+1..9: foca o n-ésimo pane diretamente (fallback caso Ctrl+Tab seja
-      // interceptado pelo SO/Electron).
-      if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
+      // Ctrl+1..9 (pane.focusN): foca o n-ésimo pane diretamente (fallback caso
+      // Ctrl+Tab seja interceptado pelo SO/Electron). Combo fixo (não editável).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         const panels = api?.panels ?? []
         const target = panels[Number(e.key) - 1]
         if (target) {
@@ -442,8 +452,8 @@ export function AppShell() {
         return
       }
 
-      // Ctrl+W: fecha o painel ativo.
-      if (e.key === 'w' && !e.shiftKey) {
+      // Ctrl+W (pane.close): fecha o painel ativo.
+      if (matchCombo(e, resolveCombo('pane.close', overrides))) {
         const id = api?.activePanel?.id
         if (id) {
           e.preventDefault()
@@ -452,24 +462,26 @@ export function AppShell() {
         return
       }
 
-      // Ctrl+\ (split à direita) / Ctrl+Shift+\ (split abaixo): nova sessão no
-      // repo do painel ativo. Usamos e.code === 'Backslash' porque e.key vira '|'
-      // com Shift pressionado, fazendo Ctrl+Shift+\ nunca casar com '\\'.
-      if (e.code === 'Backslash') {
+      // Ctrl+\ (pane.splitRight) / Ctrl+Shift+\ (pane.splitBelow): nova sessão no
+      // repo do painel ativo. Os defaults usam e.code === 'Backslash' porque
+      // e.key vira '|' com Shift, fazendo Ctrl+Shift+\ nunca casar com '\\'.
+      const isSplitRight = matchCombo(e, resolveCombo('pane.splitRight', overrides))
+      const isSplitBelow = matchCombo(e, resolveCombo('pane.splitBelow', overrides))
+      if (isSplitRight || isSplitBelow) {
         const active = api?.activePanel
         const pane = active
           ? useAppStore.getState().panes.find((p) => p.paneId === active.id)
           : undefined
         if (pane) {
           e.preventDefault()
-          nextPosition.current = e.shiftKey ? 'below' : 'right'
+          nextPosition.current = isSplitBelow ? 'below' : 'right'
           void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
         }
         return
       }
 
-      // Ctrl+T: nova sessão como aba no mesmo grupo do painel ativo.
-      if (e.key === 't' && !e.shiftKey) {
+      // Ctrl+T (pane.newTab): nova sessão como aba no mesmo grupo do painel ativo.
+      if (matchCombo(e, resolveCombo('pane.newTab', overrides))) {
         const active = api?.activePanel
         const pane = active
           ? useAppStore.getState().panes.find((p) => p.paneId === active.id)
@@ -483,7 +495,7 @@ export function AppShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closePane, openSession])
+  }, [closePane, openSession, overrides])
 
   return (
     <div className="flex h-full w-full overflow-hidden">

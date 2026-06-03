@@ -444,6 +444,8 @@ export interface MetricsSnapshot {
   generatedAt: number
   scanned: boolean
   totals: MetricsTotals
+  // totais da janela imediatamente anterior (p/ delta). Ausente em 'all'.
+  previousTotals?: MetricsTotals
   perDay: MetricsDayPoint[]
   perSession: MetricsSessionRow[]
   perProject: MetricsProjectRow[]

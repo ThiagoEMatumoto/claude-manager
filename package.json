@@ -24,7 +24,10 @@
     "dist:win": "npm run rebuild:native && electron-vite build && electron-builder --win nsis",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:test",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
     "drive": "tsx e2e/scenarios/validate-projects.ts",
     "e2e": "playwright test"
   },
@@ -60,6 +63,8 @@
     "@electron/rebuild": "^4.0.4",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.16.0",
     "@types/react": "^18.3.12",
@@ -75,6 +80,8 @@
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "vitest": "^2.1.8",
+    "jsdom": "^25.0.1"
   }
 }

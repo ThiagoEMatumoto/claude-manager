@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { getDb } from './db'
 import { PROJECTS_ROOT } from './session-activity'
 import { resolvePrice } from './metrics-pricing'
+import { computeTotals, previousWindowRange } from './metrics-totals'
 import type {
   MetricsDayPoint,
   MetricsProjectRow,
@@ -12,7 +13,6 @@ import type {
   MetricsSessionRow,
   MetricsSnapshot,
   MetricsToolRow,
-  MetricsTotals,
   MetricsTypeBucket,
   MetricsWindow,
   SessionType,
@@ -448,24 +448,19 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     .prepare('SELECT * FROM metrics_session_cache WHERE last_ts IS NULL OR last_ts >= ?')
     .all(window === 'all' ? -1 : cutoff) as CacheRow[]
 
-  const totals: MetricsTotals = {
-    sessions: 0,
-    turns: 0,
-    agentCalls: 0,
-    skillCalls: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsd: 0,
-    cacheHitRate: 0,
-    parallelizationRatio: 0,
-    inlineDelegationRatio: 0,
-  }
-  // Acumuladores das métricas de orquestração (somados sobre as sessões da janela).
-  let totalAgentRounds = 0
-  let totalParallelRounds = 0
-  let totalInlineExploreCalls = 0
+  // Totais da janela (incl. ratios de orquestração/cache) — função pura testável.
+  const totals = computeTotals(rows)
+
+  // Totais da janela anterior, p/ delta na UI ('all' não tem anterior).
+  const prevRange = previousWindowRange(window, Date.now())
+  const previousTotals = prevRange
+    ? computeTotals(
+        db
+          .prepare('SELECT * FROM metrics_session_cache WHERE last_ts >= ? AND last_ts < ?')
+          .all(prevRange.from, prevRange.to) as CacheRow[],
+      )
+    : undefined
+
   const subagentTypeMap = new Map<string, number>()
   const perDayMap = new Map<string, MetricsDayPoint>()
   const perSession: MetricsSessionRow[] = []
@@ -475,16 +470,6 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
   const unknownModels = new Set<string>()
 
   for (const row of rows) {
-    totals.sessions += 1
-    totals.turns += row.turns
-    totals.agentCalls += row.agent_calls
-    totals.skillCalls += row.skill_calls
-    totals.inputTokens += row.input_tokens
-    totals.outputTokens += row.output_tokens
-    totals.cacheReadTokens += row.cache_read_tokens
-    totals.cacheWriteTokens += row.cache_write_tokens
-    totals.costUsd += row.cost_usd
-
     const sessionType = row.session_type as SessionType
     const tokens =
       row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens
@@ -547,10 +532,7 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
       // tools_json corrompido — ignora.
     }
 
-    // orquestração: rounds + inline explore + distribuição de subagent_type.
-    totalAgentRounds += row.agent_rounds
-    totalParallelRounds += row.parallel_rounds
-    totalInlineExploreCalls += row.inline_explore_calls
+    // distribuição de subagent_type (os ratios já vêm de computeTotals).
     try {
       const counts = JSON.parse(row.subagent_type_counts_json) as Record<string, number>
       for (const [type, count] of Object.entries(counts)) {
@@ -578,14 +560,6 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     }
   }
 
-  const cacheBase = totals.cacheReadTokens + totals.inputTokens
-  totals.cacheHitRate = cacheBase > 0 ? totals.cacheReadTokens / cacheBase : 0
-
-  totals.parallelizationRatio =
-    totalAgentRounds > 0 ? totalParallelRounds / totalAgentRounds : 0
-  const delegationBase = totals.agentCalls + totalInlineExploreCalls
-  totals.inlineDelegationRatio = delegationBase > 0 ? totals.agentCalls / delegationBase : 0
-
   const subagentTypeDistribution = [...subagentTypeMap.entries()]
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count)
@@ -604,6 +578,7 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     generatedAt: Date.now(),
     scanned,
     totals,
+    previousTotals,
     perDay,
     perSession,
     perProject,

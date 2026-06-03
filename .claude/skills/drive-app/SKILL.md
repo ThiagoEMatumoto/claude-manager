@@ -60,8 +60,9 @@ Pra interações além dos helpers, use a API normal do Playwright no `page` (`p
 ## Helpers disponíveis (`e2e/driver/`)
 
 - `launch.ts` → `launchApp()`: copia dados, lança, retorna `{ app, page, userDataCopy }`.
-- `capture.ts` → `screenshot(page, name)`, `captureLogs(app, page)`.
+- `capture.ts` → `screenshot(page, name)`, `captureLogs(app, page)` (console+pageerror+requestfailed+main io).
 - `nav.ts` → `waitReady(page)`, `goToArea(page, area)`, `openSettings(page)`, `toggleProject(page, name)`.
+- `inspect.ts` → `queryDb(userDataCopy, sql)`, `listTables(userDataCopy)`: leitura read-only do `app.db` da cópia via sql.js (wasm puro — sem `sqlite3` no sistema, sem conflito de ABI). Ambos são `async`.
 
 ## Troubleshooting
 
@@ -70,4 +71,9 @@ Pra interações além dos helpers, use a API normal do Playwright no `page` (`p
 
 ## Diagnóstico (Fase 2)
 
-Pra reproduzir um bug: escreva um cenário que execute o passo-a-passo, tire screenshots em pontos-chave, e depois leia `.cm-drive/logs/<timestamp>.log` (console do renderer + stdout/stderr do main) pra ver erros. O `app.db` da cópia pode ser inspecionado read-only com `sqlite3 <userDataCopy>/app.db`.
+Pra reproduzir um bug: escreva um cenário que execute o passo-a-passo, tire screenshots em pontos-chave, e correlacione com:
+
+- **Log** (`.cm-drive/logs/<timestamp>.log`): console do renderer, `pageerror`, `requestfailed`, e stdout/stderr do main.
+- **Estado** (`queryDb`/`listTables` do `inspect.ts`): inspeção read-only do `app.db` da cópia. Ex: `await queryDb(userDataCopy, 'SELECT * FROM projects')`.
+
+Veja `e2e/scenarios/diagnose.example.ts` como template — copie, adapte os passos do repro, rode com `npx tsx`.

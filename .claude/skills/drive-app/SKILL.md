@@ -64,6 +64,30 @@ Pra interações além dos helpers, use a API normal do Playwright no `page` (`p
 - `nav.ts` → `waitReady(page)`, `goToArea(page, area)`, `openSettings(page)`, `toggleProject(page, name)`.
 - `inspect.ts` → `queryDb(userDataCopy, sql)`, `listTables(userDataCopy)`: leitura read-only do `app.db` da cópia via sql.js (wasm puro — sem `sqlite3` no sistema, sem conflito de ABI). Ambos são `async`.
 
+## Regressão (Fase 3)
+
+Suite `@playwright/test` em `e2e/specs/` — asserções **estruturais** (independentes dos dados reais), então não quebram quando o conteúdo muda.
+
+```bash
+npm run e2e
+```
+
+Cada spec usa a fixture `cm` (de `e2e/specs/_base.ts`), que lança o app contra a cópia e fecha no fim:
+
+```ts
+import { expect, test } from './_base'
+import { waitReady, goToArea } from '../driver/nav'
+
+test('descrição', async ({ cm }) => {
+  const { page } = cm
+  await waitReady(page)
+  await goToArea(page, 'projects')
+  await expect(page.getByRole('button', { name: '+ Novo' })).toBeVisible()
+})
+```
+
+Para asserções que dependem de dados específicos (não estruturais), seedar um userData determinístico em `e2e/fixtures/` e fazer `launchApp` apontar pra ele é o próximo passo — assim como cenários destrutivos (mover vault/deletar repo) com paths reescritos pra dirs descartáveis.
+
 ## Troubleshooting
 
 - **`Electron failed to install correctly`**: o binário do Electron não foi baixado no `node_modules`. Rode `node node_modules/electron/install.js`. (No checkout principal isso normalmente já está resolvido porque você roda `npm run dev` lá.)

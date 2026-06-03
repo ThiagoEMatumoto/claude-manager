@@ -520,6 +520,7 @@ export interface Api {
   repo: {
     moveIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
     symlinkIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
+    removeSymlink(target: string): Promise<{ removed: boolean }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
   }
   workspace: {

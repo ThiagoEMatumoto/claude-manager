@@ -4,7 +4,7 @@ import { simpleGit } from 'simple-git'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, rename, cp, rm, symlink } from 'node:fs/promises'
+import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/promises'
 import { getDb } from '../services/db'
 
 const VAULT_ROOT_KEY = 'vault_root'
@@ -27,6 +27,7 @@ const moveSchema = z.object({
   label: z.string().min(1),
 })
 const symlinkSchema = moveSchema
+const removeSymlinkSchema = z.object({ target: z.string().min(1) })
 const cloneSchema = z.object({ url: z.string().min(1), vaultPath: z.string().min(1) })
 
 function repoNameFromUrl(url: string): string {
@@ -72,6 +73,20 @@ export function registerGitIpc(): void {
   ipcMain.handle('repo:move-into-vault', async (_e, payload: unknown) => {
     const { source, vaultPath, label } = moveSchema.parse(payload)
     const dest = path.join(vaultPath, label)
+
+    // O destino pode já existir. Caso comum: um symlink órfão deixado por um
+    // registro 'symlink' anterior que foi deletado. Tratamos antes do rename
+    // (que falharia com EEXIST/ENOTEMPTY e seria engolido pela UI).
+    const destStat = await lstat(dest).catch(() => null)
+    if (destStat) {
+      if (destStat.isSymbolicLink()) {
+        // Artefato órfão: remove só o link (NÃO segue o alvo) e segue com o move.
+        await unlink(dest)
+      } else {
+        throw new Error(`destino já existe: ${dest}`)
+      }
+    }
+
     try {
       await rename(source, dest)
     } catch (err) {
@@ -94,6 +109,19 @@ export function registerGitIpc(): void {
       throw new Error(`Falha ao criar symlink em ${dest}: ${(err as Error).message}`)
     }
     return { path: dest }
+  })
+
+  ipcMain.handle('repo:remove-symlink', async (_e, payload: unknown) => {
+    const { target } = removeSymlinkSchema.parse(payload)
+    const stat = await lstat(target).catch(() => null)
+    if (!stat) return { removed: false }
+    // Segurança: só removemos symlinks. Diretórios/arquivos reais são dados do
+    // usuário e jamais devem ser apagados aqui.
+    if (!stat.isSymbolicLink()) {
+      throw new Error(`não é um symlink, recusando remover: ${target}`)
+    }
+    await unlink(target)
+    return { removed: true }
   })
 
   ipcMain.handle('repo:clone-url', async (_e, payload: unknown) => {

@@ -217,6 +217,11 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
           onChoose={async (repo) => {
             await done(repo)
           }}
+          onError={(message) => {
+            // Volta pro diálogo principal e mostra o erro (sem avançar).
+            setLinkChoice(null)
+            setError(`Não foi possível adicionar o repositório. ${message}`)
+          }}
         />
       )}
     </>

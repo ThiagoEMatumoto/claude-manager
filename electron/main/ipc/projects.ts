@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, lstatSync, unlinkSync } from 'node:fs'
 import { z } from 'zod'
 import { getDb } from '../services/db'
 import type {
@@ -198,6 +198,24 @@ export function registerProjectIpc(): void {
   })
 
   ipcMain.handle('projects:repos:delete', (_e, id: string) => {
-    getDb().prepare('DELETE FROM repos WHERE id = ?').run(id)
+    const db = getDb()
+    const row = db.prepare('SELECT * FROM repos WHERE id = ?').get(id) as RepoRow | undefined
+
+    // Limpeza de disco antes de remover do DB:
+    // - symlink: remove o link do vault (alvo intacto).
+    // - inside: NUNCA apaga o diretório real (é dado do usuário) — só sai do DB.
+    // - external: nada no disco.
+    if (row?.link_kind === 'symlink' && row.path) {
+      try {
+        // Defensivo: só removemos se de fato for um symlink no disco.
+        if (lstatSync(row.path).isSymbolicLink()) {
+          unlinkSync(row.path)
+        }
+      } catch {
+        // Symlink já ausente / inacessível — não bloqueia a remoção do registro.
+      }
+    }
+
+    db.prepare('DELETE FROM repos WHERE id = ?').run(id)
   })
 }

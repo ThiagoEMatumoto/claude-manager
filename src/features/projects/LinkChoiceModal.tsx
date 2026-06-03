@@ -11,11 +11,20 @@ interface Props {
   vaultPath: string
   label: string
   onChoose: (repo: Omit<CreateRepoInput, 'projectId'>) => Promise<void>
+  onError: (message: string) => void
 }
 
 type Choice = 'move' | 'symlink' | 'external'
 
-export function LinkChoiceModal({ open, onClose, source, vaultPath, label, onChoose }: Props) {
+export function LinkChoiceModal({
+  open,
+  onClose,
+  source,
+  vaultPath,
+  label,
+  onChoose,
+  onError,
+}: Props) {
   const [busy, setBusy] = useState<Choice | null>(null)
 
   async function pick(choice: Choice) {
@@ -27,11 +36,22 @@ export function LinkChoiceModal({ open, onClose, source, vaultPath, label, onCho
         await onChoose({ label, path, linkKind: 'inside', source: 'local' })
       } else if (choice === 'symlink') {
         const { path } = await repoApi.symlinkIntoVault(source, vaultPath, label)
-        await onChoose({ label, path, linkKind: 'symlink', source: 'local' })
+        try {
+          await onChoose({ label, path, linkKind: 'symlink', source: 'local' })
+        } catch (insertErr) {
+          // Registro não-atômico: o symlink foi criado mas o insert no DB falhou.
+          // Reverte o artefato de disco pra não deixar symlink órfão no vault.
+          await repoApi.removeSymlink(path).catch(() => {})
+          throw insertErr
+        }
       } else {
         await onChoose({ label, path: source, linkKind: 'external', source: 'local' })
       }
       onClose()
+    } catch (err) {
+      // Surfacing do erro: NÃO fechar/avançar como se tivesse dado certo.
+      const detail = err instanceof Error ? err.message : String(err)
+      onError(detail)
     } finally {
       setBusy(null)
     }

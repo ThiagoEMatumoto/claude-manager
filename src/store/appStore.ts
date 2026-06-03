@@ -4,6 +4,26 @@ import type { LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/
 
 export type Area = 'projects' | 'cc-configs' | 'metrics' | 'features'
 
+// Persistência leve do estado colapsado da sidebar (mesmo padrão do
+// keybindings-store: localStorage no renderer, sem IPC/DB).
+const SIDEBAR_COLLAPSED_KEY = 'cm:sidebar-collapsed'
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+  } catch {
+    // localStorage indisponível — estado segue só em memória.
+  }
+}
+
 export interface ActivePane {
   paneId: string
   session: Session
@@ -118,6 +138,7 @@ function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane 
 interface AppState {
   area: Area
   activeProjectId: string | null
+  sidebarCollapsed: boolean
   panes: ActivePane[]
   // Todas as sessões vivas (PTYs no main), atualizadas pelo stream global. Dono
   // único da assinatura — strip e overlay só leem. Snapshot via listLiveGlobal,
@@ -136,6 +157,8 @@ interface AppState {
   gridRequest: string[] | null
 
   setArea: (area: Area) => void
+  toggleSidebar: () => void
+  setSidebarCollapsed: (collapsed: boolean) => void
   initActiveProject: () => Promise<void>
   restoreWorkspace: () => Promise<void>
   retryRestore: () => Promise<void>
@@ -181,6 +204,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   area: 'projects',
   activeProjectId: null,
+  sidebarCollapsed: readSidebarCollapsed(),
   panes: [],
   liveSessions: [],
   restoreBlocked: false,
@@ -189,6 +213,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   gridRequest: null,
 
   setArea: (area) => set({ area }),
+
+  toggleSidebar: () => {
+    const next = !get().sidebarCollapsed
+    writeSidebarCollapsed(next)
+    set({ sidebarCollapsed: next })
+  },
+
+  setSidebarCollapsed: (collapsed) => {
+    writeSidebarCollapsed(collapsed)
+    set({ sidebarCollapsed: collapsed })
+  },
 
   initActiveProject: async () => {
     const id = await workspaceApi.getActive()

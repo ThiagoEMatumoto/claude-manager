@@ -10,7 +10,9 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from 'dockview'
+import { PanelLeftOpen } from 'lucide-react'
 import { IconRail } from './IconRail'
+import { Icon } from '@/components/ui/Icon'
 import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { MetricsArea } from '@/features/metrics/MetricsArea'
@@ -98,6 +100,8 @@ const tabComponents = { terminal: TerminalTab }
 
 export function AppShell() {
   const area = useAppStore((s) => s.area)
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar)
   const panes = useAppStore((s) => s.panes)
   const closePane = useAppStore((s) => s.closePane)
   const openSession = useAppStore((s) => s.openSession)
@@ -528,8 +532,23 @@ export function AppShell() {
       {area === 'metrics' && <MetricsArea />}
 
       {/* O bloco de projetos fica sempre montado (dockview/xterm vivo), apenas
-          escondido quando outra área está ativa. */}
-      {area === 'projects' && <ProjectsSidebar />}
+          escondido quando outra área está ativa. Colapsado: a sidebar some e um
+          botão estreito encostado no IconRail a reabre. */}
+      {area === 'projects' &&
+        (sidebarCollapsed ? (
+          <div className="flex w-9 shrink-0 flex-col items-center border-r border-[var(--color-border)] bg-[var(--color-surface)] py-3">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              title="Expandir barra lateral"
+              className="rounded-md p-1.5 text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]"
+            >
+              <Icon as={PanelLeftOpen} size={18} />
+            </button>
+          </div>
+        ) : (
+          <ProjectsSidebar />
+        ))}
 
       <main className={`flex flex-1 flex-col overflow-hidden ${area === 'projects' ? '' : 'hidden'}`}>
         {restoreBlocked && (

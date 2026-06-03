@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, SquarePen, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -16,6 +16,7 @@ import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
+import { PromptComposer } from './PromptComposer'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
@@ -115,6 +116,12 @@ export function Terminal({
   const [searchQuery, setSearchQuery] = useState('')
   const [pastePreview, setPastePreview] = useState<string | null>(null)
   const [multilineActive, setMultilineActive] = useState(false)
+  const [composerOpen, setComposerOpen] = useState(false)
+  const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
+  // O key handler do xterm é registrado uma vez (no mount); uma ref evita ler um
+  // `activity` stale ao decidir interceptar as setas.
+  const activityRef = useRef<SessionActivity | null>(activity)
+  activityRef.current = activity
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -193,6 +200,17 @@ export function Terminal({
     if (!text) return
     if (needsPasteConfirm(text)) setPastePreview(text)
     else xtermRef.current?.paste(text) // respeita bracketed-paste, não auto-submete
+  }
+
+  // Compose box: injeta o texto no input do claude via paste (bracketed, não
+  // auto-submete); sendPrompt ainda manda o \r final pra submeter.
+  function insertPrompt(text: string) {
+    xtermRef.current?.focus()
+    xtermRef.current?.paste(text)
+  }
+  function sendPrompt(text: string) {
+    insertPrompt(text)
+    write('\r')
   }
 
   function commitRename() {
@@ -320,6 +338,29 @@ export function Terminal({
       if (matchCombo(e, resolveCombo('terminal.newline', kbOverrides)) || (e.key === 'Enter' && e.altKey)) {
         setMultilineActive(true)
         write('\x1b\r')
+        return false
+      }
+
+      // Compose box: abre o editor de prompt (default Ctrl+Shift+E).
+      if (matchCombo(e, resolveCombo('terminal.compose', kbOverrides))) {
+        setComposerOpen(true)
+        return false
+      }
+
+      // Navegação por linha visual (opt-in): ↑/↓ movem o cursor uma linha VISUAL
+      // (uma largura de tela) em vez de cair no histórico do claude. Só quando o
+      // modo está ligado, a sessão não está processando, e sem modificadores.
+      if (
+        useTerminalPrefsStore.getState().visualLineNav &&
+        activityRef.current?.status !== 'working' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+      ) {
+        const step = e.key === 'ArrowUp' ? '\x1b[D' : '\x1b[C'
+        write(step.repeat(Math.max(1, term.cols)))
         return false
       }
 
@@ -505,6 +546,14 @@ export function Terminal({
                   ⇧⏎ multilinha
                 </span>
               )}
+              {visualLineNav && (
+                <span
+                  title="Navegação por linha visual ligada — ↑/↓ movem pelo prompt em vez do histórico (Configurações ▸ Terminal)"
+                  className="flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+                >
+                  ↕ por linha
+                </span>
+              )}
             </div>
           )}
           {exited &&
@@ -524,6 +573,17 @@ export function Terminal({
               <Icon as={AlertCircle} size={13} />
               {error}
             </span>
+          )}
+          {!exited && (
+            <button
+              type="button"
+              onClick={() => setComposerOpen(true)}
+              title="Compor prompt num editor (Ctrl+Shift+E) — navegação completa por setas, clique e seleção"
+              aria-label="Compor prompt"
+              className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
+            >
+              <Icon as={SquarePen} size={13} />
+            </button>
           )}
           <button
             type="button"
@@ -585,6 +645,17 @@ export function Terminal({
 
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="h-full bg-[var(--color-bg)] p-2" />
+
+        <PromptComposer
+          open={composerOpen}
+          onClose={() => {
+            setComposerOpen(false)
+            xtermRef.current?.focus()
+          }}
+          onSend={sendPrompt}
+          onInsert={insertPrompt}
+        />
+
 
         {searchOpen && (
           <div

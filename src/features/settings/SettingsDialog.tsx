@@ -84,6 +84,8 @@ function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
   const scrollback = useTerminalPrefsStore((s) => s.scrollback)
   const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
+  const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
+  const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
 
   useEffect(() => {
     if (!open) return
@@ -141,6 +143,23 @@ function GeneralTab({ open }: { open: boolean }) {
             className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
           />
         </div>
+
+        <label className="mt-3 flex items-start justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Navegação por linha visual (↑/↓ no prompt)</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              ↑/↓ movem o cursor pelas linhas do prompt em vez de ir pro histórico. Pode
+              interferir no histórico e em menus de seleção do claude. Para compor prompts
+              longos sem isso, use o editor de prompt (Ctrl+Shift+E).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={visualLineNav}
+            onChange={(e) => void setVisualLineNav(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
       </div>
     </div>
   )

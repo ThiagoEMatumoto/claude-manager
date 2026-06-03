@@ -91,6 +91,7 @@ export function Terminal({
   const hostRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const searchRef = useRef<SearchAddon | null>(null)
   const fontSize = useTerminalPrefsStore((s) => s.fontSize)
   // Heurístico de "claude não encontrado": registramos se algum byte chegou do PTY.
   // Se o processo saiu rápido com código != 0 e nunca emitiu nada, provavelmente o
@@ -105,6 +106,8 @@ export function Terminal({
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -209,7 +212,9 @@ export function Terminal({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon())
-    term.loadAddon(new SearchAddon())
+    const search = new SearchAddon()
+    term.loadAddon(search)
+    searchRef.current = search
     term.loadAddon(new ClipboardAddon())
     term.open(host)
     fit.fit()
@@ -281,6 +286,13 @@ export function Terminal({
         return false
       }
 
+      // Busca no terminal: combo configurável (default Ctrl/Cmd+F). Abre o overlay
+      // por-pane ligado ao SearchAddon deste terminal.
+      if (matchCombo(e, resolveCombo('terminal.search', useKeybindingsStore.getState().overrides))) {
+        setSearchOpen(true)
+        return false
+      }
+
       // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
       return true
     })
@@ -309,6 +321,7 @@ export function Terminal({
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
+      searchRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
@@ -478,7 +491,67 @@ export function Terminal({
         </div>
       )}
 
-      <div ref={hostRef} className="min-h-0 flex-1 bg-[var(--color-bg)] p-2" />
+      <div className="relative min-h-0 flex-1">
+        <div ref={hostRef} className="h-full bg-[var(--color-bg)] p-2" />
+
+        {searchOpen && (
+          <div
+            className="absolute right-3 top-3 z-40 flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              autoFocus
+              value={searchQuery}
+              placeholder="Buscar…"
+              onChange={(e) => {
+                const value = e.target.value
+                setSearchQuery(value)
+                searchRef.current?.findNext(value)
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (e.shiftKey) searchRef.current?.findPrevious(searchQuery)
+                  else searchRef.current?.findNext(searchQuery)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSearchOpen(false)
+                  xtermRef.current?.focus()
+                }
+              }}
+              className="w-44 bg-transparent text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)]"
+            />
+            <button
+              type="button"
+              title="Anterior (Shift+Enter)"
+              onClick={() => searchRef.current?.findPrevious(searchQuery)}
+              className="rounded px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              title="Próximo (Enter)"
+              onClick={() => searchRef.current?.findNext(searchQuery)}
+              className="rounded px-1 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              title="Fechar (Esc)"
+              onClick={() => {
+                setSearchOpen(false)
+                xtermRef.current?.focus()
+              }}
+              className="rounded px-1 text-[var(--color-text-dim)] hover:text-[var(--color-danger)]"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
 
       {menu && (
         <div

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AppShell } from './AppShell'
 import { useProjects } from '@/features/projects/useProjects'
 import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
@@ -47,11 +48,13 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TitleBar />
       <div className="min-h-0 flex-1">
-        {vaultConfigured === false ? (
-          <WelcomeDialog onDone={() => setVaultConfigured(true)} />
-        ) : (
-          <AppShell />
-        )}
+        <ErrorBoundary>
+          {vaultConfigured === false ? (
+            <WelcomeDialog onDone={() => setVaultConfigured(true)} />
+          ) : (
+            <AppShell />
+          )}
+        </ErrorBoundary>
       </div>
     </div>
   )

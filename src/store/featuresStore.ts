@@ -94,21 +94,38 @@ export const useFeaturesStore = create<FeaturesState>((set, get) => ({
     // StrictMode monta o effect 2x; só uma assinatura real.
     if (updatedStarted) return
     updatedStarted = true
-    offUpdated = featuresApi.onUpdated((feature) => {
-      // Atualiza/insere o item no índice (preservando ordem por updatedAt desc).
-      set((s) => {
-        const exists = s.features.some((f) => f.id === feature.id)
-        const next = exists
-          ? s.features.map((f) => (f.id === feature.id ? { ...feature, body: undefined } : f))
-          : [...s.features, { ...feature, body: undefined }]
-        return { features: next, byProject: groupByProject(next) }
-      })
-      // Recarrega o doc aberto se foi ele que mudou (pra refletir corpo/history).
-      if (get().selectedId === feature.id) {
-        void get().select(feature.id)
+    offUpdated = featuresApi.onUpdated((payload) => {
+      // O canal `feature:updated` também carrega payloads de SINAL que não são uma
+      // Feature completa (backfill `{backfill:true}`, archive `{id,archived}`,
+      // watcher de arquivo inválido `{docPath}`). Tratá-los como Feature inseria
+      // lixo na lista e quebrava o render (tela preta). Sem `id`+`projectId`
+      // válidos => é sinal de reload, não um item: recarrega e sai.
+      const feature = payload as Partial<Feature> | null | undefined
+      if (!feature || typeof feature.id !== 'string' || typeof feature.projectId !== 'string') {
+        void get().refresh()
+        return
       }
-      // Recalcula stats (contagem de sessões / coluna archived do board).
-      void get().loadStats()
+      const valid = feature as Feature
+      try {
+        // Atualiza/insere o item no índice (preservando ordem por updatedAt desc).
+        set((s) => {
+          const exists = s.features.some((f) => f.id === valid.id)
+          const next = exists
+            ? s.features.map((f) => (f.id === valid.id ? { ...valid, body: undefined } : f))
+            : [...s.features, { ...valid, body: undefined }]
+          return { features: next, byProject: groupByProject(next) }
+        })
+        // Recarrega o doc aberto se foi ele que mudou (pra refletir corpo/history).
+        if (get().selectedId === valid.id) {
+          void get().select(valid.id)
+        }
+        // Recalcula stats (contagem de sessões / coluna archived do board).
+        void get().loadStats()
+      } catch (err) {
+        // Defesa: um payload ruim nunca deve derrubar o app. Cai pro reload.
+        console.error('[featuresStore] onUpdated falhou, recarregando:', err)
+        void get().refresh()
+      }
     })
   },
 

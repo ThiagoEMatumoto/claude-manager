@@ -8,6 +8,7 @@ import * as metricsCwd from './006_metrics_cwd'
 import * as features from './007_features'
 import * as metricsOrchestration from './008_metrics_orchestration'
 import * as projectPosition from './009_project_position'
+import * as featureSessionRecords from './010_feature_session_records'
 
 interface Migration {
   version: number
@@ -25,6 +26,7 @@ const migrations: Migration[] = [
   features,
   metricsOrchestration,
   projectPosition,
+  featureSessionRecords,
 ]
 
 export function runMigrations(db: Database.Database): void {

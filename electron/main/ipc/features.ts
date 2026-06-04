@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import * as featureStore from '../services/feature-store'
 import { getDb } from '../services/db'
-import { featureMemory } from '../services/feature-memory'
+import { featureMemory, type SessionExitInfo } from '../services/feature-memory'
 import type {
   Feature,
   FeatureWithStats,
@@ -58,8 +58,10 @@ export function registerFeaturesIpc(): void {
   })
 
   // Backfill retroativo: reprocessa sessões já encerradas e ainda não vinculadas,
-  // criando/linkando as features perdidas (sem síntese LLM). Em ordem cronológica
-  // pra que features criadas cedo capturem sessões posteriores (branch/fuzzy).
+  // criando/linkando as features perdidas. A LINKAGEM é síncrona e rápida (sem LLM);
+  // a geração de registros ricos (Stage 1) + síntese holística (Stage 2) roda numa
+  // fila throttled em background, pra não travar a UI nem disparar rajada de LLM.
+  // Em ordem cronológica pra que features criadas cedo capturem sessões posteriores.
   ipcMain.handle('features:backfill', (): FeatureBackfillResult => {
     const rows = getDb()
       .prepare(
@@ -79,17 +81,26 @@ export function registerFeaturesIpc(): void {
     let created = 0
     let linked = 0
     let skipped = 0
+    const jobs: Array<{ info: SessionExitInfo; featureId: string }> = []
     for (const r of rows) {
-      const res = featureMemory.registerOnly({
+      const info: SessionExitInfo = {
         sessionId: r.id,
         ccSessionId: r.cc_session_id,
         repoId: r.repo_id,
         featureId: r.feature_id,
-      })
-      if (!res) skipped++
-      else if (res.kind === 'auto-created') created++
+      }
+      const res = featureMemory.registerOnly(info)
+      if (!res) {
+        skipped++
+        continue
+      }
+      if (res.kind === 'auto-created') created++
       else linked++
+      jobs.push({ info, featureId: res.featureId })
     }
+    // Background: gera os registros (throttled) e, ao terminar cada feature, a
+    // síntese holística. Não bloqueia o retorno do backfill.
+    featureMemory.enqueueRecords(jobs)
     broadcast('feature:updated', { backfill: true })
     return { created, linked, skipped }
   })

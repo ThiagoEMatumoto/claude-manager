@@ -80,23 +80,24 @@ interface Frontmatter {
   model: string | null
 }
 
-const SECTIONS = [
-  'Overview',
-  'Business Rules',
-  'Approach',
-  'Decisions',
-  'Progress',
-  'Next Steps',
-  'Context/References',
-  'History',
+// Estrutura enxuta: 5 seções coesas, TODAS editáveis pela síntese holística
+// (Stage 2). Acaba com os headers sempre-vazios e o "preserve freeze" do design
+// antigo (8 seções, metade nunca preenchida).
+export const SECTIONS = [
+  'Visão geral',
+  'Estado atual',
+  'Decisões',
+  'Pontos em aberto',
+  'Linha do tempo',
 ] as const
 
 function skeletonBody(seed: { overview?: string; businessRules?: string; approach?: string }): string {
-  const map: Record<string, string> = {
-    Overview: seed.overview?.trim() ?? '',
-    'Business Rules': seed.businessRules?.trim() ?? '',
-    Approach: seed.approach?.trim() ?? '',
-  }
+  // Os seeds opcionais do create (objetivo/regras/abordagem) entram todos na
+  // "Visão geral"; a síntese holística reescreve o corpo depois.
+  const overviewParts = [seed.overview?.trim(), seed.businessRules?.trim(), seed.approach?.trim()]
+    .filter(Boolean)
+    .join('\n\n')
+  const map: Record<string, string> = { 'Visão geral': overviewParts }
   return (
     SECTIONS.map((h) => {
       const content = map[h] ?? ''
@@ -409,6 +410,85 @@ export function findFeatureByRepoBranch(repoId: string, branch: string): Feature
 // Features NÃO-arquivadas de um projeto (sem corpo). Reusa list(projectId).
 export function listActiveFeaturesByProject(projectId: string): Feature[] {
   return list(projectId)
+}
+
+// ---- Registros de sessão (Stage 1 do two-stage) ----
+
+export interface SessionRecord {
+  sessionId: string
+  featureId: string
+  ccSessionId: string | null
+  summary: string
+  model: string | null
+  // Quando a sessão realmente rodou (sessions.started_at) — data da "Linha do tempo".
+  sessionAt: number
+  createdAt: number
+}
+
+// Upsert idempotente: re-sintetizar a mesma sessão substitui o registro. `session_at`
+// vem de sessions.started_at (data real do trabalho), não do horário da síntese.
+export function saveSessionRecord(rec: Omit<SessionRecord, 'createdAt' | 'sessionAt'>): void {
+  const db = getDb()
+  const now = Date.now()
+  const srow = db.prepare('SELECT started_at FROM sessions WHERE id = ?').get(rec.sessionId) as
+    | { started_at: number | null }
+    | undefined
+  const sessionAt = srow?.started_at ?? now
+  db.prepare(
+    `INSERT INTO feature_session_records (session_id, feature_id, cc_session_id, summary, model, session_at, created_at)
+     VALUES (@session_id, @feature_id, @cc_session_id, @summary, @model, @session_at, @created_at)
+     ON CONFLICT(session_id) DO UPDATE SET
+       feature_id = excluded.feature_id,
+       cc_session_id = excluded.cc_session_id,
+       summary = excluded.summary,
+       model = excluded.model,
+       session_at = excluded.session_at,
+       created_at = excluded.created_at`,
+  ).run({
+    session_id: rec.sessionId,
+    feature_id: rec.featureId,
+    cc_session_id: rec.ccSessionId,
+    summary: rec.summary,
+    model: rec.model,
+    session_at: sessionAt,
+    created_at: now,
+  })
+}
+
+// Todos os registros de uma feature, em ordem cronológica REAL da sessão (entrada
+// do Stage 2). Ordena por session_at; created_at é desempate determinístico.
+export function listSessionRecords(featureId: string): SessionRecord[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT session_id, feature_id, cc_session_id, summary, model, session_at, created_at
+         FROM feature_session_records WHERE feature_id = ?
+        ORDER BY session_at ASC, created_at ASC`,
+    )
+    .all(featureId) as Array<{
+    session_id: string
+    feature_id: string
+    cc_session_id: string | null
+    summary: string
+    model: string | null
+    session_at: number
+    created_at: number
+  }>
+  return rows.map((r) => ({
+    sessionId: r.session_id,
+    featureId: r.feature_id,
+    ccSessionId: r.cc_session_id,
+    summary: r.summary,
+    model: r.model,
+    sessionAt: r.session_at,
+    createdAt: r.created_at,
+  }))
+}
+
+export function hasSessionRecord(sessionId: string): boolean {
+  const row = getDb()
+    .prepare('SELECT 1 FROM feature_session_records WHERE session_id = ?')
+    .get(sessionId)
+  return !!row
 }
 
 export function update(input: UpdateFeatureInput): Feature {

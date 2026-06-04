@@ -12,25 +12,26 @@ import {
   listActiveFeaturesByProject,
   getProjectIdForRepo,
   getRepoPath,
+  saveSessionRecord,
+  listSessionRecords,
 } from './feature-store'
 import { findTranscriptPath } from './session-activity'
 import { runClaude } from './claude-cli'
+import { isProtectedBranch, normalizeBranch, fuzzyScore, decideRegistration } from './feature-heuristics'
 import {
-  isProtectedBranch,
-  normalizeBranch,
-  pickWorkBranch,
-  fuzzyScore,
-  decideRegistration,
-} from './feature-heuristics'
+  buildDigest,
+  renderDigestForRecord,
+  buildRecordPrompt,
+  buildHolisticPrompt,
+  stripCodeFence,
+  stripToFrontmatter,
+  isValidDoc,
+} from './feature-digest'
 
 const SYNTH_TIMEOUT_MS = 90_000
 const DEBOUNCE_MS = 4_000
-const MAX_USER_PROMPT_CHARS = 600
-const MAX_ASSISTANT_TEXT_CHARS = 400
-const MAX_DIGEST_ENTRIES = 40
 const SYNTH_MODEL_KEY = 'synth_model'
 const SYNTH_MODE_KEY = 'synth_mode'
-
 const MAX_AUTO_OBJECTIVE_CHARS = 600
 
 // Modo de síntese global (app_prefs); 'threshold' como default seguro.
@@ -58,189 +59,6 @@ function emitSynthError(featureId: string, message: string): void {
   broadcast('feature:synth-error', event)
 }
 
-// ---- Distilação do transcript (reusa o shape de TranscriptLine de session-activity) ----
-
-interface ContentItem {
-  type?: string
-  text?: string
-  name?: string
-  input?: { file_path?: string; path?: string }
-}
-
-interface TranscriptLine {
-  type?: string
-  gitBranch?: string
-  message?: {
-    role?: string
-    content?: ContentItem[] | string
-  }
-}
-
-interface Digest {
-  userPrompts: string[]
-  assistantNotes: string[]
-  filesTouched: string[]
-  gitBranch: string | null
-  refs: string[] // PR/commit citados
-  userTurns: number
-  editCount: number
-}
-
-const PR_RE = /\b(?:PR\s*#?\d+|#\d+|\b[0-9a-f]{7,40}\b)/gi
-
-function parseTranscript(path: string): TranscriptLine[] {
-  let raw: string
-  try {
-    raw = readFileSync(path, 'utf8')
-  } catch {
-    return []
-  }
-  const out: TranscriptLine[] = []
-  for (const line of raw.split('\n')) {
-    const t = line.trim()
-    if (!t) continue
-    try {
-      out.push(JSON.parse(t) as TranscriptLine)
-    } catch {
-      // linha parcial/inválida — ignora.
-    }
-  }
-  return out
-}
-
-function contentText(content: ContentItem[] | string | undefined): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((c) => c.type === 'text' && typeof c.text === 'string')
-    .map((c) => c.text as string)
-    .join('\n')
-    .trim()
-}
-
-// Lê o JSONL inteiro UMA vez e produz um digest compacto. NUNCA inclui o JSONL
-// cru no prompt — só prompts truncados, notas do assistant, arquivos editados,
-// branch e refs citados.
-function buildDigest(path: string): Digest {
-  const lines = parseTranscript(path)
-  const userPrompts: string[] = []
-  const assistantNotes: string[] = []
-  const filesTouched = new Set<string>()
-  const refs = new Set<string>()
-  const branchesSeen: string[] = []
-  let userTurns = 0
-  let editCount = 0
-
-  for (const l of lines) {
-    if (l.gitBranch && branchesSeen[branchesSeen.length - 1] !== l.gitBranch) {
-      branchesSeen.push(l.gitBranch)
-    }
-    const role = l.message?.role
-    const content = l.message?.content
-
-    if (role === 'user') {
-      const text = contentText(content)
-      // Mensagens de tool_result voltam como role:user com content estruturado
-      // sem texto — só contamos turnos com texto real do usuário.
-      if (text && !text.startsWith('<')) {
-        userTurns++
-        userPrompts.push(text.slice(0, MAX_USER_PROMPT_CHARS))
-        for (const m of text.match(PR_RE) ?? []) refs.add(m)
-      }
-    } else if (role === 'assistant') {
-      const text = contentText(content)
-      if (text) {
-        assistantNotes.push(text.slice(0, MAX_ASSISTANT_TEXT_CHARS))
-        for (const m of text.match(PR_RE) ?? []) refs.add(m)
-      }
-      if (Array.isArray(content)) {
-        for (const c of content) {
-          if (c.type === 'tool_use' && (c.name === 'Edit' || c.name === 'Write')) {
-            editCount++
-            const fp = c.input?.file_path ?? c.input?.path
-            if (fp) filesTouched.add(fp)
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    userPrompts: userPrompts.slice(-MAX_DIGEST_ENTRIES),
-    assistantNotes: assistantNotes.slice(-MAX_DIGEST_ENTRIES),
-    filesTouched: [...filesTouched],
-    gitBranch: pickWorkBranch(branchesSeen),
-    refs: [...refs].slice(0, 20),
-    userTurns,
-    editCount,
-  }
-}
-
-function renderDigest(d: Digest): string {
-  const parts: string[] = []
-  if (d.gitBranch) parts.push(`Branch: ${d.gitBranch}`)
-  if (d.refs.length) parts.push(`Referências citadas (PR/commit): ${d.refs.join(', ')}`)
-  if (d.filesTouched.length) {
-    parts.push(`Arquivos editados (${d.filesTouched.length}):\n${d.filesTouched.map((f) => `- ${f}`).join('\n')}`)
-  }
-  if (d.userPrompts.length) {
-    parts.push(`Pedidos do usuário (cronológico):\n${d.userPrompts.map((p) => `- ${p}`).join('\n')}`)
-  }
-  if (d.assistantNotes.length) {
-    parts.push(`Notas do assistant (cronológico):\n${d.assistantNotes.map((p) => `- ${p}`).join('\n')}`)
-  }
-  return parts.join('\n\n')
-}
-
-// ---- Prompt + parse do output ----
-
-function buildPrompt(currentMd: string, digest: string): string {
-  return [
-    'Você é um curador de documentação de feature do claude-manager.',
-    'Abaixo está o documento Markdown ATUAL da feature (com frontmatter YAML) e um RESUMO da última sessão de trabalho.',
-    '',
-    'Sua tarefa:',
-    '- Atualize as seções "## Progress", "## Next Steps" e "## Decisions" com o que aconteceu na sessão.',
-    '- APPEND (não substitua) uma entrada datada na seção "## History" no formato exato `- YYYY-MM-DD: <evento sucinto>` (use a data de hoje).',
-    '- PRESERVE integralmente as seções "## Overview", "## Business Rules" e "## Approach" — não as reescreva.',
-    '- Mantenha o MESMO frontmatter YAML (id/title/status/etc) inalterado, exceto se a sessão indicar claramente mudança de status.',
-    '- Seja conciso e factual. Não invente trabalho que não está no resumo.',
-    '',
-    'Devolva APENAS o Markdown COMPLETO do documento (frontmatter + corpo), sem cercas de código, sem comentários extras.',
-    '',
-    '===== DOCUMENTO ATUAL =====',
-    currentMd,
-    '',
-    '===== RESUMO DA SESSÃO =====',
-    digest,
-  ].join('\n')
-}
-
-// Remove cercas de código markdown que o modelo às vezes envolve no output inteiro.
-function stripCodeFence(s: string): string {
-  const t = s.trim()
-  if (t.startsWith('```')) {
-    const firstNl = t.indexOf('\n')
-    const lastFence = t.lastIndexOf('```')
-    if (firstNl !== -1 && lastFence > firstNl) {
-      return t.slice(firstNl + 1, lastFence).trim()
-    }
-  }
-  return t
-}
-
-// Valida que o output parseia no gray-matter com frontmatter mínimo (id/title/status).
-function isValidDoc(md: string): boolean {
-  if (!md.trim()) return false
-  try {
-    const parsed = matter(md)
-    const fm = parsed.data as { id?: unknown; title?: unknown; status?: unknown }
-    return typeof fm.id === 'string' && typeof fm.title === 'string' && typeof fm.status === 'string'
-  } catch {
-    return false
-  }
-}
-
 function resolveModel(feature: Feature): string | null {
   if (feature.model) return feature.model
   try {
@@ -265,19 +83,28 @@ export interface SessionExitInfo {
 
 type LinkKind = 'manual' | 'auto-linked' | 'auto-created'
 
+interface RecordJob {
+  info: SessionExitInfo
+  featureId: string
+}
+
 class FeatureMemoryService {
-  // Debounce por-feature: várias sessões da mesma feature encerrando em sequência
-  // colapsam numa única síntese.
+  // Debounce por-feature da síntese holística (Stage 2): várias sessões da mesma
+  // feature colapsam numa única regeneração.
   private timers = new Map<string, NodeJS.Timeout>()
   private running = new Set<string>()
+  // Fila throttled (concorrência 1) de geração de registros (Stage 1). Usada tanto
+  // pelo fluxo live (1 sessão) quanto pelo backfill (N sessões) — evita rajada de
+  // chamadas LLM concorrentes.
+  private recordQueue: RecordJob[] = []
+  private draining = false
 
   onSessionExit(info: SessionExitInfo): void {
     if (!info.ccSessionId) return
-    const ccSessionId = info.ccSessionId
 
     let resolution: { featureId: string; kind: LinkKind } | null = null
     try {
-      resolution = this.resolveFeature(info, ccSessionId)
+      resolution = this.resolveFeature(info, info.ccSessionId)
     } catch (err) {
       console.error('[feature-memory] resolução de feature falhou:', err)
       return
@@ -287,25 +114,17 @@ class FeatureMemoryService {
     const { featureId, kind } = resolution
     console.log(`[feature-memory] session ${info.sessionId} ${kind} -> feature ${featureId}`)
 
-    // Observabilidade: a UI recarrega a lista assim que a feature é criada/linkada
-    // (antes só havia console.log no main — o usuário nunca via que registrou).
+    // Observabilidade: a UI recarrega a lista assim que a feature é criada/linkada.
     const feat = getFeature(featureId)
     if (feat) broadcast('feature:updated', feat)
 
-    const existing = this.timers.get(featureId)
-    if (existing) clearTimeout(existing)
-    this.timers.set(
-      featureId,
-      setTimeout(() => {
-        this.timers.delete(featureId)
-        void this.synthesize(featureId, ccSessionId)
-      }, DEBOUNCE_MS),
-    )
+    // Stage 1 (registro) via fila → ao drenar, agenda Stage 2 (holística) debounced.
+    this.enqueueRecords([{ info, featureId }])
   }
 
-  // Backfill: resolve + cria/linka uma sessão JÁ encerrada, SEM agendar síntese LLM
-  // (o backfill só registra; a síntese fica sob demanda). Retorna o resultado para
-  // contagem, ou null se a sessão não rende feature (atividade insuficiente, etc).
+  // Backfill: resolve + cria/linka uma sessão JÁ encerrada (SEM LLM). A geração de
+  // registros é enfileirada à parte pelo IPC. Retorna o resultado para contagem, ou
+  // null se a sessão não rende feature (atividade insuficiente, etc).
   registerOnly(info: SessionExitInfo): { featureId: string; kind: LinkKind } | null {
     if (!info.ccSessionId) return null
     try {
@@ -316,9 +135,90 @@ class FeatureMemoryService {
     }
   }
 
+  // Enfileira jobs de geração de registro (Stage 1). Throttled: drena 1 por vez.
+  enqueueRecords(jobs: RecordJob[]): void {
+    if (jobs.length === 0) return
+    this.recordQueue.push(...jobs)
+    void this.drain()
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return
+    this.draining = true
+    const affected = new Set<string>()
+    try {
+      while (this.recordQueue.length) {
+        const job = this.recordQueue.shift()
+        if (!job) break
+        try {
+          const ok = await this.generateSessionRecord(job.info, job.featureId)
+          if (ok) affected.add(job.featureId)
+        } catch (err) {
+          console.error('[feature-memory] geração de registro falhou:', err)
+        }
+      }
+    } finally {
+      this.draining = false
+    }
+    // Stage 2: uma regeneração holística por feature afetada (debounced).
+    for (const fid of affected) this.scheduleHolistic(fid)
+  }
+
+  // Stage 1: destila a sessão num registro e persiste. Retorna true se produziu.
+  private async generateSessionRecord(info: SessionExitInfo, featureId: string): Promise<boolean> {
+    if (!info.ccSessionId) return false
+    const feature = getFeature(featureId)
+    if (!feature) return false
+    if (feature.synthMode === 'manual') return false
+
+    const transcriptPath = findTranscriptPath(info.ccSessionId)
+    if (!transcriptPath) return false
+    const digest = buildDigest(transcriptPath)
+
+    // Guarda de atividade (modo 'threshold'; 'auto' pula). Não gera registro de
+    // sessão trivial.
+    if (feature.synthMode !== 'auto') {
+      if (digest.userTurns < 2 || digest.editCount === 0) return false
+    }
+
+    const prompt = buildRecordPrompt(feature, renderDigestForRecord(digest))
+    const model = resolveModel(feature)
+    const args = ['-p', prompt, '--output-format', 'text']
+    if (model) args.push('--model', model)
+
+    const result = await runClaude(args, { timeoutMs: SYNTH_TIMEOUT_MS })
+    if (result.code !== 0) {
+      emitSynthError(featureId, `registro de sessão falhou (exit ${result.code}): ${result.stderr.slice(0, 300)}`)
+      return false
+    }
+    const summary = stripCodeFence(result.stdout).trim()
+    if (!summary) return false
+
+    saveSessionRecord({
+      sessionId: info.sessionId,
+      featureId,
+      ccSessionId: info.ccSessionId,
+      summary,
+      model,
+    })
+    return true
+  }
+
+  private scheduleHolistic(featureId: string): void {
+    const existing = this.timers.get(featureId)
+    if (existing) clearTimeout(existing)
+    this.timers.set(
+      featureId,
+      setTimeout(() => {
+        this.timers.delete(featureId)
+        void this.synthesizeHolistic(featureId)
+      }, DEBOUNCE_MS),
+    )
+  }
+
   // Resolve (ou cria) a feature a vincular à sessão e persiste sessions.feature_id.
-  // Retorna null quando não deve vincular nem sintetizar (trivial / sem branch
-  // utilizável / branch protegida sem feature pré-existente).
+  // Retorna null quando não deve vincular (trivial / sem branch utilizável / branch
+  // protegida sem feature pré-existente).
   private resolveFeature(
     info: SessionExitInfo,
     ccSessionId: string,
@@ -330,8 +230,7 @@ class FeatureMemoryService {
       // feature manual sumiu — cai pra auto-resolução.
     }
 
-    // 2. Distila o transcript. `digest.gitBranch` já é a branch de TRABALHO (última
-    // não-protegida vista — pegar a primeira/main era a causa de 0 registros).
+    // 2. Distila o transcript. `digest.gitBranch` já é a branch de TRABALHO.
     const transcriptPath = findTranscriptPath(ccSessionId)
     if (!transcriptPath) return null
     const digest = buildDigest(transcriptPath)
@@ -378,7 +277,6 @@ class FeatureMemoryService {
       objective: firstPrompt ? firstPrompt.slice(0, MAX_AUTO_OBJECTIVE_CHARS) : null,
       repos: [{ repoId: info.repoId, branch: workBranch ?? branch ?? 'main', worktreePath: repoPath }],
     })
-    // create() já fez markSelfWrite no `.md`; nada extra a fazer aqui.
     this.persistLink(info.sessionId, created.id)
     return { featureId: created.id, kind: 'auto-created' }
   }
@@ -391,7 +289,9 @@ class FeatureMemoryService {
     }
   }
 
-  private async synthesize(featureId: string, ccSessionId: string): Promise<void> {
+  // Stage 2: regenera o corpo inteiro do doc sintetizando TODOS os registros da
+  // feature. Substitui o antigo patch incremental por-sessão.
+  private async synthesizeHolistic(featureId: string): Promise<void> {
     if (this.running.has(featureId)) return
     this.running.add(featureId)
     try {
@@ -399,15 +299,8 @@ class FeatureMemoryService {
       if (!feature) return
       if (feature.synthMode === 'manual') return
 
-      const transcriptPath = findTranscriptPath(ccSessionId)
-      if (!transcriptPath) return
-
-      const digest = buildDigest(transcriptPath)
-
-      // Guarda (modo 'threshold'): exige trabalho real. 'auto' pula a guarda.
-      if (feature.synthMode !== 'auto') {
-        if (digest.userTurns < 2 || digest.editCount === 0) return
-      }
+      const records = listSessionRecords(featureId)
+      if (records.length === 0) return
 
       const currentMd = (() => {
         try {
@@ -418,7 +311,7 @@ class FeatureMemoryService {
       })()
       if (!currentMd) return
 
-      const prompt = buildPrompt(currentMd, renderDigest(digest))
+      const prompt = buildHolisticPrompt(currentMd, records)
       const model = resolveModel(feature)
       const args = ['-p', prompt, '--output-format', 'text']
       if (model) args.push('--model', model)
@@ -429,7 +322,7 @@ class FeatureMemoryService {
         return
       }
 
-      const md = stripCodeFence(result.stdout)
+      const md = stripToFrontmatter(result.stdout)
       if (!isValidDoc(md)) {
         emitSynthError(featureId, 'output da síntese inválido (frontmatter ausente ou não parseável)')
         return
@@ -438,7 +331,6 @@ class FeatureMemoryService {
       // Escrita segura: marca self-write ANTES de escrever (o watcher ignora),
       // depois re-indexa pelo doc e emite o update.
       try {
-        // Garante last_updated atualizado no frontmatter escrito.
         const reparsed = matter(md)
         reparsed.data.last_updated = Date.now()
         const finalMd = matter.stringify(reparsed.content, reparsed.data)
@@ -461,15 +353,16 @@ class FeatureMemoryService {
   close(): void {
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
+    this.recordQueue = []
   }
 }
 
 export const featureMemory = new FeatureMemoryService()
 
 // Helper público pra fase 6: extrai seções-chave do corpo de um doc pra injeção
-// no system prompt (Overview/Business Rules/Approach/Next Steps).
+// no system prompt (Visão geral / Estado atual / Pontos em aberto).
 export function extractKeySections(body: string): string {
-  const wanted = ['Overview', 'Business Rules', 'Approach', 'Next Steps']
+  const wanted = ['Visão geral', 'Estado atual', 'Pontos em aberto']
   const out: string[] = []
   // Quebra o body por headings de nível 2.
   const sections = body.split(/^## /m)

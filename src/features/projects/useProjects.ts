@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { arrayMove } from '@dnd-kit/sortable'
-import { projectsApi } from '@/lib/ipc'
+import { projectsApi, vaultApi } from '@/lib/ipc'
 import type {
   CreateProjectInput,
   CreateRepoInput,
   Project,
   Repo,
+  UntrackedFolder,
   UpdateProjectInput,
   UpdateRepoInput,
 } from '../../../shared/types/ipc'
@@ -67,15 +68,18 @@ export function useProjects() {
 
 export function useRepos(projectId: string | null) {
   const [repos, setRepos] = useState<Repo[]>([])
+  const [untracked, setUntracked] = useState<UntrackedFolder[]>([])
   const [loading, setLoading] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!projectId) {
       setRepos([])
+      setUntracked([])
       return
     }
     setLoading(true)
     setRepos(await projectsApi.listRepos(projectId))
+    setUntracked(await vaultApi.listUntracked(projectId))
     setLoading(false)
   }, [projectId])
 
@@ -87,6 +91,23 @@ export function useRepos(projectId: string | null) {
     async (input: Omit<CreateRepoInput, 'projectId'>) => {
       if (!projectId) return
       await projectsApi.createRepo({ projectId, ...input })
+      await refresh()
+    },
+    [projectId, refresh],
+  )
+
+  // Adota uma pasta já existente no vault: registra como repo 'inside' sem mover
+  // nem clonar nada (o conteúdo já está no lugar certo).
+  const adopt = useCallback(
+    async (folder: UntrackedFolder) => {
+      if (!projectId) return
+      await projectsApi.createRepo({
+        projectId,
+        label: folder.name,
+        path: folder.path,
+        linkKind: 'inside',
+        source: 'local',
+      })
       await refresh()
     },
     [projectId, refresh],
@@ -125,5 +146,5 @@ export function useRepos(projectId: string | null) {
     [projectId],
   )
 
-  return { repos, loading, refresh, create, update, remove, reorder }
+  return { repos, untracked, loading, refresh, create, adopt, update, remove, reorder }
 }

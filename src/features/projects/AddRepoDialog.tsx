@@ -26,6 +26,14 @@ function repoNameFromUrl(url: string): string {
   return basename(url.trim().replace(/\.git$/, '').replace(/\/+$/, ''))
 }
 
+function joinPath(dir: string, name: string): string {
+  return `${dir.replace(/[/\\]+$/, '')}/${name}`
+}
+
+function isCollisionError(message: string): boolean {
+  return /destino já existe|already exists|destination path|EEXIST|ENOTEMPTY/i.test(message)
+}
+
 export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
   const hasVault = !!project.vaultPath
 
@@ -37,6 +45,9 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkChoice, setLinkChoice] = useState<{ source: string; label: string } | null>(null)
+  // Colisão: já existe uma pasta no destino do vault. Em vez de dead-end, oferecemos
+  // registrar (adotar) a pasta existente.
+  const [collision, setCollision] = useState<{ label: string; path: string } | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -47,6 +58,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
     setRole(null)
     setError(null)
     setLinkChoice(null)
+    setCollision(null)
   }, [open])
 
   async function pickLocal() {
@@ -63,9 +75,20 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
     onClose()
   }
 
+  // Adota a pasta já existente no vault (registra como 'inside', sem mover/clonar).
+  async function adoptExisting(adoptLabel: string, adoptPath: string) {
+    setSubmitting(true)
+    try {
+      await done({ label: adoptLabel, path: adoptPath, linkKind: 'inside', source: 'local' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleSubmit() {
     if (submitting) return
     setError(null)
+    setCollision(null)
 
     if (origin === 'local') {
       if (!target) {
@@ -99,8 +122,20 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
       setError('Defina um label.')
       return
     }
+    const cloneName = repoNameFromUrl(url)
+    const cloneDest = joinPath(project.vaultPath, cloneName)
+
     setSubmitting(true)
     try {
+      // Pré-check: se já existe uma pasta não-registrada nesse destino, não clona —
+      // oferece adotar a existente (evita o erro cru do git "already exists").
+      const existing = (await vaultApi.listUntracked(project.id)).find(
+        (f) => f.name === cloneName,
+      )
+      if (existing) {
+        setCollision({ label: finalLabel, path: existing.path })
+        return
+      }
       const { path } = await repoApi.cloneUrl(url.trim(), project.vaultPath)
       await done({
         label: finalLabel,
@@ -110,7 +145,11 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
       })
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e)
-      setError(`Não foi possível clonar o repositório. ${detail}`)
+      if (isCollisionError(detail)) {
+        setCollision({ label: finalLabel, path: cloneDest })
+      } else {
+        setError(`Não foi possível clonar o repositório. ${detail}`)
+      }
     } finally {
       setSubmitting(false)
     }
@@ -205,6 +244,26 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
             </div>
           </div>
         )}
+
+        {collision && (
+          <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)]/40 px-3 py-2 text-xs text-[var(--color-text)]">
+            <div className="font-medium">Já existe uma pasta no vault</div>
+            <div className="mt-0.5 break-words text-[var(--color-text-dim)]" title={collision.path}>
+              {collision.path}
+            </div>
+            <div className="mt-2 flex gap-2">
+              <Button
+                onClick={() => void adoptExisting(collision.label, collision.path)}
+                loading={submitting}
+              >
+                Registrar a pasta existente
+              </Button>
+              <Button variant="ghost" onClick={() => setCollision(null)}>
+                Usar outro nome
+              </Button>
+            </div>
+          </div>
+        )}
       </Dialog>
 
       {linkChoice && project.vaultPath && (
@@ -218,9 +277,15 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
             await done(repo)
           }}
           onError={(message) => {
-            // Volta pro diálogo principal e mostra o erro (sem avançar).
+            // Volta pro diálogo principal. Se a falha foi colisão de destino, oferece
+            // adotar a pasta já existente em vez de só mostrar o erro cru.
+            const dest = joinPath(project.vaultPath!, linkChoice.label)
             setLinkChoice(null)
-            setError(`Não foi possível adicionar o repositório. ${message}`)
+            if (isCollisionError(message)) {
+              setCollision({ label: linkChoice.label, path: dest })
+            } else {
+              setError(`Não foi possível adicionar o repositório. ${message}`)
+            }
           }}
         />
       )}

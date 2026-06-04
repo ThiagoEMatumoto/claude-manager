@@ -26,6 +26,13 @@ export interface Repo {
   createdAt: number
 }
 
+// Pasta que existe fisicamente dentro do vault de um projeto mas ainda não foi
+// registrada como repo. Surge quando o usuário clona/cria a pasta por fora do app.
+export interface UntrackedFolder {
+  name: string
+  path: string
+}
+
 export interface Session {
   id: string
   repoId: string
@@ -564,6 +571,7 @@ export interface Api {
     setRoot(root: string): Promise<void>
     ensureDir(path: string): Promise<{ created: boolean; wasEmpty: boolean }>
     isInside(vaultPath: string, target: string): Promise<boolean>
+    listUntracked(projectId: string): Promise<UntrackedFolder[]>
   }
   repo: {
     moveIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>

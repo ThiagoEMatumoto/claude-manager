@@ -97,6 +97,7 @@ const api: Api = {
     ensureDir: (path: string) => invoke('vault:ensure-dir', { path }),
     isInside: (vaultPath: string, target: string) =>
       invoke('vault:is-inside', { vaultPath, target }),
+    listUntracked: (projectId: string) => invoke('vault:list-untracked', { projectId }),
   },
   repo: {
     moveIntoVault: (source: string, vaultPath: string, label: string) =>

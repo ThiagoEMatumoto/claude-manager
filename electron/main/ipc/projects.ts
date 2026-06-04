@@ -1,14 +1,16 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, lstatSync, unlinkSync } from 'node:fs'
+import { mkdirSync, lstatSync, unlinkSync, readdirSync } from 'node:fs'
 import { z } from 'zod'
 import { getDb } from '../services/db'
+import { normalizePath, selectUntracked } from './untracked-folders'
 import type {
   Project,
   Repo,
   CreateProjectInput,
   CreateRepoInput,
   LinkKind,
+  UntrackedFolder,
 } from '../../../shared/types/ipc'
 
 const updateProjectSchema = z.object({
@@ -171,6 +173,17 @@ export function registerProjectIpc(): void {
 
   ipcMain.handle('projects:repos:create', (_e, input: CreateRepoInput) => {
     const db = getDb()
+    // Guard anti-duplicata: o schema não tem UNIQUE(project_id, path), então a
+    // adoção de uma pasta existente precisa ser idempotente. Se já houver repo no
+    // mesmo projeto apontando pro mesmo path, devolve o existente em vez de duplicar.
+    const target = normalizePath(input.path)
+    const existing = (
+      db
+        .prepare('SELECT * FROM repos WHERE project_id = ?')
+        .all(input.projectId) as RepoRow[]
+    ).find((r) => normalizePath(r.path) === target)
+    if (existing) return toRepo(existing)
+
     const maxPos = db
       .prepare('SELECT COALESCE(MAX(position), -1) as max FROM repos WHERE project_id = ?')
       .get(input.projectId) as { max: number }
@@ -252,5 +265,32 @@ export function registerProjectIpc(): void {
       'UPDATE repos SET position = ? WHERE id = ? AND project_id = ?',
     )
     db.transaction(() => input.repoIds.forEach((id, i) => setPos.run(i, id, input.projectId)))()
+  })
+
+  // Lista pastas que existem no primeiro nível do vault do projeto mas ainda não
+  // foram registradas como repo. Permite "adotar" pastas clonadas/criadas por fora
+  // do app (caso clássico: clonou direto no vault e a pasta não aparece na sidebar).
+  ipcMain.handle('vault:list-untracked', (_e, raw: unknown) => {
+    const { projectId } = z.object({ projectId: z.string().min(1) }).parse(raw)
+    const db = getDb()
+    const project = db
+      .prepare('SELECT vault_path FROM projects WHERE id = ?')
+      .get(projectId) as { vault_path: string | null } | undefined
+    const vaultPath = project?.vault_path
+    if (!vaultPath) return [] as UntrackedFolder[]
+
+    const registered = (
+      db.prepare('SELECT path FROM repos WHERE project_id = ?').all(projectId) as {
+        path: string
+      }[]
+    ).map((r) => r.path)
+
+    try {
+      const entries = readdirSync(vaultPath, { withFileTypes: true })
+      return selectUntracked(vaultPath, entries, registered)
+    } catch {
+      // Vault aponta pra caminho inexistente/inacessível — sem sugestões.
+      return [] as UntrackedFolder[]
+    }
   })
 }

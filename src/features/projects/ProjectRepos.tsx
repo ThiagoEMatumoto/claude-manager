@@ -19,6 +19,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { EditRepoDialog } from './EditRepoDialog'
+import { UntrackedFolders } from './UntrackedFolders'
 import { Menu } from '@/components/ui/Menu'
 import { Icon } from '@/components/ui/Icon'
 import { SessionsModal } from '@/features/sessions/SessionsModal'
@@ -36,7 +37,7 @@ const LINK_BADGE: Record<LinkKind, { icon: ComponentType<LucideProps>; title: st
 }
 
 export function ProjectRepos({ project }: Props) {
-  const { repos, create, update, remove, reorder } = useRepos(project.id)
+  const { repos, untracked, create, adopt, update, remove, reorder } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -88,6 +89,8 @@ export function ProjectRepos({ project }: Props) {
           </button>
         </>
       )}
+
+      <UntrackedFolders folders={untracked} onAdopt={adopt} />
 
       <AddRepoDialog
         open={adding}

@@ -1,11 +1,33 @@
 import { useMemo } from 'react'
+import type { AnchorHTMLAttributes } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink, GitBranch } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { shellApi } from '@/lib/ipc'
 import type { Feature, Repo } from '../../../shared/types/ipc'
 import { StatusBadge } from './FeatureList'
+
+// Links de PR/docs no markdown abrem no browser do sistema. Sem isso, o clique
+// num <a> puro dispara navegação no Electron e a janela do app some / abre em
+// branco em vez de levar a URL pro Chrome.
+function MarkdownLink({ href, children, ...rest }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return (
+    <a
+      {...rest}
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (href) void shellApi.openExternal(href)
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+const MARKDOWN_COMPONENTS: Components = { a: MarkdownLink }
 
 interface Props {
   feature: Feature | null
@@ -118,7 +140,9 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
         ) : (
           <>
             <article className="markdown-body max-w-none text-sm leading-relaxed text-[var(--color-text)]">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{split.main}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                {split.main}
+              </ReactMarkdown>
             </article>
 
             {split.history && (
@@ -132,7 +156,9 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
                         style={{ background: 'var(--color-accent)' }}
                       />
                       <div className="markdown-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                          {entry}
+                        </ReactMarkdown>
                       </div>
                     </li>
                   ))}

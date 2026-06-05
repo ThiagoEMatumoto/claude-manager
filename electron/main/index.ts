@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
@@ -61,9 +61,21 @@ function createMainWindow(): BrowserWindow {
   setMainWindow(win)
   wireWindowMaximizeBroadcast(win)
 
+  // Links externos sempre vão pro browser do sistema, nunca navegam a janela do
+  // app. Só abre http(s) — sem isso um window.open() vazio mandava `about:blank`
+  // pro openExternal e o Chrome abria em branco.
+  const openExternalSafe = (url: string) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  }
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    openExternalSafe(url)
     return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win.webContents.getURL()) {
+      e.preventDefault()
+      openExternalSafe(url)
+    }
   })
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -76,6 +88,11 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
+  // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
+  // textarea do xterm — resultado é colar 2x. Campos de input normais continuam
+  // colando via clipboard nativo do Chromium. Coerente com autoHideMenuBar.
+  Menu.setApplicationMenu(null)
   getDb()
   // Captura o clean_shutdown do boot anterior e o zera; deve rodar antes da
   // janela para que o renderer leia o valor correto via workspace:get-boot-state.

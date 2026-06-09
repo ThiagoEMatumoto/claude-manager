@@ -17,6 +17,7 @@ import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
 import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { MetricsArea } from '@/features/metrics/MetricsArea'
 import { FeaturesArea } from '@/features/features/FeaturesArea'
+import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
@@ -526,6 +527,8 @@ export function AppShell() {
       <IconRail onOpenSettings={() => setSettingsOpen(true)} />
 
       {area === 'features' && <FeaturesArea />}
+
+      {area === 'objectives' && <ObjectivesArea />}
 
       {area === 'cc-configs' && <CcConfigsArea />}
 

@@ -175,6 +175,153 @@ export interface FeatureBackfillResult {
   skipped: number
 }
 
+// ---- Objetivos / Key Results (camada genérica de OKRs, Fase 1) ----
+
+export type ObjectiveKind = 'okr' | 'personal_goal' | 'project' | 'custom'
+export type ObjectiveStatus = 'active' | 'paused' | 'done' | 'archived'
+export type KeyResultStatus = 'active' | 'paused' | 'done' | 'cancelled'
+export type ProgressMode = 'auto_rollup' | 'metric' | 'manual'
+export type ProgressDirection = 'increase' | 'decrease' | 'maintain'
+
+// Persistência SQLite-only (sem espelho .md). tags são strings opacas (JSON na
+// coluna); progresso NÃO é persistido — calculado via shared/progress.ts.
+export interface Objective {
+  id: string
+  title: string
+  description: string | null
+  kind: ObjectiveKind
+  status: ObjectiveStatus
+  period: string | null
+  startDate: number | null
+  endDate: number | null
+  parentObjectiveId: string | null
+  priority: 'low' | 'medium' | 'high' | null
+  owner: string | null
+  tags: string[]
+  progressMode: ProgressMode
+  // Escala 0–100 (null = indeterminado).
+  progressManual: number | null
+  baseline: number | null
+  current: number | null
+  target: number | null
+  unit: string | null
+  direction: ProgressDirection | null
+  createdAt: number
+  updatedAt: number
+  completedAt: number | null
+  archivedAt: number | null
+}
+
+export interface KeyResult {
+  id: string
+  objectiveId: string
+  title: string
+  owner: string | null
+  status: KeyResultStatus
+  // Peso no rollup do objetivo (default 1 quando null).
+  weight: number | null
+  progressMode: ProgressMode
+  progressManual: number | null
+  baseline: number | null
+  current: number | null
+  target: number | null
+  unit: string | null
+  direction: ProgressDirection | null
+  createdAt: number
+  updatedAt: number
+}
+
+// Objective enriquecido com o progresso calculado (0–100; null = indeterminado,
+// a UI mostra "—").
+export interface ObjectiveWithProgress extends Objective {
+  progress: number | null
+}
+
+// Detalhe: objetivo + KRs (cada um com seu progresso calculado).
+export interface ObjectiveDetail extends ObjectiveWithProgress {
+  keyResults: Array<KeyResult & { progress: number | null }>
+}
+
+export interface CreateObjectiveInput {
+  title: string
+  description?: string | null
+  kind: ObjectiveKind
+  status?: ObjectiveStatus
+  period?: string | null
+  startDate?: number | null
+  endDate?: number | null
+  parentObjectiveId?: string | null
+  priority?: 'low' | 'medium' | 'high' | null
+  owner?: string | null
+  tags?: string[]
+  progressMode?: ProgressMode
+  progressManual?: number | null
+  baseline?: number | null
+  current?: number | null
+  target?: number | null
+  unit?: string | null
+  direction?: ProgressDirection | null
+}
+
+export interface UpdateObjectiveInput {
+  id: string
+  title?: string
+  description?: string | null
+  kind?: ObjectiveKind
+  status?: ObjectiveStatus
+  period?: string | null
+  startDate?: number | null
+  endDate?: number | null
+  parentObjectiveId?: string | null
+  priority?: 'low' | 'medium' | 'high' | null
+  owner?: string | null
+  tags?: string[]
+  progressMode?: ProgressMode
+  progressManual?: number | null
+  baseline?: number | null
+  current?: number | null
+  target?: number | null
+  unit?: string | null
+  direction?: ProgressDirection | null
+}
+
+export interface CreateKeyResultInput {
+  objectiveId: string
+  title: string
+  owner?: string | null
+  status?: KeyResultStatus
+  weight?: number | null
+  progressMode?: ProgressMode
+  progressManual?: number | null
+  baseline?: number | null
+  current?: number | null
+  target?: number | null
+  unit?: string | null
+  direction?: ProgressDirection | null
+}
+
+export interface UpdateKeyResultInput {
+  id: string
+  title?: string
+  owner?: string | null
+  status?: KeyResultStatus
+  weight?: number | null
+  progressMode?: ProgressMode
+  progressManual?: number | null
+  baseline?: number | null
+  current?: number | null
+  target?: number | null
+  unit?: string | null
+  direction?: ProgressDirection | null
+}
+
+export interface ObjectiveListFilter {
+  kind?: ObjectiveKind
+  status?: ObjectiveStatus
+  tags?: string[]
+  search?: string
+}
+
 export interface ResumeSessionInput {
   repoId: string
   ccSessionId: string
@@ -626,6 +773,19 @@ export interface Api {
     backfill(): Promise<FeatureBackfillResult>
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void
+  }
+  objectives: {
+    list(filter?: ObjectiveListFilter): Promise<ObjectiveWithProgress[]>
+    get(id: string): Promise<ObjectiveDetail | null>
+    create(input: CreateObjectiveInput): Promise<Objective>
+    update(input: UpdateObjectiveInput): Promise<Objective>
+    archive(id: string): Promise<void>
+    createKeyResult(input: CreateKeyResultInput): Promise<KeyResult>
+    updateKeyResult(input: UpdateKeyResultInput): Promise<KeyResult>
+    deleteKeyResult(id: string): Promise<void>
+    // Payload varia por mutação (Objective completo, ou marcador {id, archived}
+    // / {keyResultId, ...}) — o renderer trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

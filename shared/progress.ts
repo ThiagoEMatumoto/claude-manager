@@ -1,4 +1,10 @@
-import type { KeyResultStatus, ProgressDirection, ProgressMode, TaskStatus } from './types/ipc'
+import type {
+  FeatureStatus,
+  KeyResultStatus,
+  ProgressDirection,
+  ProgressMode,
+  TaskStatus,
+} from './types/ipc'
 
 // Cálculo puro de progresso (0–100 | null) de Objetivos/KRs — importável por
 // main e renderer (precedente: shared/metrics-targets.ts). null = indeterminado
@@ -83,4 +89,38 @@ export function taskProgressChild(status: TaskStatus): ProgressChild {
 // rollup ponderado de computeProgress/auto_rollup com peso uniforme.
 export function computeTaskRollup(statuses: TaskStatus[]): number | null {
   return rollupProgress(statuses.map(taskProgressChild))
+}
+
+// ---- Features como filhos de rollup (Fase 3) ----
+
+// Subconjunto da Feature que o rollup precisa enxergar (status + arquivamento).
+export interface FeatureRollupSource {
+  status: FeatureStatus
+  archivedAt: number | null
+}
+
+// Progresso de uma feature: % de tarefas done vinculadas a ela. Sem tarefas
+// elegíveis (nenhuma, ou todas cancelled), cai pro status da feature:
+// done → 100; demais → null (indeterminado, fica fora do rollup do pai).
+export function computeFeatureProgress(
+  status: FeatureStatus,
+  taskStatuses: TaskStatus[],
+): number | null {
+  const rollup = computeTaskRollup(taskStatuses)
+  if (rollup !== null) return rollup
+  return status === 'done' ? 100 : null
+}
+
+// Feature como filho de rollup (peso 1). Retorna null quando a feature deve
+// ficar FORA do denominador (arquivada ou progresso indeterminado) — a
+// exclusão acontece aqui, não em rollupProgress: FeatureStatus não tem
+// 'cancelled', então o status emitido é a sentinela não-cancelled 'active'.
+export function featureProgressChild(
+  feature: FeatureRollupSource,
+  taskStatuses: TaskStatus[],
+): ProgressChild | null {
+  if (feature.archivedAt !== null) return null
+  const progress = computeFeatureProgress(feature.status, taskStatuses)
+  if (progress === null) return null
+  return { status: 'active', weight: null, progress }
 }

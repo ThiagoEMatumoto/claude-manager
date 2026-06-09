@@ -1,7 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { getDb } from './db'
-import { computeProgress, taskProgressChild, type ProgressChild } from '../../../shared/progress'
-import type { TaskParentType, TaskStatus } from '../../../shared/types/ipc'
+import {
+  computeFeatureProgress,
+  computeProgress,
+  featureProgressChild,
+  taskProgressChild,
+  type ProgressChild,
+} from '../../../shared/progress'
+import type {
+  FeatureLinkTargetType,
+  FeatureStatus,
+  LinkedFeatureSummary,
+  TaskParentType,
+  TaskStatus,
+} from '../../../shared/types/ipc'
 import type {
   CreateKeyResultInput,
   CreateObjectiveInput,
@@ -142,21 +154,89 @@ function taskChildren(parentType: TaskParentType, parentId: string): ProgressChi
   return rows.map((r) => taskProgressChild(r.status))
 }
 
+// ---- Features vinculadas (Fase 3) ----
+
+interface LinkedFeatureRow {
+  id: string
+  title: string
+  status: string
+  archived_at: number | null
+}
+
+// Features NÃO-arquivadas vinculadas a um objetivo/KR via feature_links.
+// Query direta (sem importar feature-store — evita acoplamento circular).
+function linkedFeatureRows(targetType: FeatureLinkTargetType, targetId: string): LinkedFeatureRow[] {
+  return getDb()
+    .prepare(
+      `SELECT f.id, f.title, f.status, f.archived_at FROM features f
+       JOIN feature_links l ON l.feature_id = f.id
+       WHERE l.target_type = ? AND l.target_id = ? AND f.archived_at IS NULL
+       ORDER BY f.updated_at DESC`,
+    )
+    .all(targetType, targetId) as LinkedFeatureRow[]
+}
+
+// Statuses das tarefas vinculadas a uma feature (entrada do progresso dela).
+function featureTaskStatuses(featureId: string): TaskStatus[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT t.status FROM tasks t
+       JOIN task_links l ON l.task_id = t.id
+       WHERE l.parent_type = 'feature' AND l.parent_id = ?`,
+    )
+    .all(featureId) as Array<{ status: TaskStatus }>
+  return rows.map((r) => r.status)
+}
+
+// Filhos de rollup vindos de features vinculadas (peso 1; indeterminadas e
+// arquivadas ficam fora do denominador via featureProgressChild → null).
+function featureChildren(targetType: FeatureLinkTargetType, targetId: string): ProgressChild[] {
+  return linkedFeatureRows(targetType, targetId)
+    .map((f) =>
+      featureProgressChild(
+        { status: f.status as FeatureStatus, archivedAt: f.archived_at },
+        featureTaskStatuses(f.id),
+      ),
+    )
+    .filter((c): c is ProgressChild => c !== null)
+}
+
+// Projeção pra UI de Objetivos: features vinculadas com progresso calculado
+// (inclui as de progresso null — a UI mostra "—"; só o rollup as exclui).
+function linkedFeatureSummaries(
+  targetType: FeatureLinkTargetType,
+  targetId: string,
+): LinkedFeatureSummary[] {
+  return linkedFeatureRows(targetType, targetId).map((f) => ({
+    id: f.id,
+    title: f.title,
+    status: f.status as FeatureStatus,
+    progress: computeFeatureProgress(f.status as FeatureStatus, featureTaskStatuses(f.id)),
+  }))
+}
+
 function keyResultProgress(kr: KeyResult): number | null {
-  // KR auto_rollup → % de tarefas done vinculadas ao KR (sem tarefas → null).
+  // KR auto_rollup → rollup de tarefas vinculadas ao KR + features vinculadas
+  // ao KR (peso 1 cada; sem filhos elegíveis → null).
   if (kr.progressMode === 'auto_rollup') {
-    return computeProgress(kr, taskChildren('key_result', kr.id))
+    return computeProgress(kr, [
+      ...taskChildren('key_result', kr.id),
+      ...featureChildren('key_result', kr.id),
+    ])
   }
   return computeProgress(kr)
 }
 
 function objectiveProgress(obj: Objective, keyResults: KeyResult[]): number | null {
   // Objetivo auto_rollup SEM KRs elegíveis (não-cancelled) cai pro rollup de
-  // tarefas vinculadas direto ao objetivo (sem tarefas → null).
+  // tarefas diretas + features vinculadas (sem filhos elegíveis → null).
   if (obj.progressMode === 'auto_rollup') {
     const eligible = keyResults.filter((kr) => kr.status !== 'cancelled')
     if (eligible.length === 0) {
-      return computeProgress(obj, taskChildren('objective', obj.id))
+      return computeProgress(obj, [
+        ...taskChildren('objective', obj.id),
+        ...featureChildren('objective', obj.id),
+      ])
     }
   }
   const children: ProgressChild[] = keyResults.map((kr) => ({
@@ -224,7 +304,12 @@ export function get(id: string): ObjectiveDetail | null {
   return {
     ...objective,
     progress: objectiveProgress(objective, keyResults),
-    keyResults: keyResults.map((kr) => ({ ...kr, progress: keyResultProgress(kr) })),
+    keyResults: keyResults.map((kr) => ({
+      ...kr,
+      progress: keyResultProgress(kr),
+      linkedFeatures: linkedFeatureSummaries('key_result', kr.id),
+    })),
+    linkedFeatures: linkedFeatureSummaries('objective', id),
   }
 }
 
@@ -459,9 +544,12 @@ export function deleteKeyResult(id: string): void {
   const db = getDb()
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM key_results WHERE id = ?').run(id)
-    // task_links é polimórfico (sem FK em parent_id) → limpeza manual dos
-    // vínculos órfãos; as tarefas em si sobrevivem (viram standalone).
+    // task_links/feature_links são polimórficos (sem FK em parent/target_id)
+    // → limpeza manual dos vínculos órfãos; tarefas e features sobrevivem.
     db.prepare("DELETE FROM task_links WHERE parent_type = 'key_result' AND parent_id = ?").run(id)
+    db.prepare("DELETE FROM feature_links WHERE target_type = 'key_result' AND target_id = ?").run(
+      id,
+    )
   })
   tx()
 }

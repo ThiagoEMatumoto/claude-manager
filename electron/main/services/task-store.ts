@@ -276,19 +276,31 @@ export function reorder(taskId: string, position: number): Task {
 }
 
 // Resolve os objetivos afetados por um conjunto de vínculos: 'objective' usa o
-// parentId direto; 'key_result' resolve o objective_id via key_results.
-// 'feature' não participa de rollup de objetivos.
+// parentId direto; 'key_result' resolve o objective_id via key_results;
+// 'feature' resolve via feature_links (a tarefa da feature muda o progresso da
+// feature, que entra no rollup dos objetivos/KRs vinculados a ela — Fase 3).
 export function affectedObjectiveIds(links: TaskLink[]): string[] {
   const db = getDb()
   const ids = new Set<string>()
+  const addKeyResultObjective = (keyResultId: string): void => {
+    const row = db
+      .prepare('SELECT objective_id FROM key_results WHERE id = ?')
+      .get(keyResultId) as { objective_id: string } | undefined
+    if (row) ids.add(row.objective_id)
+  }
   for (const link of links) {
     if (link.parentType === 'objective') {
       ids.add(link.parentId)
     } else if (link.parentType === 'key_result') {
-      const row = db
-        .prepare('SELECT objective_id FROM key_results WHERE id = ?')
-        .get(link.parentId) as { objective_id: string } | undefined
-      if (row) ids.add(row.objective_id)
+      addKeyResultObjective(link.parentId)
+    } else {
+      const targets = db
+        .prepare('SELECT target_type, target_id FROM feature_links WHERE feature_id = ?')
+        .all(link.parentId) as Array<{ target_type: string; target_id: string }>
+      for (const t of targets) {
+        if (t.target_type === 'objective') ids.add(t.target_id)
+        else addKeyResultObjective(t.target_id)
+      }
     }
   }
   return [...ids]

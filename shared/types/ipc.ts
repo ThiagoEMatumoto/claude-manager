@@ -263,9 +263,11 @@ export interface ObjectiveWithProgress extends Objective {
   progress: number | null
 }
 
-// Detalhe: objetivo + KRs (cada um com seu progresso calculado).
+// Detalhe: objetivo + KRs (cada um com seu progresso calculado) + features
+// vinculadas (Fase 3) — no nível do objetivo e por KR.
 export interface ObjectiveDetail extends ObjectiveWithProgress {
-  keyResults: Array<KeyResult & { progress: number | null }>
+  keyResults: Array<KeyResult & { progress: number | null; linkedFeatures: LinkedFeatureSummary[] }>
+  linkedFeatures: LinkedFeatureSummary[]
 }
 
 export interface CreateObjectiveInput {
@@ -861,6 +863,8 @@ export interface Api {
     update(input: UpdateFeatureInput): Promise<Feature>
     archive(id: string): Promise<void>
     setRepos(input: SetFeatureReposInput): Promise<Feature>
+    setObjectiveLinks(input: SetFeatureObjectiveLinksInput): Promise<Feature>
+    listObjectiveLinks(featureId: string): Promise<FeatureObjectiveLink[]>
     backfill(): Promise<FeatureBackfillResult>
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void

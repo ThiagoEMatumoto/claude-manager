@@ -7,6 +7,8 @@ import chokidar, { FSWatcher } from 'chokidar'
 import { getDb } from './db'
 import type {
   Feature,
+  FeatureLinkTargetType,
+  FeatureObjectiveLink,
   FeatureRepoLink,
   FeatureStatus,
   FeatureSynthMode,
@@ -520,6 +522,46 @@ export function update(input: UpdateFeatureInput): Feature {
 export function archive(id: string): void {
   const now = Date.now()
   getDb().prepare('UPDATE features SET archived_at = ?, updated_at = ? WHERE id = ?').run(now, now, id)
+}
+
+// ---- Vínculos Feature → Objetivo/KR (Fase 3) ----
+
+// feature_links é polimórfico (sem FK em target_id), espelho de task_links:
+// o CASCADE de features→feature_links cobre o delete da feature; órfãos por
+// target são limpos pelo dono do target (deleteKeyResult em objective-store).
+
+export function listObjectiveLinks(featureId: string): FeatureObjectiveLink[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT target_type, target_id FROM feature_links
+        WHERE feature_id = ? ORDER BY target_type ASC, target_id ASC`,
+    )
+    .all(featureId) as Array<{ target_type: string; target_id: string }>
+  return rows.map((r) => ({
+    targetType: r.target_type as FeatureLinkTargetType,
+    targetId: r.target_id,
+  }))
+}
+
+// Substitui o conjunto de vínculos (replace-all em transação); retorna os
+// links anteriores pra que o IPC notifique também os objetivos que perderam
+// a feature. Bumpa updated_at (espelha setLinks de task-store).
+export function setObjectiveLinks(
+  featureId: string,
+  links: FeatureObjectiveLink[],
+): FeatureObjectiveLink[] {
+  const previous = listObjectiveLinks(featureId)
+  const db = getDb()
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM feature_links WHERE feature_id = ?').run(featureId)
+    const ins = db.prepare(
+      'INSERT OR IGNORE INTO feature_links (feature_id, target_type, target_id) VALUES (?, ?, ?)',
+    )
+    for (const link of links) ins.run(featureId, link.targetType, link.targetId)
+    db.prepare('UPDATE features SET updated_at = ? WHERE id = ?').run(Date.now(), featureId)
+  })
+  tx()
+  return previous
 }
 
 export function setRepos(id: string, repos: FeatureRepoLink[]): Feature {

@@ -1,19 +1,34 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import * as featureStore from '../services/feature-store'
+import * as taskStore from '../services/task-store'
 import { getDb } from '../services/db'
 import { featureMemory, type SessionExitInfo } from '../services/feature-memory'
 import type {
   Feature,
+  FeatureObjectiveLink,
   FeatureWithStats,
   CreateFeatureInput,
   UpdateFeatureInput,
   SetFeatureReposInput,
+  SetFeatureObjectiveLinksInput,
   FeatureBackfillResult,
 } from '../../../shared/types/ipc'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, payload)
+  }
+}
+
+// Mudar os vínculos feature→objetivo/KR muda o progresso calculado dos
+// objetivos envolvidos → emite 'objective:updated' com { id } por objetivo
+// afetado (mesmo canal/contrato do IPC de tasks). FeatureObjectiveLink tem o
+// mesmo shape semântico de TaskLink (target ∈ objective|key_result), então a
+// resolução KR→objetivo é reusada de task-store.affectedObjectiveIds.
+function broadcastAffectedObjectives(links: FeatureObjectiveLink[]): void {
+  const asTaskLinks = links.map((l) => ({ parentType: l.targetType, parentId: l.targetId }))
+  for (const id of taskStore.affectedObjectiveIds(asTaskLinks)) {
+    broadcast('objective:updated', { id })
   }
 }
 
@@ -56,6 +71,26 @@ export function registerFeaturesIpc(): void {
     broadcast('feature:updated', feature)
     return feature
   })
+
+  ipcMain.handle(
+    'features:set-objective-links',
+    (_e, input: SetFeatureObjectiveLinksInput): Feature => {
+      const previous = featureStore.setObjectiveLinks(input.featureId, input.links)
+      const feature = featureStore.get(input.featureId)
+      if (!feature) throw new Error(`feature not found: ${input.featureId}`)
+      broadcast('feature:updated', feature)
+      // Notifica tanto os objetivos que ganharam quanto os que perderam a feature.
+      broadcastAffectedObjectives([...previous, ...input.links])
+      return feature
+    },
+  )
+
+  ipcMain.handle(
+    'features:list-objective-links',
+    (_e, featureId: string): FeatureObjectiveLink[] => {
+      return featureStore.listObjectiveLinks(featureId)
+    },
+  )
 
   // Backfill retroativo: reprocessa sessões já encerradas e ainda não vinculadas,
   // criando/linkando as features perdidas. A LINKAGEM é síncrona e rápida (sem LLM);

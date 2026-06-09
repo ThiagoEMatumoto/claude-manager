@@ -852,6 +852,20 @@ export interface Api {
     // / {keyResultId, ...}) — o renderer trata como sinal de recarga.
     onUpdated(handler: (payload: unknown) => void): () => void
   }
+  tasks: {
+    list(filter?: TaskListFilter): Promise<Task[]>
+    get(id: string): Promise<Task | null>
+    listByParent(parentType: TaskParentType, parentId: string): Promise<Task[]>
+    create(input: CreateTaskInput): Promise<Task>
+    update(input: UpdateTaskInput): Promise<Task>
+    delete(id: string): Promise<void>
+    setLinks(taskId: string, links: TaskLink[]): Promise<Task>
+    reorder(taskId: string, position: number): Promise<Task>
+    // Payload varia por mutação (Task completa ou marcador {id, deleted}) —
+    // o renderer trata como sinal de recarga. Mutações com parent
+    // objective/key_result também emitem 'objective:updated' com {id}.
+    onUpdated(handler: (payload: unknown) => void): () => void
+  }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void
   }

@@ -15,6 +15,7 @@ import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
+import { registerTasksIpc } from './ipc/tasks'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -110,6 +111,7 @@ app.whenReady().then(() => {
   registerMetricsIpc()
   registerFeaturesIpc()
   registerObjectivesIpc()
+  registerTasksIpc()
   registerWindowIpc()
 
   createMainWindow()

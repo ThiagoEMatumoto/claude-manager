@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { getDb } from './db'
-import { computeProgress, type ProgressChild } from '../../../shared/progress'
+import { computeProgress, taskProgressChild, type ProgressChild } from '../../../shared/progress'
+import type { TaskParentType, TaskStatus } from '../../../shared/types/ipc'
 import type {
   CreateKeyResultInput,
   CreateObjectiveInput,
@@ -128,12 +129,36 @@ function rowToKeyResult(row: KeyResultRow): KeyResult {
 
 // ---- progresso ----
 
+// Filhos de rollup vindos de tarefas vinculadas (Fase 2). Query direta em
+// task_links/tasks — sem importar task-store (evita acoplamento circular).
+function taskChildren(parentType: TaskParentType, parentId: string): ProgressChild[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT t.status FROM tasks t
+       JOIN task_links l ON l.task_id = t.id
+       WHERE l.parent_type = ? AND l.parent_id = ?`,
+    )
+    .all(parentType, parentId) as Array<{ status: TaskStatus }>
+  return rows.map((r) => taskProgressChild(r.status))
+}
+
 function keyResultProgress(kr: KeyResult): number | null {
-  // KR auto_rollup não tem filhos na Fase 1 → computeProgress retorna null.
+  // KR auto_rollup → % de tarefas done vinculadas ao KR (sem tarefas → null).
+  if (kr.progressMode === 'auto_rollup') {
+    return computeProgress(kr, taskChildren('key_result', kr.id))
+  }
   return computeProgress(kr)
 }
 
 function objectiveProgress(obj: Objective, keyResults: KeyResult[]): number | null {
+  // Objetivo auto_rollup SEM KRs elegíveis (não-cancelled) cai pro rollup de
+  // tarefas vinculadas direto ao objetivo (sem tarefas → null).
+  if (obj.progressMode === 'auto_rollup') {
+    const eligible = keyResults.filter((kr) => kr.status !== 'cancelled')
+    if (eligible.length === 0) {
+      return computeProgress(obj, taskChildren('objective', obj.id))
+    }
+  }
   const children: ProgressChild[] = keyResults.map((kr) => ({
     status: kr.status,
     weight: kr.weight,
@@ -431,5 +456,12 @@ export function updateKeyResult(input: UpdateKeyResultInput): KeyResult {
 }
 
 export function deleteKeyResult(id: string): void {
-  getDb().prepare('DELETE FROM key_results WHERE id = ?').run(id)
+  const db = getDb()
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM key_results WHERE id = ?').run(id)
+    // task_links é polimórfico (sem FK em parent_id) → limpeza manual dos
+    // vínculos órfãos; as tarefas em si sobrevivem (viram standalone).
+    db.prepare("DELETE FROM task_links WHERE parent_type = 'key_result' AND parent_id = ?").run(id)
+  })
+  tx()
 }

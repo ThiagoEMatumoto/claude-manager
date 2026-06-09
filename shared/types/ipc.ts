@@ -322,6 +322,71 @@ export interface ObjectiveListFilter {
   search?: string
 }
 
+// ---- Tarefas (Fase 2) ----
+
+export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
+export type TaskPriority = 'low' | 'medium' | 'high'
+export type TaskParentType = 'objective' | 'key_result' | 'feature'
+
+// Vínculo polimórfico tarefa → parent (sem FK real em parentId; tarefa
+// standalone = sem vínculos). Alimenta o rollup de KRs/objetivos auto_rollup.
+export interface TaskLink {
+  parentType: TaskParentType
+  parentId: string
+}
+
+// Persistência SQLite-only (mesmo padrão de Objective): tags são strings
+// opacas (JSON na coluna); position REAL p/ ordenação manual.
+export interface Task {
+  id: string
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority | null
+  dueDate: number | null
+  startedAt: number | null
+  completedAt: number | null
+  tags: string[]
+  notes: string | null
+  position: number
+  links: TaskLink[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateTaskInput {
+  title: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority | null
+  dueDate?: number | null
+  tags?: string[]
+  notes?: string | null
+  position?: number
+  links?: TaskLink[]
+}
+
+export interface UpdateTaskInput {
+  id: string
+  title?: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority | null
+  dueDate?: number | null
+  tags?: string[]
+  notes?: string | null
+  position?: number
+}
+
+export interface TaskListFilter {
+  status?: TaskStatus
+  priority?: TaskPriority
+  tag?: string
+  search?: string
+  parentType?: TaskParentType
+  parentId?: string
+}
+
 export interface ResumeSessionInput {
   repoId: string
   ccSessionId: string

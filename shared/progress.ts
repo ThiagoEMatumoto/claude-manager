@@ -1,4 +1,4 @@
-import type { KeyResultStatus, ProgressDirection, ProgressMode } from './types/ipc'
+import type { KeyResultStatus, ProgressDirection, ProgressMode, TaskStatus } from './types/ipc'
 
 // Cálculo puro de progresso (0–100 | null) de Objetivos/KRs — importável por
 // main e renderer (precedente: shared/metrics-targets.ts). null = indeterminado
@@ -14,7 +14,9 @@ export interface ProgressInput {
 }
 
 export interface ProgressChild {
-  status: KeyResultStatus
+  // KRs e tarefas compartilham a mesma regra de exclusão: 'cancelled' sai do
+  // rollup (numerador e denominador); os demais status só carregam o progress.
+  status: KeyResultStatus | TaskStatus
   // Peso no rollup (null = 1).
   weight: number | null
   // Progresso já calculado do filho (null conta como 0 no numerador).
@@ -67,4 +69,18 @@ export function computeProgress(
     case 'auto_rollup':
       return rollupProgress(children)
   }
+}
+
+// ---- Tarefas como filhos de rollup (Fase 2) ----
+
+// Tarefa vira filho binário do rollup: done = 100, qualquer outro status = 0.
+// O status é repassado para que 'cancelled' saia do denominador em rollupProgress.
+export function taskProgressChild(status: TaskStatus): ProgressChild {
+  return { status, weight: null, progress: status === 'done' ? 100 : 0 }
+}
+
+// % de tarefas done (cancelled fora; lista vazia → null). Reusa o mesmo
+// rollup ponderado de computeProgress/auto_rollup com peso uniforme.
+export function computeTaskRollup(statuses: TaskStatus[]): number | null {
+  return rollupProgress(statuses.map(taskProgressChild))
 }

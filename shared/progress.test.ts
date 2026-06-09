@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { computeProgress, type ProgressChild, type ProgressInput } from './progress'
+import {
+  computeProgress,
+  computeTaskRollup,
+  taskProgressChild,
+  type ProgressChild,
+  type ProgressInput,
+} from './progress'
 
 function input(overrides: Partial<ProgressInput>): ProgressInput {
   return {
@@ -135,5 +141,36 @@ describe('computeProgress — auto_rollup', () => {
     expect(
       computeProgress(input({ progressMode: 'auto_rollup' }), [child(100, null), child(0, 1)]),
     ).toBe(50)
+  })
+})
+
+describe('taskProgressChild', () => {
+  it('maps done to 100 and any other status to 0, preserving the status', () => {
+    expect(taskProgressChild('done')).toEqual({ status: 'done', weight: null, progress: 100 })
+    expect(taskProgressChild('todo').progress).toBe(0)
+    expect(taskProgressChild('in_progress').progress).toBe(0)
+    expect(taskProgressChild('blocked').progress).toBe(0)
+    expect(taskProgressChild('cancelled').status).toBe('cancelled')
+  })
+})
+
+describe('computeTaskRollup', () => {
+  it('returns the % of done tasks', () => {
+    expect(computeTaskRollup(['done', 'todo', 'done', 'todo'])).toBe(50)
+    expect(computeTaskRollup(['done', 'done'])).toBe(100)
+  })
+
+  it('excludes cancelled tasks from the denominator', () => {
+    expect(computeTaskRollup(['done', 'cancelled'])).toBe(100)
+    expect(computeTaskRollup(['todo', 'cancelled', 'done'])).toBe(50)
+  })
+
+  it('returns null for an empty list or all-cancelled list', () => {
+    expect(computeTaskRollup([])).toBeNull()
+    expect(computeTaskRollup(['cancelled', 'cancelled'])).toBeNull()
+  })
+
+  it('counts blocked and in_progress as 0', () => {
+    expect(computeTaskRollup(['done', 'blocked', 'in_progress', 'todo'])).toBe(25)
   })
 })

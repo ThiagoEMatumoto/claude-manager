@@ -774,6 +774,19 @@ export interface Api {
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void
   }
+  objectives: {
+    list(filter?: ObjectiveListFilter): Promise<ObjectiveWithProgress[]>
+    get(id: string): Promise<ObjectiveDetail | null>
+    create(input: CreateObjectiveInput): Promise<Objective>
+    update(input: UpdateObjectiveInput): Promise<Objective>
+    archive(id: string): Promise<void>
+    createKeyResult(input: CreateKeyResultInput): Promise<KeyResult>
+    updateKeyResult(input: UpdateKeyResultInput): Promise<KeyResult>
+    deleteKeyResult(id: string): Promise<void>
+    // Payload varia por mutação (Objective completo, ou marcador {id, archived}
+    // / {keyResultId, ...}) — o renderer trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
+  }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void
   }

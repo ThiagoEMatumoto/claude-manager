@@ -19,6 +19,7 @@ export const updatesApi = api.updates
 export const usageApi = api.usage
 export const metricsApi = api.metrics
 export const featuresApi = api.features
+export const objectivesApi = api.objectives
 export const windowApi = api.window
 export const notificationsApi = api.notifications
 

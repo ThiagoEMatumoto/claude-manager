@@ -23,6 +23,11 @@ import type {
   UpdateFeatureInput,
   SetFeatureReposInput,
   FeatureSynthError,
+  ObjectiveListFilter,
+  CreateObjectiveInput,
+  UpdateObjectiveInput,
+  CreateKeyResultInput,
+  UpdateKeyResultInput,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -156,6 +161,17 @@ const api: Api = {
     backfill: () => invoke('features:backfill'),
     onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
     onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),
+  },
+  objectives: {
+    list: (filter?: ObjectiveListFilter) => invoke('objectives:list', filter),
+    get: (id: string) => invoke('objectives:get', id),
+    create: (input: CreateObjectiveInput) => invoke('objectives:create', input),
+    update: (input: UpdateObjectiveInput) => invoke('objectives:update', input),
+    archive: (id: string) => invoke('objectives:archive', id),
+    createKeyResult: (input: CreateKeyResultInput) => invoke('objectives:kr-create', input),
+    updateKeyResult: (input: UpdateKeyResultInput) => invoke('objectives:kr-update', input),
+    deleteKeyResult: (id: string) => invoke('objectives:kr-delete', id),
+    onUpdated: (handler) => subscribe<unknown>('objective:updated', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

@@ -11,6 +11,7 @@ import * as projectPosition from './009_project_position'
 import * as featureSessionRecords from './010_feature_session_records'
 import * as objectives from './011_objectives'
 import * as tasks from './012_tasks'
+import * as featureLinks from './013_feature_links'
 
 interface Migration {
   version: number
@@ -31,6 +32,7 @@ const migrations: Migration[] = [
   featureSessionRecords,
   objectives,
   tasks,
+  featureLinks,
 ]
 
 export function runMigrations(db: Database.Database): void {

@@ -175,6 +175,32 @@ export interface FeatureBackfillResult {
   skipped: number
 }
 
+// ---- Vínculos Feature → Objetivo/KR (Fase 3) ----
+
+export type FeatureLinkTargetType = 'objective' | 'key_result'
+
+// Vínculo polimórfico feature → objetivo/KR (sem FK real em targetId, espelho
+// de TaskLink). Alimenta o rollup de objetivos/KRs auto_rollup.
+export interface FeatureObjectiveLink {
+  targetType: FeatureLinkTargetType
+  targetId: string
+}
+
+export interface SetFeatureObjectiveLinksInput {
+  featureId: string
+  links: FeatureObjectiveLink[]
+}
+
+// Projeção enxuta de uma feature vinculada, pronta pra UI de Objetivos.
+// progress = % de tarefas done da feature (ou 100 se status done sem tarefas;
+// null = indeterminado, fica fora do rollup do pai).
+export interface LinkedFeatureSummary {
+  id: string
+  title: string
+  status: FeatureStatus
+  progress: number | null
+}
+
 // ---- Objetivos / Key Results (camada genérica de OKRs, Fase 1) ----
 
 export type ObjectiveKind = 'okr' | 'personal_goal' | 'project' | 'custom'

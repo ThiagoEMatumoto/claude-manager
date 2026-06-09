@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
 import type { LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
-export type Area = 'projects' | 'cc-configs' | 'metrics' | 'features' | 'objectives'
+export type Area = 'projects' | 'cc-configs' | 'metrics' | 'features' | 'objectives' | 'tasks'
 
 // Persistência leve do estado colapsado da sidebar (mesmo padrão do
 // keybindings-store: localStorage no renderer, sem IPC/DB).

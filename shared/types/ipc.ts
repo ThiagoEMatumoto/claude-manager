@@ -322,6 +322,71 @@ export interface ObjectiveListFilter {
   search?: string
 }
 
+// ---- Tarefas (Fase 2) ----
+
+export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
+export type TaskPriority = 'low' | 'medium' | 'high'
+export type TaskParentType = 'objective' | 'key_result' | 'feature'
+
+// Vínculo polimórfico tarefa → parent (sem FK real em parentId; tarefa
+// standalone = sem vínculos). Alimenta o rollup de KRs/objetivos auto_rollup.
+export interface TaskLink {
+  parentType: TaskParentType
+  parentId: string
+}
+
+// Persistência SQLite-only (mesmo padrão de Objective): tags são strings
+// opacas (JSON na coluna); position REAL p/ ordenação manual.
+export interface Task {
+  id: string
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority | null
+  dueDate: number | null
+  startedAt: number | null
+  completedAt: number | null
+  tags: string[]
+  notes: string | null
+  position: number
+  links: TaskLink[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateTaskInput {
+  title: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority | null
+  dueDate?: number | null
+  tags?: string[]
+  notes?: string | null
+  position?: number
+  links?: TaskLink[]
+}
+
+export interface UpdateTaskInput {
+  id: string
+  title?: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority | null
+  dueDate?: number | null
+  tags?: string[]
+  notes?: string | null
+  position?: number
+}
+
+export interface TaskListFilter {
+  status?: TaskStatus
+  priority?: TaskPriority
+  tag?: string
+  search?: string
+  parentType?: TaskParentType
+  parentId?: string
+}
+
 export interface ResumeSessionInput {
   repoId: string
   ccSessionId: string
@@ -785,6 +850,20 @@ export interface Api {
     deleteKeyResult(id: string): Promise<void>
     // Payload varia por mutação (Objective completo, ou marcador {id, archived}
     // / {keyResultId, ...}) — o renderer trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  tasks: {
+    list(filter?: TaskListFilter): Promise<Task[]>
+    get(id: string): Promise<Task | null>
+    listByParent(parentType: TaskParentType, parentId: string): Promise<Task[]>
+    create(input: CreateTaskInput): Promise<Task>
+    update(input: UpdateTaskInput): Promise<Task>
+    delete(id: string): Promise<void>
+    setLinks(taskId: string, links: TaskLink[]): Promise<Task>
+    reorder(taskId: string, position: number): Promise<Task>
+    // Payload varia por mutação (Task completa ou marcador {id, deleted}) —
+    // o renderer trata como sinal de recarga. Mutações com parent
+    // objective/key_result também emitem 'objective:updated' com {id}.
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   notifications: {

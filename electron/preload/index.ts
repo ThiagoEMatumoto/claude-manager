@@ -28,6 +28,11 @@ import type {
   UpdateObjectiveInput,
   CreateKeyResultInput,
   UpdateKeyResultInput,
+  TaskListFilter,
+  TaskParentType,
+  TaskLink,
+  CreateTaskInput,
+  UpdateTaskInput,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -172,6 +177,18 @@ const api: Api = {
     updateKeyResult: (input: UpdateKeyResultInput) => invoke('objectives:kr-update', input),
     deleteKeyResult: (id: string) => invoke('objectives:kr-delete', id),
     onUpdated: (handler) => subscribe<unknown>('objective:updated', handler),
+  },
+  tasks: {
+    list: (filter?: TaskListFilter) => invoke('tasks:list', filter),
+    get: (id: string) => invoke('tasks:get', id),
+    listByParent: (parentType: TaskParentType, parentId: string) =>
+      invoke('tasks:list-by-parent', parentType, parentId),
+    create: (input: CreateTaskInput) => invoke('tasks:create', input),
+    update: (input: UpdateTaskInput) => invoke('tasks:update', input),
+    delete: (id: string) => invoke('tasks:delete', id),
+    setLinks: (taskId: string, links: TaskLink[]) => invoke('tasks:set-links', taskId, links),
+    reorder: (taskId: string, position: number) => invoke('tasks:reorder', taskId, position),
+    onUpdated: (handler) => subscribe<unknown>('task:updated', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

@@ -1,16 +1,22 @@
 import { Pencil, Trash2 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import type { KeyResult } from '../../../shared/types/ipc'
+import type { KeyResult, LinkedFeatureSummary } from '../../../shared/types/ipc'
 import { KR_STATUS_META } from './status'
 import { ProgressBar } from './ProgressBar'
 
 interface Props {
   kr: KeyResult & { progress: number | null }
+  // Features vinculadas ao KR (Fase 3) — chips compactos com % abaixo da barra.
+  linkedFeatures?: LinkedFeatureSummary[]
   onEdit: () => void
   onDelete: () => void
 }
 
-export function KeyResultRow({ kr, onEdit, onDelete }: Props) {
+function fmtProgress(progress: number | null): string {
+  return progress === null ? '—' : `${Math.round(progress)}%`
+}
+
+export function KeyResultRow({ kr, linkedFeatures, onEdit, onDelete }: Props) {
   const meta = KR_STATUS_META[kr.status]
   return (
     <li className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
@@ -50,6 +56,21 @@ export function KeyResultRow({ kr, onEdit, onDelete }: Props) {
         </div>
       </div>
       <ProgressBar value={kr.progress} className="mt-2" />
+      {linkedFeatures && linkedFeatures.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {linkedFeatures.map((f) => (
+            <li
+              key={f.id}
+              className="inline-flex max-w-48 items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+              title={`feature: ${f.title}`}
+            >
+              <span className="shrink-0 font-medium text-[var(--color-accent)]">feature</span>
+              <span className="truncate">{f.title}</span>
+              <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   )
 }

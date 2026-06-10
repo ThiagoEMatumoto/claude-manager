@@ -857,6 +857,15 @@ export interface AppInfo {
   arch: string
 }
 
+// Status read-only do MCP server embutido (Settings → Geral). addCommand é o
+// `claude mcp add ...` pronto (inclui o bearer token) pra sessões externas.
+export interface McpStatus {
+  running: boolean
+  port: number | null
+  url: string | null
+  addCommand: string | null
+}
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -1000,6 +1009,9 @@ export interface Api {
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void
+  }
+  mcp: {
+    status(): Promise<McpStatus>
   }
   window: {
     minimize(): Promise<void>

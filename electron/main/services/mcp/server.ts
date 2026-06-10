@@ -16,7 +16,9 @@ import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node'
 import {
   getMcpPort,
   loadOrCreateToken,
+  mcpClientConfigPath,
   mcpConfigPath,
+  writeMcpClientConfig,
   writeMcpRuntimeInfo,
 } from './config'
 import { registerTools, type McpNotify } from './tools'
@@ -67,6 +69,7 @@ export interface StartMcpOptions {
   token?: string
   notify?: McpNotify
   configFilePath?: string
+  clientConfigFilePath?: string
 }
 
 export interface McpServerHandle {
@@ -78,8 +81,15 @@ export interface McpServerHandle {
 
 let running: McpServerHandle | null = null
 
+// Consultado pelo spawn de sessões (B4) e pelo mcp:status: null = server não
+// subiu (EADDRINUSE etc.) → ninguém injeta --mcp-config nem anuncia URL.
+export function getMcpRuntime(): McpServerHandle | null {
+  return running
+}
+
 export async function startMcpServer(opts: StartMcpOptions = {}): Promise<McpServerHandle | null> {
   const configFilePath = opts.configFilePath ?? mcpConfigPath()
+  const clientConfigFilePath = opts.clientConfigFilePath ?? mcpClientConfigPath()
   const token = opts.token ?? loadOrCreateToken(configFilePath)
   const port = opts.port ?? getMcpPort()
   const notify = opts.notify ?? defaultNotify
@@ -124,8 +134,9 @@ export async function startMcpServer(opts: StartMcpOptions = {}): Promise<McpSer
       const url = `http://127.0.0.1:${actualPort}/mcp`
       try {
         writeMcpRuntimeInfo({ url, token, pid: process.pid }, configFilePath)
+        writeMcpClientConfig({ url, token, pid: process.pid }, clientConfigFilePath)
       } catch (err) {
-        console.error('[mcp] failed to write mcp.json (server stays up):', err)
+        console.error('[mcp] failed to write mcp config files (server stays up):', err)
       }
       const handleObj: McpServerHandle = {
         port: actualPort,

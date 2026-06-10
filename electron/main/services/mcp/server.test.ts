@@ -74,6 +74,18 @@ describe('mcp server — contrato', () => {
     expect(statSync(configPath).mode & 0o777).toBe(0o600)
   })
 
+  it('escreve mcp-client-config.json no formato mcpServers (--mcp-config) com mode 0600', () => {
+    const clientConfigPath = join(app.getPath('userData'), 'mcp-client-config.json')
+    const parsed = JSON.parse(readFileSync(clientConfigPath, 'utf8')) as {
+      mcpServers: Record<string, { type: string; url: string; headers: Record<string, string> }>
+    }
+    const server = parsed.mcpServers['claude-manager']
+    expect(server.type).toBe('http')
+    expect(server.url).toBe(handle.url)
+    expect(server.headers.Authorization).toBe(`Bearer ${TOKEN}`)
+    expect(statSync(clientConfigPath).mode & 0o777).toBe(0o600)
+  })
+
   it('initialize + tools/list expõe as tools de objectives/KRs', async () => {
     const client = await connectedClient()
     try {

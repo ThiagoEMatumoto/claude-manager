@@ -23,5 +23,6 @@ export const objectivesApi = api.objectives
 export const tasksApi = api.tasks
 export const windowApi = api.window
 export const notificationsApi = api.notifications
+export const mcpApi = api.mcp
 
 export { api }

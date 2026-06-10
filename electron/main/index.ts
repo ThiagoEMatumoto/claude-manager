@@ -16,6 +16,7 @@ import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerMcpIpc } from './ipc/mcp'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -116,6 +117,7 @@ app.whenReady().then(() => {
   registerFeaturesIpc()
   registerObjectivesIpc()
   registerTasksIpc()
+  registerMcpIpc()
   registerWindowIpc()
 
   createMainWindow()

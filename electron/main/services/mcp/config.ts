@@ -57,3 +57,28 @@ export function writeMcpRuntimeInfo(info: McpRuntimeInfo, path: string = mcpConf
   // outra permissão, força 0600.
   chmodSync(path, 0o600)
 }
+
+// Config no formato consumido pelo `claude --mcp-config`: mesmo shape do
+// .mcp.json de projetos (mcpServers → nome → {type, url, headers}). Regenerado
+// a cada boot junto com o mcp.json — URL/token sempre atuais. Contém o token,
+// daí o mesmo mode 0600.
+export function mcpClientConfigPath(): string {
+  return join(app.getPath('userData'), 'mcp-client-config.json')
+}
+
+export function writeMcpClientConfig(
+  info: McpRuntimeInfo,
+  path: string = mcpClientConfigPath(),
+): void {
+  const config = {
+    mcpServers: {
+      'claude-manager': {
+        type: 'http',
+        url: info.url,
+        headers: { Authorization: `Bearer ${info.token}` },
+      },
+    },
+  }
+  writeFileSync(path, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
+  chmodSync(path, 0o600)
+}

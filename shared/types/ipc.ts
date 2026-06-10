@@ -95,6 +95,9 @@ export interface SpawnSessionInput {
 
 export type FeatureStatus = 'pending' | 'in-progress' | 'blocked' | 'done' | 'paused'
 export type FeatureSynthMode = 'auto' | 'manual' | 'threshold'
+// 'manual' = criada pelo usuário; 'auto' = auto-criada pela resolução de sessões.
+// Rascunho oculto = origin='auto' E 0 session records (derivado, sem flag mutável).
+export type FeatureOrigin = 'manual' | 'auto'
 
 export interface FeatureRepoLink {
   repoId: string
@@ -115,6 +118,8 @@ export interface Feature {
   synthMode: FeatureSynthMode
   model: string | null
   repos: FeatureRepoLink[]
+  // Vive só no SQLite (como archivedAt) — não vai pro frontmatter do `.md`.
+  origin: FeatureOrigin
   createdAt: number
   updatedAt: number
   completedAt: number | null
@@ -123,10 +128,20 @@ export interface Feature {
   body?: string
 }
 
-// Feature do índice + contagem real de sessões ligadas (sessions.feature_id).
-// Usado pelo board; sem corpo, igual a list().
+// Feature do índice + stats de atividade real. Usado pelo board e pela
+// listagem (ordenação/badges); sem corpo, igual a list().
 export interface FeatureWithStats extends Feature {
   sessionCount: number
+  // Registros em feature_session_records (0 = "sem registros").
+  recordCount: number
+  // session_at do registro mais recente; null sem registros. A listagem ordena
+  // por COALESCE(lastRecordAt, updatedAt) DESC (atividade real > metadado).
+  lastRecordAt: number | null
+}
+
+export interface FeatureListStatsOpts {
+  includeArchived?: boolean
+  includeDrafts?: boolean
 }
 
 export interface CreateFeatureInput {
@@ -137,6 +152,9 @@ export interface CreateFeatureInput {
   synthMode?: FeatureSynthMode
   model?: string | null
   repos?: FeatureRepoLink[]
+  // Default 'manual'. A resolução automática de sessões passa 'auto' (rascunho
+  // oculto até a feature ganhar o 1º session record).
+  origin?: FeatureOrigin
   // Seções iniciais do corpo (preenchem o esqueleto de headings).
   overview?: string
   businessRules?: string
@@ -940,7 +958,7 @@ export interface Api {
   }
   features: {
     list(projectId?: string): Promise<Feature[]>
-    listWithStats(opts?: { includeArchived?: boolean }): Promise<FeatureWithStats[]>
+    listWithStats(opts?: FeatureListStatsOpts): Promise<FeatureWithStats[]>
     get(id: string): Promise<Feature | null>
     create(input: CreateFeatureInput): Promise<Feature>
     update(input: UpdateFeatureInput): Promise<Feature>

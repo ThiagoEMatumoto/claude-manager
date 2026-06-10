@@ -5,7 +5,9 @@ import { Input } from '@/components/ui/Input'
 import type { Feature, FeatureStatus, Project } from '../../../shared/types/ipc'
 import { STATUS_META, STATUS_ORDER } from './status'
 
-type StatusFilter = 'all' | FeatureStatus
+// 'drafts' = rascunhos ocultos (auto-criados sem registros); o conjunto vem
+// pronto da FeaturesArea via byProject — aqui só pulamos o filtro de status.
+type StatusFilter = 'all' | FeatureStatus | 'drafts'
 
 interface Props {
   projects: Project[]
@@ -26,6 +28,7 @@ interface Props {
 const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'Todas' },
   ...STATUS_ORDER.map((s) => ({ id: s as StatusFilter, label: STATUS_META[s].label })),
+  { id: 'drafts', label: 'Rascunhos' },
 ]
 
 export function FeaturesSidebar({
@@ -52,7 +55,7 @@ export function FeaturesSidebar({
       .map((project) => {
         const all = byProject[project.id] ?? []
         const features = all.filter((f) => {
-          if (filter !== 'all' && f.status !== filter) return false
+          if (filter !== 'all' && filter !== 'drafts' && f.status !== filter) return false
           if (q && !f.title.toLowerCase().includes(q)) return false
           return true
         })

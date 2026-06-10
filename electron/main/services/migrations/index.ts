@@ -13,6 +13,7 @@ import * as objectives from './011_objectives'
 import * as tasks from './012_tasks'
 import * as featureLinks from './013_feature_links'
 import * as sessionsRepoNullable from './014_sessions_repo_nullable'
+import * as featureOrigin from './015_feature_origin'
 
 interface Migration {
   version: number
@@ -24,7 +25,9 @@ interface Migration {
   disableForeignKeys?: boolean
 }
 
-const migrations: Migration[] = [
+// Exportada pra testes: permite aplicar um prefixo da cadeia (ex: 001-014),
+// seedar dados e só então aplicar a migration sob teste.
+export const migrations: Migration[] = [
   init,
   vault,
   workspacePanes,
@@ -39,6 +42,7 @@ const migrations: Migration[] = [
   tasks,
   featureLinks,
   sessionsRepoNullable,
+  featureOrigin,
 ]
 
 export function runMigrations(db: Database.Database): void {

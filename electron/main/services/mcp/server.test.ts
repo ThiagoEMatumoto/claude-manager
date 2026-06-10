@@ -86,6 +86,18 @@ describe('mcp server — contrato', () => {
     expect(statSync(clientConfigPath).mode & 0o777).toBe(0o600)
   })
 
+  it('initialize anuncia as instructions de auto-tracking', async () => {
+    const client = await connectedClient()
+    try {
+      const instructions = client.getInstructions()
+      expect(instructions).toBeTruthy()
+      expect(instructions).toContain('auto')
+      expect(instructions).toContain('task_list')
+    } finally {
+      await client.close()
+    }
+  })
+
   it('initialize + tools/list expõe as tools de objectives/KRs', async () => {
     const client = await connectedClient()
     try {

@@ -14,6 +14,7 @@ import { app } from 'electron'
 import { McpServer } from '@modelcontextprotocol/server'
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node'
 import {
+  cleanupStaleMcpConfigs,
   getMcpPort,
   loadOrCreateToken,
   mcpClientConfigPath,
@@ -22,6 +23,7 @@ import {
   writeMcpRuntimeInfo,
 } from './config'
 import { registerTools, type McpNotify } from './tools'
+import { SERVER_INSTRUCTIONS } from './instructions'
 import {
   broadcast,
   broadcastAffectedObjectives,
@@ -102,7 +104,11 @@ export async function startMcpServer(opts: StartMcpOptions = {}): Promise<McpSer
       if (!tokenMatches(req.headers.authorization, token)) return deny(res, 401, 'unauthorized')
 
       // Stateless: instâncias novas por request, descartadas no fim da resposta.
-      const mcp = new McpServer({ name: 'claude-manager', version: app.getVersion() })
+      // instructions: injetadas pelo client no contexto da sessão (auto-tracking).
+      const mcp = new McpServer(
+        { name: 'claude-manager', version: app.getVersion() },
+        { instructions: SERVER_INSTRUCTIONS },
+      )
       registerTools(mcp, notify)
       const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
       res.on('close', () => {
@@ -127,6 +133,19 @@ export async function startMcpServer(opts: StartMcpOptions = {}): Promise<McpSer
       // EADDRINUSE (outra instância/processo na porta) ou afins: o app segue
       // funcionando sem MCP — nunca crashar o boot por causa disso.
       console.error(`[mcp] failed to listen on 127.0.0.1:${port} — continuing without MCP:`, err)
+      if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+        // Sem server próprio, configs no NOSSO userData apontariam pra um
+        // server stale (ex: userData copiado pra E2E) → remove, a menos que
+        // pertençam a outra instância viva (ver decideStaleConfigCleanup).
+        try {
+          const decision = cleanupStaleMcpConfigs(configFilePath, clientConfigFilePath)
+          if (decision === 'keep') {
+            console.warn('[mcp] mcp.json belongs to another live instance — leaving config files')
+          }
+        } catch (cleanupErr) {
+          console.error('[mcp] failed to clean stale mcp config files:', cleanupErr)
+        }
+      }
       resolve(null)
     })
     server.listen(port, '127.0.0.1', () => {

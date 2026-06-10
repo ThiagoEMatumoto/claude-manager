@@ -195,7 +195,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       const panes = useAppStore.getState().panes
       list.push({
         id: 'close-pane',
-        label: `Fechar pane: ${panes[panes.length - 1]?.repo.label ?? ''}`.trim(),
+        label: `Fechar pane: ${panes[panes.length - 1]?.repo?.label ?? ''}`.trim(),
         icon: <Icon as={X} />,
         group: 'Ações',
         run: () => closePane(panes[panes.length - 1].paneId),

@@ -29,6 +29,14 @@ const GROUPS: GroupDef[] = [
   { id: 'idle', label: 'Idle', statuses: ['idle'], accent: false },
 ]
 
+// Sessões avulsas (repo null) ficam num grupo próprio, fora dos grupos por status.
+const STANDALONE_GROUP: GroupDef = {
+  id: 'standalone',
+  label: 'Avulsas',
+  statuses: [],
+  accent: false,
+}
+
 interface StatusView {
   label: string
   icon: ComponentType<LucideProps>
@@ -101,18 +109,21 @@ export function SessionSwitcher({ open, onClose }: Props) {
   )
 
   const filtered = useMemo(
-    () => liveSessions.filter((s) => matches(query, s.title, s.name, s.projectName, s.repo.label)),
+    () => liveSessions.filter((s) => matches(query, s.title, s.name, s.projectName, s.repo?.label)),
     [liveSessions, query],
   )
 
-  const grouped = useMemo(
-    () =>
-      GROUPS.map((g) => ({
+  const grouped = useMemo(() => {
+    const withRepo = filtered.filter((s) => s.repo !== null)
+    const standalone = filtered.filter((s) => s.repo === null)
+    return [
+      ...GROUPS.map((g) => ({
         def: g,
-        items: filtered.filter((s) => g.statuses.includes(s.status)),
-      })).filter((g) => g.items.length > 0),
-    [filtered],
-  )
+        items: withRepo.filter((s) => g.statuses.includes(s.status)),
+      })),
+      { def: STANDALONE_GROUP, items: standalone },
+    ].filter((g) => g.items.length > 0)
+  }, [filtered])
 
   const selectedItems = useMemo(
     () => liveSessions.filter((s) => selected.has(s.ccSessionId)),
@@ -254,7 +265,7 @@ interface RowProps {
 
 function SessionRow({ item, accent, selected, onScreen, onToggle, onOpen }: RowProps) {
   const view = statusView(item.status)
-  const name = item.title ?? item.name ?? item.repo.label
+  const name = item.title ?? item.name ?? item.repo?.label ?? 'Avulsa'
   const preview = item.lastText?.replace(/\s+/g, ' ').trim()
 
   return (
@@ -296,7 +307,7 @@ function SessionRow({ item, accent, selected, onScreen, onToggle, onOpen }: RowP
               style={{ background: item.projectColor ?? 'var(--color-border)' }}
             />
             <span className="shrink-0">{renderProjectIcon(item.projectIcon)}</span>
-            <span className="max-w-32 truncate">{item.projectName || item.repo.label}</span>
+            <span className="max-w-32 truncate">{item.projectName || (item.repo?.label ?? 'Avulsa')}</span>
           </span>
           <span className={`flex shrink-0 items-center gap-1 ${view.className}`}>
             <Icon as={view.icon} size={11} className={view.spin ? 'animate-spin' : undefined} />

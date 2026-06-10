@@ -34,8 +34,9 @@ function writeSidebarCollapsed(collapsed: boolean): void {
 export interface ActivePane {
   paneId: string
   session: Session
-  repo: Repo
-  projectName: string
+  // null = sessão avulsa (sem repo/projeto), rodando no scratch dir.
+  repo: Repo | null
+  projectName: string | null
   projectIcon: string | null
   projectColor: string | null
 }
@@ -127,7 +128,7 @@ function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane 
     paneId,
     session: {
       id: item.id,
-      repoId: item.repo.id,
+      repoId: item.repo?.id ?? null,
       ccSessionId: item.ccSessionId,
       title: item.title ?? item.name,
       paneId,
@@ -174,8 +175,8 @@ interface AppState {
   clearGridRequest: () => void
   setActiveProject: (id: string | null) => void
   openSession: (
-    repo: Repo,
-    projectName: string,
+    repo: Repo | null,
+    projectName: string | null,
     projectIcon: string | null,
     projectColor: string | null,
     paneId?: string,
@@ -183,9 +184,11 @@ interface AppState {
     name?: string,
     initialCommand?: string,
   ) => Promise<void>
+  // Sessão avulsa: spawn sem repo (cwd = scratch dir do backend).
+  openQuickSession: () => Promise<void>
   resumeSession: (
-    repo: Repo,
-    projectName: string,
+    repo: Repo | null,
+    projectName: string | null,
     projectIcon: string | null,
     projectColor: string | null,
     ccSessionId: string,
@@ -291,7 +294,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
-    const session = await sessionsApi.spawn({ repoId: repo.id, featureId, name, initialCommand })
+    const session = await sessionsApi.spawn({
+      repoId: repo?.id ?? null,
+      featureId,
+      name,
+      initialCommand,
+    })
     set((s) => ({
       panes: [
         ...s.panes,
@@ -309,6 +317,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().refreshLiveSessions()
   },
 
+  openQuickSession: async () => {
+    await get().openSession(null, null, null, null)
+  },
+
   resumeSession: async (repo, projectName, projectIcon, projectColor, ccSessionId, paneId) => {
     // Já há uma pane com essa sessão aberta (ou um resume em voo)? Não duplicar.
     // `resuming` é reservado de forma síncrona antes do await pra fechar a corrida.
@@ -316,7 +328,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     resuming.add(ccSessionId)
     try {
-      const session = await sessionsApi.resume({ repoId: repo.id, ccSessionId })
+      const session = await sessionsApi.resume({ repoId: repo?.id ?? null, ccSessionId })
       set((s) => ({
         panes: [
           ...s.panes,

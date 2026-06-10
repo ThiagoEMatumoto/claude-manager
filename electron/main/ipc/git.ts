@@ -6,6 +6,7 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/promises'
 import { getDb } from '../services/db'
+import { validateBlankRepoName } from './blank-repo'
 
 const VAULT_ROOT_KEY = 'vault_root'
 
@@ -29,6 +30,11 @@ const moveSchema = z.object({
 const symlinkSchema = moveSchema
 const removeSymlinkSchema = z.object({ target: z.string().min(1) })
 const cloneSchema = z.object({ url: z.string().min(1), vaultPath: z.string().min(1) })
+const createBlankSchema = z.object({
+  vaultPath: z.string().min(1),
+  name: z.string().min(1),
+  gitInit: z.boolean(),
+})
 
 function repoNameFromUrl(url: string): string {
   const base = url.replace(/\/+$/, '').split('/').pop() ?? 'repo'
@@ -128,6 +134,26 @@ export function registerGitIpc(): void {
     const { url, vaultPath } = cloneSchema.parse(payload)
     const dest = path.join(vaultPath, repoNameFromUrl(url))
     await simpleGit().clone(url, dest)
+    return { path: dest }
+  })
+
+  ipcMain.handle('repo:create-blank', async (_e, payload: unknown) => {
+    const { vaultPath, name, gitInit } = createBlankSchema.parse(payload)
+    const result = validateBlankRepoName(name)
+    if (!result.ok) {
+      throw new Error(result.error)
+    }
+    // O nome validado não contém separadores → o join nunca escapa do vault.
+    const dest = path.join(vaultPath, result.name)
+    // lstat (e não existsSync) pra detectar também symlinks quebrados no destino.
+    const destStat = await lstat(dest).catch(() => null)
+    if (destStat) {
+      throw new Error(`destino já existe: ${dest}`)
+    }
+    await mkdir(dest, { recursive: true })
+    if (gitInit) {
+      await simpleGit(dest).init()
+    }
     return { path: dest }
   })
 }

@@ -12,11 +12,16 @@ import * as featureSessionRecords from './010_feature_session_records'
 import * as objectives from './011_objectives'
 import * as tasks from './012_tasks'
 import * as featureLinks from './013_feature_links'
+import * as sessionsRepoNullable from './014_sessions_repo_nullable'
 
 interface Migration {
   version: number
   name: string
   up(db: Database.Database): void
+  // Migrations que recriam tabela referenciada por FK (DROP+RENAME) precisam de
+  // foreign_keys OFF. SQLite ignora o pragma dentro de transação, então o runner
+  // o aplica ANTES da transação e valida com foreign_key_check ao religar.
+  disableForeignKeys?: boolean
 }
 
 const migrations: Migration[] = [
@@ -33,6 +38,7 @@ const migrations: Migration[] = [
   objectives,
   tasks,
   featureLinks,
+  sessionsRepoNullable,
 ]
 
 export function runMigrations(db: Database.Database): void {
@@ -64,7 +70,23 @@ export function runMigrations(db: Database.Database): void {
       m.up(db)
       insert.run(m.version, m.name, Date.now())
     })
-    tx()
+    if (m.disableForeignKeys) {
+      db.pragma('foreign_keys = OFF')
+      try {
+        tx()
+      } finally {
+        db.pragma('foreign_keys = ON')
+      }
+      const violations = db.pragma('foreign_key_check') as unknown[]
+      if (violations.length > 0) {
+        throw new Error(
+          `[db] migration ${m.name} left ${violations.length} foreign key violation(s): ` +
+            JSON.stringify(violations.slice(0, 5)),
+        )
+      }
+    } else {
+      tx()
+    }
     console.log(`[db] migration applied: ${m.name}`)
   }
 }

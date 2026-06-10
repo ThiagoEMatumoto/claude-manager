@@ -16,6 +16,7 @@ import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerMcpIpc } from './ipc/mcp'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -23,6 +24,7 @@ import {
   markWorkspaceRunning,
   markWorkspaceCleanShutdown,
 } from './ipc/workspace'
+import { startMcpServer, stopMcpServer } from './services/mcp/server'
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
@@ -96,6 +98,9 @@ app.whenReady().then(() => {
   // colando via clipboard nativo do Chromium. Coerente com autoHideMenuBar.
   Menu.setApplicationMenu(null)
   getDb()
+  // MCP server local (writes externos via Claude Code). Async e fire-and-forget:
+  // EADDRINUSE etc. são logados dentro do start — nunca derrubam o boot.
+  void startMcpServer()
   // Captura o clean_shutdown do boot anterior e o zera; deve rodar antes da
   // janela para que o renderer leia o valor correto via workspace:get-boot-state.
   markWorkspaceRunning()
@@ -112,6 +117,7 @@ app.whenReady().then(() => {
   registerFeaturesIpc()
   registerObjectivesIpc()
   registerTasksIpc()
+  registerMcpIpc()
   registerWindowIpc()
 
   createMainWindow()
@@ -125,6 +131,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
   featureMemory.close()

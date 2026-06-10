@@ -17,6 +17,8 @@ import {
   isPidAlive,
   mapStatus,
 } from '../services/session-activity'
+import { getMcpRuntime } from '../services/mcp/server'
+import { mcpClientConfigPath } from '../services/mcp/config'
 import { mapLiveSessionRepo, type LiveSessionJoinRow } from './live-session-mapping'
 import type {
   Session,
@@ -84,6 +86,15 @@ function resolveScratchDir(): string {
   const dir = row?.value?.trim() || join(homedir(), 'ClaudeManager', 'scratch')
   mkdirSync(dir, { recursive: true })
   return dir
+}
+
+// B4: conecta a sessão ao MCP server do claude-manager via --mcp-config (config
+// gerado no boot em <userData>/mcp-client-config.json). Sem --strict-mcp-config:
+// os servers de user/projeto do claude continuam valendo. Se o server não subiu
+// (EADDRINUSE → getMcpRuntime() null), não injeta nada — sessão sobe normal.
+function mcpConfigArg(): string {
+  if (!getMcpRuntime()) return ''
+  return ` --mcp-config ${shquote(mcpClientConfigPath())}`
 }
 
 // O claude vive em ~/.local/bin e o env do Electron GUI não herda o PATH do rc.
@@ -294,7 +305,7 @@ export function registerSessionIpc(): void {
 
     if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
     const claudeCmd = resolveClaudeCommand()
-    let innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}`
+    let innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}${mcpConfigArg()}`
 
     // Fase 6: se a sessão é vinculada a uma feature, escreve um arquivo temporário
     // com o contexto (frontmatter-derivado + seções-chave do doc) e anexa via
@@ -348,7 +359,7 @@ export function registerSessionIpc(): void {
     const name = (transcript ? readTranscriptTitle(transcript) : null) || defaultName
 
     const claudeCmd = resolveClaudeCommand()
-    const innerCmd = `${claudeCmd} --resume ${input.ccSessionId} -n ${shquote(name)}`
+    const innerCmd = `${claudeCmd} --resume ${input.ccSessionId} -n ${shquote(name)}${mcpConfigArg()}`
 
     return startSession({
       ccSessionId: input.ccSessionId,

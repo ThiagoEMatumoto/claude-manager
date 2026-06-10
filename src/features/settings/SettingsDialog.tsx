@@ -4,8 +4,8 @@ import { AboutTab } from './AboutTab'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { ColorSelect } from '@/components/ui/ColorSelect'
-import { dialogApi, prefsApi, vaultApi } from '@/lib/ipc'
-import type { NotificationPrefs } from '../../../shared/types/ipc'
+import { dialogApi, mcpApi, prefsApi, vaultApi } from '@/lib/ipc'
+import type { McpStatus, NotificationPrefs } from '../../../shared/types/ipc'
 import {
   COMMANDS,
   formatCombo,
@@ -85,6 +85,8 @@ const SCRATCH_DIR_DEFAULT = '~/ClaudeManager/scratch'
 function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
   const [scratchDir, setScratchDir] = useState('')
+  const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null)
+  const [mcpCopied, setMcpCopied] = useState(false)
   const scrollback = useTerminalPrefsStore((s) => s.scrollback)
   const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
@@ -94,8 +96,18 @@ function GeneralTab({ open }: { open: boolean }) {
     if (!open) return
     void vaultApi.getRoot().then(setRoot)
     void prefsApi.get<string>('scratch_dir').then((dir) => setScratchDir(dir ?? ''))
+    void mcpApi.status().then(setMcpStatus)
+    setMcpCopied(false)
     void useTerminalPrefsStore.getState().load()
   }, [open])
+
+  function copyMcpCommand() {
+    if (!mcpStatus?.addCommand) return
+    void navigator.clipboard.writeText(mcpStatus.addCommand).then(() => {
+      setMcpCopied(true)
+      setTimeout(() => setMcpCopied(false), 2000)
+    })
+  }
 
   async function changeRoot() {
     const picked = await dialogApi.openDirectory()
@@ -149,6 +161,44 @@ function GeneralTab({ open }: { open: boolean }) {
             <span className="text-[var(--color-text-dim)]">{SCRATCH_DIR_DEFAULT}</span>
           )}
         </div>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Servidor MCP
+        </div>
+        <div className="text-sm text-[var(--color-text)]">
+          {mcpStatus === null ? (
+            <span className="text-[var(--color-text-dim)]">carregando…</span>
+          ) : mcpStatus.running ? (
+            <>Rodando na porta {mcpStatus.port}</>
+          ) : (
+            'Parado (porta em uso por outra instância?)'
+          )}
+        </div>
+        {mcpStatus?.running && mcpStatus.addCommand && (
+          <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+            <div className="mb-1 text-xs text-[var(--color-text-dim)]">
+              Sessões abertas pelo app já se conectam automaticamente. Para sessões externas do
+              Claude Code:
+            </div>
+            <div className="flex items-center gap-2">
+              <code
+                className="min-w-0 flex-1 truncate rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 font-mono text-xs text-[var(--color-text-dim)]"
+                title={mcpStatus.addCommand}
+              >
+                {mcpStatus.addCommand}
+              </code>
+              <button
+                type="button"
+                onClick={copyMcpCommand}
+                className="shrink-0 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+              >
+                {mcpCopied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">

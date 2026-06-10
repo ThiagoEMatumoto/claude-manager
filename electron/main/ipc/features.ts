@@ -1,7 +1,10 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import * as featureStore from '../services/feature-store'
-import * as taskStore from '../services/task-store'
 import { getDb } from '../services/db'
+import {
+  broadcast,
+  broadcastAffectedObjectivesForFeatureLinks as broadcastAffectedObjectives,
+} from '../services/notify'
 import { featureMemory, type SessionExitInfo } from '../services/feature-memory'
 import type {
   Feature,
@@ -14,24 +17,6 @@ import type {
   SetFeatureObjectiveLinksInput,
   FeatureBackfillResult,
 } from '../../../shared/types/ipc'
-
-function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload)
-  }
-}
-
-// Mudar os vínculos feature→objetivo/KR muda o progresso calculado dos
-// objetivos envolvidos → emite 'objective:updated' com { id } por objetivo
-// afetado (mesmo canal/contrato do IPC de tasks). FeatureObjectiveLink tem o
-// mesmo shape semântico de TaskLink (target ∈ objective|key_result), então a
-// resolução KR→objetivo é reusada de task-store.affectedObjectiveIds.
-function broadcastAffectedObjectives(links: FeatureObjectiveLink[]): void {
-  const asTaskLinks = links.map((l) => ({ parentType: l.targetType, parentId: l.targetId }))
-  for (const id of taskStore.affectedObjectiveIds(asTaskLinks)) {
-    broadcast('objective:updated', { id })
-  }
-}
 
 export function registerFeaturesIpc(): void {
   ipcMain.handle('features:list', (_e, projectId?: string): Feature[] => {

@@ -1,6 +1,7 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import * as objectiveStore from '../services/objective-store'
 import * as overviewStore from '../services/overview-store'
+import { broadcast } from '../services/notify'
 import type {
   CreateKeyResultInput,
   CreateObjectiveInput,
@@ -13,12 +14,6 @@ import type {
   UpdateKeyResultInput,
   UpdateObjectiveInput,
 } from '../../../shared/types/ipc'
-
-function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload)
-  }
-}
 
 export function registerObjectivesIpc(): void {
   ipcMain.handle(

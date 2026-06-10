@@ -200,6 +200,9 @@ const api: Api = {
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),
   },
+  mcp: {
+    status: () => invoke('mcp:status'),
+  },
   window: {
     minimize: () => invoke('window:minimize'),
     toggleMaximize: () => invoke('window:toggle-maximize'),

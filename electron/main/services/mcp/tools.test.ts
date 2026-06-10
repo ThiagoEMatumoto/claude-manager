@@ -1,0 +1,351 @@
+/** @vitest-environment node */
+// Unit dos handlers MCP contra um DB better-sqlite3 real (tmp dir), com o
+// electron mockado (app.getPath → tmp) e o notify espiado. Mesma estratégia
+// dos testes de migration: schema real via runMigrations, sem janela.
+import { rmSync } from 'node:fs'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('electron', async () => {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-tools-test-'))
+  return {
+    app: { getPath: () => dir, getVersion: () => '0.0.0-test' },
+    BrowserWindow: { getAllWindows: () => [] },
+  }
+})
+
+import { existsSync } from 'node:fs'
+import { app } from 'electron'
+import { closeDb, getDb } from '../db'
+import { buildTools, type McpNotify, type ToolDef } from './tools'
+import type {
+  Feature,
+  KeyResult,
+  Objective,
+  ObjectiveDetail,
+  OverviewData,
+  Task,
+} from '../../../../shared/types/ipc'
+
+interface NotifySpy extends McpNotify {
+  calls: Array<[string, unknown]>
+  affected: unknown[][]
+}
+
+function makeNotify(): NotifySpy {
+  const calls: Array<[string, unknown]> = []
+  const affected: unknown[][] = []
+  return {
+    calls,
+    affected,
+    broadcast: (channel, payload) => calls.push([channel, payload]),
+    affectedObjectives: (links) => affected.push(links),
+    affectedObjectivesForFeatureLinks: (links) => affected.push(links),
+  }
+}
+
+let notify: NotifySpy
+let tools: ToolDef[]
+
+function tool(name: string): ToolDef {
+  const def = tools.find((t) => t.name === name)
+  if (!def) throw new Error(`tool not registered: ${name}`)
+  return def
+}
+
+function call<T>(name: string, args: unknown): T {
+  return tool(name).handler(args).structuredContent as T
+}
+
+beforeEach(() => {
+  notify = makeNotify()
+  tools = buildTools(notify)
+})
+
+afterAll(() => {
+  closeDb()
+  rmSync(app.getPath('userData'), { recursive: true, force: true })
+})
+
+describe('mcp tools — objectives/KRs', () => {
+  it('objective_create persiste, broadcasta e retorna o objetivo', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Lançar o MCP',
+      kind: 'okr',
+      description: 'Server embutido',
+    })
+    expect(objective.id).toBeTruthy()
+    expect(objective.title).toBe('Lançar o MCP')
+    expect(objective.kind).toBe('okr')
+
+    const row = getDb().prepare('SELECT title FROM objectives WHERE id = ?').get(objective.id) as {
+      title: string
+    }
+    expect(row.title).toBe('Lançar o MCP')
+    expect(notify.calls).toEqual([['objective:updated', objective]])
+  })
+
+  it('objective_create rejeita input inválido (zod)', () => {
+    expect(() => tool('objective_create').handler({ title: '', kind: 'okr' })).toThrow()
+    expect(() => tool('objective_create').handler({ title: 'X', kind: 'nope' })).toThrow()
+    expect(notify.calls).toEqual([])
+  })
+
+  it('objective_list filtra e objective_get retorna detalhe com KRs', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Com KR',
+      kind: 'project',
+    })
+    const { keyResult } = call<{ keyResult: KeyResult }>('key_result_create', {
+      objectiveId: objective.id,
+      title: 'KR 1',
+    })
+    expect(keyResult.objectiveId).toBe(objective.id)
+    // create do KR broadcasta o marcador {id, keyResultId}.
+    expect(notify.calls.at(-1)).toEqual([
+      'objective:updated',
+      { id: objective.id, keyResultId: keyResult.id },
+    ])
+
+    const { items } = call<{ items: Objective[] }>('objective_list', { kind: 'project' })
+    expect(items.some((o) => o.id === objective.id)).toBe(true)
+    expect(items.every((o) => o.kind === 'project')).toBe(true)
+
+    const { objective: detail } = call<{ objective: ObjectiveDetail }>('objective_get', {
+      id: objective.id,
+    })
+    expect(detail.keyResults.map((k) => k.id)).toContain(keyResult.id)
+  })
+
+  it('objective_get retorna null quando não existe', () => {
+    const { objective } = call<{ objective: null }>('objective_get', { id: 'nao-existe' })
+    expect(objective).toBeNull()
+  })
+
+  it('objective_update muda só os campos enviados', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Antes',
+      kind: 'custom',
+      owner: 'thiago',
+    })
+    const { objective: updated } = call<{ objective: Objective }>('objective_update', {
+      id: objective.id,
+      title: 'Depois',
+    })
+    expect(updated.title).toBe('Depois')
+    expect(updated.owner).toBe('thiago')
+    expect(notify.calls.at(-1)).toEqual(['objective:updated', updated])
+  })
+
+  it('objective_archive arquiva e broadcasta o marcador', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Arquivável',
+      kind: 'custom',
+    })
+    const out = call<{ id: string; archived: boolean }>('objective_archive', { id: objective.id })
+    expect(out).toEqual({ id: objective.id, archived: true })
+    const row = getDb()
+      .prepare('SELECT archived_at FROM objectives WHERE id = ?')
+      .get(objective.id) as { archived_at: number | null }
+    expect(row.archived_at).not.toBeNull()
+    expect(notify.calls.at(-1)).toEqual(['objective:updated', { id: objective.id, archived: true }])
+  })
+
+  it('não expõe tools de delete destrutivo', () => {
+    const names = tools.map((t) => t.name)
+    expect(names.some((n) => n.includes('delete'))).toBe(false)
+  })
+
+  it('key_result_update altera o KR e broadcasta o marcador', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Pai de KR',
+      kind: 'okr',
+    })
+    const { keyResult } = call<{ keyResult: KeyResult }>('key_result_create', {
+      objectiveId: objective.id,
+      title: 'KR original',
+    })
+    const { keyResult: updated } = call<{ keyResult: KeyResult }>('key_result_update', {
+      id: keyResult.id,
+      title: 'KR renomeado',
+      status: 'done',
+    })
+    expect(updated.title).toBe('KR renomeado')
+    expect(updated.status).toBe('done')
+    expect(notify.calls.at(-1)).toEqual([
+      'objective:updated',
+      { id: objective.id, keyResultId: keyResult.id },
+    ])
+  })
+})
+
+describe('mcp tools — tasks', () => {
+  it('task_create com link broadcasta task e objetivos afetados', () => {
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo de tarefa',
+      kind: 'okr',
+    })
+    const links = [{ parentType: 'objective', parentId: objective.id }]
+    const { task } = call<{ task: Task }>('task_create', {
+      title: 'Tarefa via MCP',
+      priority: 'high',
+      links,
+    })
+    expect(task.id).toBeTruthy()
+    expect(task.links).toEqual(links)
+
+    const row = getDb().prepare('SELECT title FROM tasks WHERE id = ?').get(task.id) as {
+      title: string
+    }
+    expect(row.title).toBe('Tarefa via MCP')
+    expect(notify.calls.at(-1)).toEqual(['task:updated', task])
+    expect(notify.affected.at(-1)).toEqual(links)
+  })
+
+  it('task_list filtra por status e por parent', () => {
+    const { task } = call<{ task: Task }>('task_create', { title: 'Só todo', status: 'todo' })
+    const { items } = call<{ items: Task[] }>('task_list', { status: 'todo' })
+    expect(items.some((t) => t.id === task.id)).toBe(true)
+    expect(items.every((t) => t.status === 'todo')).toBe(true)
+  })
+
+  it('task_update muda campos e re-broadcasta', () => {
+    const { task } = call<{ task: Task }>('task_create', { title: 'Pra atualizar' })
+    const { task: updated } = call<{ task: Task }>('task_update', {
+      id: task.id,
+      status: 'done',
+    })
+    expect(updated.status).toBe('done')
+    expect(notify.calls.at(-1)).toEqual(['task:updated', updated])
+  })
+
+  it('task_set_links substitui vínculos e notifica quem ganhou E quem perdeu', () => {
+    const { objective: a } = call<{ objective: Objective }>('objective_create', {
+      title: 'Perde tarefa',
+      kind: 'okr',
+    })
+    const { objective: b } = call<{ objective: Objective }>('objective_create', {
+      title: 'Ganha tarefa',
+      kind: 'okr',
+    })
+    const { task } = call<{ task: Task }>('task_create', {
+      title: 'Migra de objetivo',
+      links: [{ parentType: 'objective', parentId: a.id }],
+    })
+    const newLinks = [{ parentType: 'objective', parentId: b.id }]
+    const { task: relinked } = call<{ task: Task }>('task_set_links', {
+      taskId: task.id,
+      links: newLinks,
+    })
+    expect(relinked.links).toEqual(newLinks)
+    expect(notify.affected.at(-1)).toEqual([
+      { parentType: 'objective', parentId: a.id },
+      { parentType: 'objective', parentId: b.id },
+    ])
+  })
+})
+
+describe('mcp tools — features', () => {
+  function seedProject(id: string): void {
+    getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, `Projeto ${id}`, Date.now(), Date.now())
+  }
+
+  it('feature_create persiste, escreve o .md e broadcasta', () => {
+    seedProject('proj-mcp')
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Feature via MCP',
+      overview: 'Criada pelo teste de tools',
+    })
+    expect(feature.id).toBeTruthy()
+    expect(feature.origin).toBe('manual')
+    expect(existsSync(feature.docPath)).toBe(true)
+
+    const row = getDb().prepare('SELECT title FROM features WHERE id = ?').get(feature.id) as {
+      title: string
+    }
+    expect(row.title).toBe('Feature via MCP')
+    expect(notify.calls.at(-1)?.[0]).toBe('feature:updated')
+  })
+
+  it('feature_get traz o corpo; feature_list filtra por projeto', () => {
+    seedProject('proj-mcp')
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Com corpo',
+      overview: 'Texto da visão geral',
+    })
+    const { feature: fetched } = call<{ feature: Feature }>('feature_get', { id: feature.id })
+    expect(fetched.body).toContain('Texto da visão geral')
+
+    const { items } = call<{ items: Feature[] }>('feature_list', { projectId: 'proj-mcp' })
+    expect(items.some((f) => f.id === feature.id)).toBe(true)
+    expect(items.every((f) => f.projectId === 'proj-mcp')).toBe(true)
+  })
+
+  it('feature_update e feature_archive espelham o IPC', () => {
+    seedProject('proj-mcp')
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Pra arquivar',
+    })
+    const { feature: updated } = call<{ feature: Feature }>('feature_update', {
+      id: feature.id,
+      status: 'in-progress',
+    })
+    expect(updated.status).toBe('in-progress')
+
+    const out = call<{ id: string; archived: boolean }>('feature_archive', { id: feature.id })
+    expect(out).toEqual({ id: feature.id, archived: true })
+    expect(notify.calls.at(-1)).toEqual(['feature:updated', { id: feature.id, archived: true }])
+    const { items } = call<{ items: Feature[] }>('feature_list', { projectId: 'proj-mcp' })
+    expect(items.some((f) => f.id === feature.id)).toBe(false)
+  })
+
+  it('feature_set_objective_links notifica objetivos que ganharam e perderam', () => {
+    seedProject('proj-mcp')
+    const { objective: a } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo A da feature',
+      kind: 'okr',
+    })
+    const { objective: b } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo B da feature',
+      kind: 'okr',
+    })
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Linkável',
+    })
+    call('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: a.id }],
+    })
+    const { feature: relinked } = call<{ feature: Feature }>('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: b.id }],
+    })
+    expect(relinked.id).toBe(feature.id)
+    expect(notify.calls.at(-1)?.[0]).toBe('feature:updated')
+    expect(notify.affected.at(-1)).toEqual([
+      { targetType: 'objective', targetId: a.id },
+      { targetType: 'objective', targetId: b.id },
+    ])
+  })
+})
+
+describe('mcp tools — overview', () => {
+  it('overview_get retorna o snapshot agregado', () => {
+    call('objective_create', { title: 'Ativo no overview', kind: 'okr' })
+    const { overview } = call<{ overview: OverviewData }>('overview_get', {})
+    expect(overview.counts.activeObjectives).toBeGreaterThan(0)
+    expect(Array.isArray(overview.objectives)).toBe(true)
+    expect(Array.isArray(overview.pending)).toBe(true)
+    expect(Array.isArray(overview.features)).toBe(true)
+  })
+})

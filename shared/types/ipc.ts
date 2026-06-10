@@ -486,6 +486,18 @@ export interface OverviewCounts {
   overdue: number
 }
 
+// Feature em andamento com a atividade real de sessões (card da Home):
+// lastSessionAt = MAX(COALESCE(ended_at, started_at)) das sessions com
+// feature_id apontando pra ela; null = nenhuma sessão linkada ainda.
+export interface OverviewFeatureActivity {
+  id: string
+  title: string
+  status: FeatureStatus
+  projectId: string
+  lastSessionAt: number | null
+  sessionCount: number
+}
+
 // Payload agregado do dashboard: a árvore inteira numa chamada IPC (evita N+1
 // de get/listByParent a partir do renderer).
 export interface OverviewData {
@@ -495,6 +507,9 @@ export interface OverviewData {
   // (null por último) → position.
   pending: OverviewPendingTask[]
   counts: OverviewCounts
+  // Features ativas (in-progress|blocked|paused, não-arquivadas) com atividade
+  // de sessões, ordenadas pela última sessão (fallback updated_at) desc.
+  features: OverviewFeatureActivity[]
 }
 
 export interface ResumeSessionInput {

@@ -3,8 +3,10 @@ import * as objectiveStore from './objective-store'
 import * as taskStore from './task-store'
 import { classifyDue, isPendingStatus, sortPendingTasks } from '../../../shared/pending'
 import type {
+  FeatureStatus,
   OverviewCounts,
   OverviewData,
+  OverviewFeatureActivity,
   OverviewObjectiveNode,
   OverviewPendingTask,
   OverviewTaskParentRef,
@@ -68,6 +70,50 @@ function resolveParent(link: TaskLink): OverviewTaskParentRef | null {
   return { type: link.parentType, id: link.parentId, title: row.title }
 }
 
+// ---- Features em andamento (card da Home) ----
+
+interface FeatureActivityRow {
+  id: string
+  title: string
+  status: string
+  project_id: string
+  last_session_at: number | null
+  session_count: number
+}
+
+// Features ativas (in-progress|blocked|paused, não-arquivadas) com a atividade
+// real de sessões: última sessão = MAX(COALESCE(ended_at, started_at)) e
+// contagem, agregadas só sobre sessions com feature_id (sessões avulsas e sem
+// vínculo ficam de fora do GROUP BY). LEFT JOIN: feature sem nenhuma sessão
+// aparece com lastSessionAt null e sessionCount 0.
+function featureActivity(): OverviewFeatureActivity[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT f.id, f.title, f.status, f.project_id,
+              s.last_session_at, COALESCE(s.session_count, 0) AS session_count
+       FROM features f
+       LEFT JOIN (
+         SELECT feature_id,
+                MAX(COALESCE(ended_at, started_at)) AS last_session_at,
+                COUNT(*) AS session_count
+         FROM sessions
+         WHERE feature_id IS NOT NULL
+         GROUP BY feature_id
+       ) s ON s.feature_id = f.id
+       WHERE f.status IN ('in-progress', 'blocked', 'paused') AND f.archived_at IS NULL
+       ORDER BY COALESCE(s.last_session_at, f.updated_at) DESC`,
+    )
+    .all() as FeatureActivityRow[]
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status as FeatureStatus,
+    projectId: r.project_id,
+    lastSessionAt: r.last_session_at,
+    sessionCount: r.session_count,
+  }))
+}
+
 // ---- API pública ----
 
 export function getOverview(): OverviewData {
@@ -121,5 +167,5 @@ export function getOverview(): OverviewData {
     overdue: pending.filter((t) => classifyDue(t.dueDate, now) === 'overdue').length,
   }
 
-  return { objectives: roots, pending, counts }
+  return { objectives: roots, pending, counts, features: featureActivity() }
 }

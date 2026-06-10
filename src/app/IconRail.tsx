@@ -3,7 +3,7 @@ import {
   Blocks,
   ClipboardList,
   Folder,
-  LayoutDashboard,
+  Home,
   ListTodo,
   Settings,
   Target,
@@ -21,9 +21,10 @@ interface AreaDef {
 }
 
 const AREAS: AreaDef[] = [
+  // Home primeiro: é a área default no boot.
+  { id: 'overview', icon: Home, label: 'Home' },
   { id: 'projects', icon: Folder, label: 'Projetos' },
   { id: 'features', icon: ClipboardList, label: 'Features' },
-  { id: 'overview', icon: LayoutDashboard, label: 'Visão geral' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },
   { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },

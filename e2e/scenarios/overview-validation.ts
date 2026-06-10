@@ -49,13 +49,14 @@ try {
     return { okrId: okr.id }
   })
 
-  // Dashboard completo (cards de counts + pendências do dia)
-  await page.getByTitle('Visão geral', { exact: true }).click()
+  // Home completa (chips de counts + grid 2×2 com tasks urgentes)
+  await page.getByTitle('Home', { exact: true }).click()
   await page.getByText('Lançar o produto').first().waitFor({ state: 'visible' })
   await page.getByText('Renovar certificado SSL').first().waitFor({ state: 'visible' })
   await screenshot(page, 'overview-01-dashboard')
 
-  // Árvore expandida (raízes expandem por default: KR + tarefas + sub-objetivo)
+  // Árvore de objetivos agora é colapsável — expandir antes de validar os nós.
+  await page.getByRole('button', { name: 'Árvore de objetivos' }).click()
   await page.getByText('Entregar onboarding').first().waitFor({ state: 'visible' })
   await page.getByText('Documentação do produto').first().waitFor({ state: 'visible' })
   await screenshot(page, 'overview-02-tree')

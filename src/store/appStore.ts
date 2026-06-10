@@ -213,7 +213,9 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  area: 'projects',
+  // Boot abre na Home (status geral); o painel de terminais fica montado oculto
+  // no AppShell, então o restore de panes segue funcionando em background.
+  area: 'overview',
   activeProjectId: null,
   sidebarCollapsed: readSidebarCollapsed(),
   panes: [],

@@ -33,7 +33,9 @@ jobs:
         include:
           - { os: ubuntu-latest, args: '--linux AppImage deb' }
           - { os: macos-latest, args: '--mac dmg zip' }
-          - { os: windows-latest, args: '--win nsis' }
+          # windows-2022: a imagem windows-latest atual não tem Visual Studio
+          # detectável pelo node-gyp (rebuild do node-pty falha)
+          - { os: windows-2022, args: '--win nsis' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

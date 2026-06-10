@@ -5,6 +5,7 @@ import { getDb } from '../services/db'
 import { featureMemory, type SessionExitInfo } from '../services/feature-memory'
 import type {
   Feature,
+  FeatureListStatsOpts,
   FeatureObjectiveLink,
   FeatureWithStats,
   CreateFeatureInput,
@@ -39,7 +40,7 @@ export function registerFeaturesIpc(): void {
 
   ipcMain.handle(
     'features:list-with-stats',
-    (_e, opts?: { includeArchived?: boolean }): FeatureWithStats[] => {
+    (_e, opts?: FeatureListStatsOpts): FeatureWithStats[] => {
       return featureStore.listWithStats(opts)
     },
   )

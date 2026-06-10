@@ -9,6 +9,7 @@ import {
   markSelfWrite,
   reindexFromFile,
   findFeatureByRepoBranch,
+  isVisibleFeature,
   listActiveFeaturesByProject,
   getProjectIdForRepo,
   getRepoPath,
@@ -115,8 +116,11 @@ class FeatureMemoryService {
     console.log(`[feature-memory] session ${info.sessionId} ${kind} -> feature ${featureId}`)
 
     // Observabilidade: a UI recarrega a lista assim que a feature é criada/linkada.
+    // Gate: rascunho invisível (auto-criado sem registros) NÃO é broadcastado —
+    // o featuresStore.onUpdated insere qualquer Feature recebida na lista. Ele
+    // aparece quando o 1º registro for gravado (broadcast em generateSessionRecord).
     const feat = getFeature(featureId)
-    if (feat) broadcast('feature:updated', feat)
+    if (feat && isVisibleFeature(feat)) broadcast('feature:updated', feat)
 
     // Stage 1 (registro) via fila → ao drenar, agenda Stage 2 (holística) debounced.
     this.enqueueRecords([{ info, featureId }])
@@ -201,6 +205,10 @@ class FeatureMemoryService {
       summary,
       model,
     })
+    // O 1º registro torna um rascunho visível — broadcasta pra feature "aparecer
+    // sozinha" na UI (pra features já visíveis é um update inofensivo).
+    const updated = getFeature(featureId)
+    if (updated && isVisibleFeature(updated)) broadcast('feature:updated', updated)
     return true
   }
 
@@ -268,12 +276,14 @@ class FeatureMemoryService {
       return { featureId: decision.featureId, kind: 'auto-linked' }
     }
 
-    // create: título já decidido (pela branch ou pelo objetivo).
+    // create: título já decidido (pela branch ou pelo objetivo). Nasce como
+    // rascunho oculto (origin 'auto') — só aparece quando ganhar o 1º registro.
     const repoPath = getRepoPath(info.repoId)
     const created = createFeature({
       projectId,
       title: decision.title,
       status: 'in-progress',
+      origin: 'auto',
       objective: firstPrompt ? firstPrompt.slice(0, MAX_AUTO_OBJECTIVE_CHARS) : null,
       repos: [{ repoId: info.repoId, branch: workBranch ?? branch ?? 'main', worktreePath: repoPath }],
     })

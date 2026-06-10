@@ -1,23 +1,29 @@
-import { GitBranch } from 'lucide-react'
+import { Archive, GitBranch } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
-import type { Feature, Repo } from '../../../shared/types/ipc'
+import { stalledDays } from '../../../shared/feature-visibility'
+import type { Feature, FeatureWithStats, Repo } from '../../../shared/types/ipc'
 import { STATUS_META } from './status'
 
 interface Props {
   features: Feature[]
   reposById: Map<string, Repo>
   sessionCounts: Map<string, number>
+  // Stats por feature (recordCount/lastRecordAt) — badges e horário de atividade.
+  statsById: Map<string, FeatureWithStats>
   selectedId: string | null
   onSelect: (id: string) => void
+  onArchive: (id: string) => void
 }
 
 export function FeatureList({
   features,
   reposById,
   sessionCounts,
+  statsById,
   selectedId,
   onSelect,
+  onArchive,
 }: Props) {
   if (features.length === 0) {
     return (
@@ -35,8 +41,10 @@ export function FeatureList({
           feature={f}
           reposById={reposById}
           sessions={sessionCounts.get(f.id) ?? 0}
+          stats={statsById.get(f.id)}
           active={f.id === selectedId}
           onSelect={() => onSelect(f.id)}
+          onArchive={() => onArchive(f.id)}
         />
       ))}
     </ul>
@@ -47,22 +55,38 @@ export function FeatureCard({
   feature,
   reposById,
   sessions,
+  stats,
   active,
   onSelect,
+  onArchive,
 }: {
   feature: Feature
   reposById: Map<string, Repo>
   sessions: number
+  stats?: FeatureWithStats
   active: boolean
   onSelect: () => void
+  onArchive?: () => void
 }) {
   const meta = STATUS_META[feature.status]
+  const recordCount = stats?.recordCount ?? 0
+  // Atividade real: último registro de sessão quando existe, senão updated_at.
+  const lastActivity = stats?.lastRecordAt ?? feature.updatedAt
+  const stalled = stalledDays(feature.status, lastActivity)
   return (
     <li>
-      <button
-        type="button"
+      {/* div role=button (não <button>) pra permitir o botão de archive aninhado */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onSelect}
-        className={`w-full rounded-lg border px-4 py-3 text-left transition ${
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelect()
+          }
+        }}
+        className={`group w-full cursor-pointer rounded-lg border px-4 py-3 text-left transition ${
           active
             ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]'
             : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]/60'
@@ -79,7 +103,22 @@ export function FeatureCard({
               </div>
             )}
           </div>
-          <StatusBadge status={feature.status} />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <StatusBadge status={feature.status} />
+            {onArchive && (
+              <button
+                type="button"
+                title="Arquivar feature"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onArchive()
+                }}
+                className="rounded p-1 text-[var(--color-text-dim)] opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]"
+              >
+                <Icon as={Archive} size={13} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -93,10 +132,26 @@ export function FeatureCard({
               {reposById.get(link.repoId)?.label ?? link.repoId}
             </span>
           ))}
+          {recordCount === 0 && (
+            <span
+              className="inline-flex items-center rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+              title="Nenhum registro de sessão sintetizado pra esta feature"
+            >
+              sem registros
+            </span>
+          )}
+          {stalled !== null && (
+            <span
+              className="inline-flex items-center rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[10px] font-medium text-amber-500"
+              title={`Sem atividade real há ${stalled} dias (status ${meta.label})`}
+            >
+              parada há {stalled}d
+            </span>
+          )}
         </div>
 
         <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--color-text-dim)]">
-          <span title={meta.label}>{relativeTime(feature.updatedAt)}</span>
+          <span title={meta.label}>{relativeTime(lastActivity)}</span>
           {sessions > 0 && (
             <>
               <span aria-hidden>·</span>
@@ -106,7 +161,7 @@ export function FeatureCard({
             </>
           )}
         </div>
-      </button>
+      </div>
     </li>
   )
 }

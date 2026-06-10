@@ -159,7 +159,7 @@ const api: Api = {
   },
   features: {
     list: (projectId?: string) => invoke('features:list', projectId),
-    listWithStats: (opts?: { includeArchived?: boolean }) =>
+    listWithStats: (opts?: { includeArchived?: boolean; includeDrafts?: boolean }) =>
       invoke('features:list-with-stats', opts),
     get: (id: string) => invoke('features:get', id),
     create: (input: CreateFeatureInput) => invoke('features:create', input),

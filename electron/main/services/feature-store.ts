@@ -5,10 +5,12 @@ import { join } from 'node:path'
 import matter from 'gray-matter'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getDb } from './db'
+import { isDraftFeature } from '../../../shared/feature-visibility'
 import type {
   Feature,
   FeatureLinkTargetType,
   FeatureObjectiveLink,
+  FeatureOrigin,
   FeatureRepoLink,
   FeatureStatus,
   FeatureSynthMode,
@@ -155,6 +157,7 @@ function fromFrontmatter(fm: Partial<Frontmatter>, docPath: string, body: string
     updatedAt: typeof fm.last_updated === 'number' ? fm.last_updated : Date.now(),
     completedAt: typeof fm.completed === 'number' ? fm.completed : null,
     archivedAt: null, // archive vive só no SQLite, não no frontmatter
+    origin: 'manual', // idem: origin vive só no SQLite (reindex preserva o valor da row)
     body,
   }
 }
@@ -197,6 +200,7 @@ interface FeatureRow {
   updated_at: number
   completed_at: number | null
   archived_at: number | null
+  origin: string
 }
 
 function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string): Feature {
@@ -211,6 +215,7 @@ function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string):
     synthMode: row.synth_mode as FeatureSynthMode,
     model: row.model,
     repos,
+    origin: row.origin as FeatureOrigin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -245,9 +250,9 @@ function upsertIndex(f: Feature): void {
     db.prepare(
       `INSERT INTO features
          (id, project_id, slug, title, status, objective, doc_path,
-          synth_mode, model, created_at, updated_at, completed_at, archived_at)
+          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin)
        VALUES (@id, @project_id, @slug, @title, @status, @objective, @doc_path,
-               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at)
+               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin)
        ON CONFLICT(id) DO UPDATE SET
          project_id  = excluded.project_id,
          slug        = excluded.slug,
@@ -272,9 +277,10 @@ function upsertIndex(f: Feature): void {
       created_at: f.createdAt,
       updated_at: f.updatedAt,
       completed_at: f.completedAt,
-      // archived_at não vem do frontmatter; preservado via COALESCE no UPDATE acima
-      // omitido — a coluna não é tocada no DO UPDATE.
+      // archived_at e origin não vêm do frontmatter; ambos são omitidos do
+      // DO UPDATE — a row existente preserva os valores (inseridos só no INSERT).
       archived_at: f.archivedAt,
+      origin: f.origin,
     })
     db.prepare('DELETE FROM feature_repos WHERE feature_id = ?').run(f.id)
     const ins = db.prepare(
@@ -302,6 +308,7 @@ export function create(input: CreateFeatureInput): Feature {
     synthMode: input.synthMode ?? 'threshold',
     model: input.model ?? null,
     repos: input.repos ?? [],
+    origin: input.origin ?? 'manual',
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -320,11 +327,15 @@ export function create(input: CreateFeatureInput): Feature {
 interface ListOpts {
   projectId?: string
   includeArchived?: boolean
+  includeDrafts?: boolean
 }
 
-// Carrega as rows do índice. Por padrão exclui arquivadas (archived_at IS NULL),
-// preservando o comportamento histórico de list(); includeArchived as inclui
-// (usado pela coluna "archived" do board).
+// Carrega as rows do índice. Por padrão exclui arquivadas (archived_at IS NULL)
+// E rascunhos (origin='auto' sem nenhum session record) — a visibilidade do
+// rascunho é derivada por query, sem flag mutável: o 1º saveSessionRecord()
+// torna a feature visível sozinha. includeArchived traz as arquivadas (coluna
+// "archived" do board); includeDrafts traz os rascunhos (filtro da sidebar e
+// resolução de sessões — sessões novas devem linkar no draft, não duplicar).
 function listRows(opts: ListOpts): FeatureRow[] {
   const db = getDb()
   const where: string[] = []
@@ -335,6 +346,11 @@ function listRows(opts: ListOpts): FeatureRow[] {
   }
   if (!opts.includeArchived) {
     where.push('archived_at IS NULL')
+  }
+  if (!opts.includeDrafts) {
+    where.push(
+      `NOT (origin = 'auto' AND id NOT IN (SELECT feature_id FROM feature_session_records))`,
+    )
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
   return db
@@ -357,14 +373,36 @@ function sessionCounts(): Map<string, number> {
   return new Map(rows.map((r) => [r.feature_id, r.n]))
 }
 
-// list() enriquecido com sessionCount real. includeArchived traz as arquivadas
-// (coluna do board). Sem corpo — é índice, igual a list().
-export function listWithStats(opts?: { includeArchived?: boolean }): FeatureWithStats[] {
+// Agrega contagem e última atividade dos session records num único GROUP BY
+// (mesmo padrão de sessionCounts). featureId -> { count, last }.
+function recordStats(): Map<string, { count: number; last: number }> {
+  const rows = getDb()
+    .prepare(
+      `SELECT feature_id, COUNT(*) AS n, MAX(session_at) AS last
+         FROM feature_session_records GROUP BY feature_id`,
+    )
+    .all() as Array<{ feature_id: string; n: number; last: number }>
+  return new Map(rows.map((r) => [r.feature_id, { count: r.n, last: r.last }]))
+}
+
+// list() enriquecido com stats reais (sessões + registros). includeArchived
+// traz as arquivadas (coluna do board); includeDrafts traz os rascunhos
+// (filtro "Rascunhos" da sidebar). Ordenação por atividade REAL: o registro
+// de sessão mais recente quando existe, senão o updated_at do índice.
+export function listWithStats(opts?: {
+  includeArchived?: boolean
+  includeDrafts?: boolean
+}): FeatureWithStats[] {
   const counts = sessionCounts()
-  return listRows({ includeArchived: opts?.includeArchived }).map((row) => ({
-    ...rowToFeature(row, loadRepos(row.id)),
-    sessionCount: counts.get(row.id) ?? 0,
-  }))
+  const records = recordStats()
+  return listRows({ includeArchived: opts?.includeArchived, includeDrafts: opts?.includeDrafts })
+    .map((row) => ({
+      ...rowToFeature(row, loadRepos(row.id)),
+      sessionCount: counts.get(row.id) ?? 0,
+      recordCount: records.get(row.id)?.count ?? 0,
+      lastRecordAt: records.get(row.id)?.last ?? null,
+    }))
+    .sort((a, b) => (b.lastRecordAt ?? b.updatedAt) - (a.lastRecordAt ?? a.updatedAt))
 }
 
 export function get(id: string): Feature | null {
@@ -395,6 +433,8 @@ export function getRepoPath(repoId: string): string | null {
 
 // Acha a feature NÃO-arquivada cujo feature_repos casa (repo_id, branch).
 // Dedup natural: sessões repetidas na mesma branch caem na mesma feature.
+// INCLUI rascunhos de propósito (query direta, sem o predicado de draft de
+// listRows): a sessão nova deve linkar no draft existente, não duplicá-lo.
 export function findFeatureByRepoBranch(repoId: string, branch: string): Feature | null {
   const row = getDb()
     .prepare(
@@ -409,9 +449,26 @@ export function findFeatureByRepoBranch(repoId: string, branch: string): Feature
   return rowToFeature(row, loadRepos(row.id))
 }
 
-// Features NÃO-arquivadas de um projeto (sem corpo). Reusa list(projectId).
+// Features NÃO-arquivadas de um projeto (sem corpo). INCLUI rascunhos: o fuzzy
+// match da resolução de sessões precisa enxergá-los pra linkar em vez de duplicar.
 export function listActiveFeaturesByProject(projectId: string): Feature[] {
-  return list(projectId)
+  return listRows({ projectId, includeDrafts: true }).map((row) =>
+    rowToFeature(row, loadRepos(row.id)),
+  )
+}
+
+// Quantos session records a feature tem (entrada do predicado de rascunho).
+export function sessionRecordCount(featureId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM feature_session_records WHERE feature_id = ?')
+    .get(featureId) as { n: number }
+  return row.n
+}
+
+// Gate de broadcast: rascunho invisível não deve ir pro renderer (o
+// featuresStore.onUpdated insere qualquer Feature broadcastada na lista).
+export function isVisibleFeature(f: Feature): boolean {
+  return !isDraftFeature(f.origin, sessionRecordCount(f.id))
 }
 
 // ---- Registros de sessão (Stage 1 do two-stage) ----
@@ -588,11 +645,15 @@ export function reindexFromFile(path: string): Feature | null {
   }
   const doc = readDoc(path)
   if (!doc) return null
-  // preserva archived_at existente
+  // preserva archived_at e origin existentes (vivem só no SQLite)
   const existing = getDb()
-    .prepare('SELECT archived_at FROM features WHERE id = ?')
-    .get(doc.feature.id) as { archived_at: number | null } | undefined
-  const feature: Feature = { ...doc.feature, archivedAt: existing?.archived_at ?? null }
+    .prepare('SELECT archived_at, origin FROM features WHERE id = ?')
+    .get(doc.feature.id) as { archived_at: number | null; origin: string } | undefined
+  const feature: Feature = {
+    ...doc.feature,
+    archivedAt: existing?.archived_at ?? null,
+    origin: (existing?.origin as FeatureOrigin) ?? 'manual',
+  }
   upsertIndex(feature)
   return feature
 }
@@ -648,8 +709,13 @@ class FeatureWatcher {
     for (const p of paths) {
       try {
         const feature = reindexFromFile(p)
-        if (feature) broadcast('feature:updated', feature)
-        else broadcast('feature:updated', { docPath: p })
+        // Rascunho invisível re-indexado por edição externa NÃO é broadcastado
+        // (o renderer inseriria o draft na lista). O índice já foi atualizado.
+        if (feature) {
+          if (isVisibleFeature(feature)) broadcast('feature:updated', feature)
+        } else {
+          broadcast('feature:updated', { docPath: p })
+        }
       } catch (err) {
         console.error('[feature-watcher] reindex failed:', p, err)
       }

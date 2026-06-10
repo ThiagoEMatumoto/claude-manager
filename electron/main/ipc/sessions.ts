@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
 import { get as getFeature } from '../services/feature-store'
-import { featureMemory, extractKeySections } from '../services/feature-memory'
+import { featureMemory } from '../services/feature-memory'
+import { buildFeatureContextContent } from './feature-context'
 import {
   sessionActivityService,
   findTranscriptPath,
@@ -116,22 +117,12 @@ function broadcast(channel: string, payload: unknown): void {
 
 // Escreve um arquivo temporário com o contexto da feature pra injeção via
 // --append-system-prompt-file. Retorna o path, ou null se a feature não existe.
-// O doc é mantido automaticamente pelo claude-manager → instruímos a sessão a
-// NÃO editar o doc manualmente.
+// Conteúdo (header + bloco tracking + seções-chave) vem do builder puro em
+// feature-context.ts.
 function writeFeatureContextFile(featureId: string): string | null {
   const feature = getFeature(featureId)
   if (!feature) return null
-  const sections = extractKeySections(feature.body ?? '')
-  const header = [
-    `Esta sessão trabalha na feature «${feature.title}».`,
-    'O claude-manager mantém este documento automaticamente — NÃO edite o doc manualmente; apenas trabalhe.',
-    '',
-    `Status atual: ${feature.status}`,
-    feature.objective ? `Objetivo: ${feature.objective}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-  const content = sections ? `${header}\n\n${sections}\n` : `${header}\n`
+  const content = buildFeatureContextContent(feature)
 
   const tmpDir = join(app.getPath('userData'), 'tmp')
   mkdirSync(tmpDir, { recursive: true })

@@ -15,13 +15,18 @@ export function resolveRealUserData(): string {
   const override = process.env.CM_REAL_USERDATA
   if (override) return override
   const configDir = join(homedir(), '.config')
+  const preferred = join(configDir, 'claude-manager')
+  if (existsSync(join(preferred, 'app.db'))) return preferred
   if (existsSync(configDir)) {
     for (const name of readdirSync(configDir)) {
+      // ~/.config/Electron é o userData default do `npm run dev` (DB stale de dev),
+      // nunca a instalação real — pular no fallback scan.
+      if (name === 'Electron') continue
       const candidate = join(configDir, name)
       if (existsSync(join(candidate, 'app.db'))) return candidate
     }
   }
-  return join(configDir, 'claude-manager')
+  return preferred
 }
 
 export interface LaunchResult {

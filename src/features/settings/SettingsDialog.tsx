@@ -80,8 +80,11 @@ export function SettingsDialog({ open, onClose }: Props) {
   )
 }
 
+const SCRATCH_DIR_DEFAULT = '~/ClaudeManager/scratch'
+
 function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
+  const [scratchDir, setScratchDir] = useState('')
   const scrollback = useTerminalPrefsStore((s) => s.scrollback)
   const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
@@ -90,6 +93,7 @@ function GeneralTab({ open }: { open: boolean }) {
   useEffect(() => {
     if (!open) return
     void vaultApi.getRoot().then(setRoot)
+    void prefsApi.get<string>('scratch_dir').then((dir) => setScratchDir(dir ?? ''))
     void useTerminalPrefsStore.getState().load()
   }, [open])
 
@@ -99,6 +103,13 @@ function GeneralTab({ open }: { open: boolean }) {
     await vaultApi.ensureDir(picked)
     await vaultApi.setRoot(picked)
     setRoot(picked)
+  }
+
+  async function changeScratchDir() {
+    const picked = await dialogApi.openDirectory()
+    if (!picked) return
+    await prefsApi.set('scratch_dir', picked)
+    setScratchDir(picked)
   }
 
   return (
@@ -116,6 +127,27 @@ function GeneralTab({ open }: { open: boolean }) {
         </div>
         <div className="truncate text-sm text-[var(--color-text)]" title={root || undefined}>
           {root || <span className="text-[var(--color-text-dim)]">carregando…</span>}
+        </div>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-[var(--color-text-dim)]">Pasta das sessões avulsas</span>
+          <button
+            type="button"
+            onClick={changeScratchDir}
+            className="text-xs text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+          >
+            Trocar
+          </button>
+        </div>
+        <div
+          className="truncate text-sm text-[var(--color-text)]"
+          title={scratchDir || SCRATCH_DIR_DEFAULT}
+        >
+          {scratchDir || (
+            <span className="text-[var(--color-text-dim)]">{SCRATCH_DIR_DEFAULT}</span>
+          )}
         </div>
       </div>
 

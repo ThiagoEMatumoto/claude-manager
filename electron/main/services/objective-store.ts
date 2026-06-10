@@ -203,7 +203,8 @@ function featureChildren(targetType: FeatureLinkTargetType, targetId: string): P
 
 // Projeção pra UI de Objetivos: features vinculadas com progresso calculado
 // (inclui as de progresso null — a UI mostra "—"; só o rollup as exclui).
-function linkedFeatureSummaries(
+// Exportada pro overview-store (Fase 4) reusar a mesma projeção.
+export function linkedFeatureSummaries(
   targetType: FeatureLinkTargetType,
   targetId: string,
 ): LinkedFeatureSummary[] {
@@ -215,7 +216,8 @@ function linkedFeatureSummaries(
   }))
 }
 
-function keyResultProgress(kr: KeyResult): number | null {
+// Exportada pro overview-store (Fase 4) — mesma regra de progresso de KR.
+export function keyResultProgress(kr: KeyResult): number | null {
   // KR auto_rollup → rollup de tarefas vinculadas ao KR + features vinculadas
   // ao KR (peso 1 cada; sem filhos elegíveis → null).
   if (kr.progressMode === 'auto_rollup') {
@@ -247,7 +249,8 @@ function objectiveProgress(obj: Objective, keyResults: KeyResult[]): number | nu
   return computeProgress(obj, children)
 }
 
-function loadKeyResults(objectiveId: string): KeyResult[] {
+// Exportada pro overview-store (Fase 4) montar os nós de KR da árvore.
+export function loadKeyResults(objectiveId: string): KeyResult[] {
   const rows = getDb()
     .prepare('SELECT * FROM key_results WHERE objective_id = ? ORDER BY created_at ASC')
     .all(objectiveId) as KeyResultRow[]

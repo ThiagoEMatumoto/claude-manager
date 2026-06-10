@@ -415,6 +415,68 @@ export interface TaskListFilter {
   parentId?: string
 }
 
+// ---- Dashboard / visão hierárquica (Fase 4) ----
+
+// Projeção enxuta de tarefa pros nós da árvore do dashboard.
+export interface OverviewTaskSummary {
+  id: string
+  title: string
+  status: TaskStatus
+  priority: TaskPriority | null
+  dueDate: number | null
+}
+
+// Mesmo shape de LinkedFeatureSummary — alias nomeado pro contexto do overview.
+export type OverviewFeatureSummary = LinkedFeatureSummary
+
+export interface OverviewKeyResultNode {
+  keyResult: KeyResult
+  progress: number | null
+  tasks: OverviewTaskSummary[]
+  linkedFeatures: OverviewFeatureSummary[]
+}
+
+export interface OverviewObjectiveNode {
+  objective: Objective
+  progress: number | null
+  keyResults: OverviewKeyResultNode[]
+  // Tarefas vinculadas direto ao objetivo (sem passar por KR).
+  directTasks: OverviewTaskSummary[]
+  linkedFeatures: OverviewFeatureSummary[]
+  // Sub-objetivos via parent_objective_id.
+  children: OverviewObjectiveNode[]
+}
+
+// Referência resolvida (com título do pai) de uma tarefa pendente, p/ exibição.
+export interface OverviewTaskParentRef {
+  type: TaskParentType
+  id: string
+  title: string
+}
+
+// Tarefa pendente (todo|in_progress|blocked) com os parents resolvidos.
+export type OverviewPendingTask = Task & { parents: OverviewTaskParentRef[] }
+
+export interface OverviewCounts {
+  activeObjectives: number
+  pendingTasks: number
+  // dueToday = due_date dentro do dia local corrente; overdue = antes do
+  // começo do dia local (ambos só sobre tarefas pendentes).
+  dueToday: number
+  overdue: number
+}
+
+// Payload agregado do dashboard: a árvore inteira numa chamada IPC (evita N+1
+// de get/listByParent a partir do renderer).
+export interface OverviewData {
+  // Raízes (parent null) com status active|paused|done — archived fica fora.
+  objectives: OverviewObjectiveNode[]
+  // Pendentes ordenadas: prioridade (high>medium>low>null) → dueDate asc
+  // (null por último) → position.
+  pending: OverviewPendingTask[]
+  counts: OverviewCounts
+}
+
 export interface ResumeSessionInput {
   repoId: string
   ccSessionId: string
@@ -872,6 +934,7 @@ export interface Api {
   objectives: {
     list(filter?: ObjectiveListFilter): Promise<ObjectiveWithProgress[]>
     get(id: string): Promise<ObjectiveDetail | null>
+    overview(): Promise<OverviewData>
     create(input: CreateObjectiveInput): Promise<Objective>
     update(input: UpdateObjectiveInput): Promise<Objective>
     archive(id: string): Promise<void>

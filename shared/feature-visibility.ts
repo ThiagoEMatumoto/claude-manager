@@ -1,4 +1,4 @@
-import type { FeatureOrigin } from './types/ipc'
+import type { FeatureOrigin, FeatureStatus } from './types/ipc'
 
 // Regras de visibilidade de features (puras, compartilhadas entre main e renderer).
 //
@@ -17,4 +17,22 @@ export function isListedFeature(
   archivedAt: number | null,
 ): boolean {
   return archivedAt === null && !isDraftFeature(origin, recordCount)
+}
+
+// Badge "parada há Nd": feature que deveria estar andando (in-progress/blocked)
+// sem atividade real há mais de 14 dias. lastActivityAt = lastRecordAt quando
+// existe, senão updatedAt. Retorna os dias parados, ou null se não se aplica.
+// SEM auto-archive: badge informa, o archive é decisão manual no card.
+export const STALLED_THRESHOLD_DAYS = 14
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function stalledDays(
+  status: FeatureStatus,
+  lastActivityAt: number,
+  now: number = Date.now(),
+): number | null {
+  if (status !== 'in-progress' && status !== 'blocked') return null
+  const days = Math.floor((now - lastActivityAt) / DAY_MS)
+  return days > STALLED_THRESHOLD_DAYS ? days : null
 }

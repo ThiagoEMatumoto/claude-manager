@@ -3,7 +3,14 @@ import { LayoutList, Columns3 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { projectsApi, featuresApi } from '@/lib/ipc'
 import { useFeaturesStore } from '@/store/featuresStore'
-import type { CreateFeatureInput, Project, Repo } from '../../../shared/types/ipc'
+import { isDraftFeature } from '../../../shared/feature-visibility'
+import type {
+  CreateFeatureInput,
+  Feature,
+  FeatureWithStats,
+  Project,
+  Repo,
+} from '../../../shared/types/ipc'
 import { FeatureBoard } from './FeatureBoard'
 import { FeatureDoc } from './FeatureDoc'
 import { FeatureList } from './FeatureList'
@@ -52,26 +59,60 @@ export function FeaturesArea() {
 
   const reposById = useMemo(() => new Map(repos.map((r) => [r.id, r])), [repos])
 
+  // Stats por feature (recordCount/lastRecordAt) — alimenta badges e ordenação.
+  const statsById = useMemo(
+    () => new Map<string, FeatureWithStats>(withStats.map((f) => [f.id, f])),
+    [withStats],
+  )
+
+  // Rascunhos ocultos (auto-criados, 0 registros, não arquivados): só aparecem
+  // no filtro "Rascunhos" — withStats vem com includeDrafts:true do store.
+  const drafts = useMemo(
+    () => withStats.filter((f) => !f.archivedAt && isDraftFeature(f.origin, f.recordCount)),
+    [withStats],
+  )
+
   const q = query.trim().toLowerCase()
   const listed = useMemo(() => {
-    return features.filter((f) => {
-      if (filter !== 'all' && f.status !== filter) return false
+    const source: Feature[] = filter === 'drafts' ? drafts : features
+    const filtered = source.filter((f) => {
+      if (filter !== 'all' && filter !== 'drafts' && f.status !== filter) return false
       if (q && !f.title.toLowerCase().includes(q)) return false
       return true
     })
-  }, [features, filter, q])
+    // Ordena por atividade REAL: último session record quando existe, senão
+    // o updated_at do índice (mexer em metadado não "sobe" a feature).
+    const activity = (f: Feature) => statsById.get(f.id)?.lastRecordAt ?? f.updatedAt
+    return [...filtered].sort((a, b) => activity(b) - activity(a))
+  }, [features, drafts, statsById, filter, q])
 
-  // Board: usa a lista com stats (inclui arquivadas). Filtro de status do board é
-  // por coluna, então só aplica a busca textual aqui.
+  // Sidebar agrupada por projeto: no filtro "Rascunhos" troca a fonte pelos drafts.
+  const sidebarByProject = useMemo(() => {
+    if (filter !== 'drafts') return byProject
+    const by: Record<string, Feature[]> = {}
+    for (const f of drafts) (by[f.projectId] ??= []).push(f)
+    return by
+  }, [filter, byProject, drafts])
+
+  // Board: usa a lista com stats (inclui arquivadas, mas NUNCA rascunhos).
+  // Filtro de status do board é por coluna, então só aplica a busca textual aqui.
   const boardFeatures = useMemo(() => {
-    if (!q) return withStats
-    return withStats.filter((f) => f.title.toLowerCase().includes(q))
+    const visible = withStats.filter((f) => !isDraftFeature(f.origin, f.recordCount))
+    if (!q) return visible
+    return visible.filter((f) => f.title.toLowerCase().includes(q))
   }, [withStats, q])
 
   async function handleCreate(input: CreateFeatureInput) {
     const created = await featuresApi.create(input)
     await refresh()
     void select(created.id)
+  }
+
+  // Archive manual a partir do card (sem auto-archive: badge informa, humano decide).
+  async function handleArchive(id: string) {
+    await featuresApi.archive(id)
+    if (selectedId === id) void select(null)
+    await refresh()
   }
 
   async function handleBackfill() {
@@ -94,7 +135,7 @@ export function FeaturesArea() {
     <>
       <FeaturesSidebar
         projects={projects}
-        byProject={byProject}
+        byProject={sidebarByProject}
         selectedId={selectedId}
         loading={loading}
         query={query}
@@ -145,8 +186,10 @@ export function FeaturesArea() {
                   features={listed}
                   reposById={reposById}
                   sessionCounts={sessionCounts}
+                  statsById={statsById}
                   selectedId={selectedId}
                   onSelect={(id) => void select(id)}
+                  onArchive={(id) => void handleArchive(id)}
                 />
               </div>
             )}

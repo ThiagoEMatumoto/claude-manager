@@ -373,14 +373,36 @@ function sessionCounts(): Map<string, number> {
   return new Map(rows.map((r) => [r.feature_id, r.n]))
 }
 
-// list() enriquecido com sessionCount real. includeArchived traz as arquivadas
-// (coluna do board). Sem corpo — é índice, igual a list().
-export function listWithStats(opts?: { includeArchived?: boolean }): FeatureWithStats[] {
+// Agrega contagem e última atividade dos session records num único GROUP BY
+// (mesmo padrão de sessionCounts). featureId -> { count, last }.
+function recordStats(): Map<string, { count: number; last: number }> {
+  const rows = getDb()
+    .prepare(
+      `SELECT feature_id, COUNT(*) AS n, MAX(session_at) AS last
+         FROM feature_session_records GROUP BY feature_id`,
+    )
+    .all() as Array<{ feature_id: string; n: number; last: number }>
+  return new Map(rows.map((r) => [r.feature_id, { count: r.n, last: r.last }]))
+}
+
+// list() enriquecido com stats reais (sessões + registros). includeArchived
+// traz as arquivadas (coluna do board); includeDrafts traz os rascunhos
+// (filtro "Rascunhos" da sidebar). Ordenação por atividade REAL: o registro
+// de sessão mais recente quando existe, senão o updated_at do índice.
+export function listWithStats(opts?: {
+  includeArchived?: boolean
+  includeDrafts?: boolean
+}): FeatureWithStats[] {
   const counts = sessionCounts()
-  return listRows({ includeArchived: opts?.includeArchived }).map((row) => ({
-    ...rowToFeature(row, loadRepos(row.id)),
-    sessionCount: counts.get(row.id) ?? 0,
-  }))
+  const records = recordStats()
+  return listRows({ includeArchived: opts?.includeArchived, includeDrafts: opts?.includeDrafts })
+    .map((row) => ({
+      ...rowToFeature(row, loadRepos(row.id)),
+      sessionCount: counts.get(row.id) ?? 0,
+      recordCount: records.get(row.id)?.count ?? 0,
+      lastRecordAt: records.get(row.id)?.last ?? null,
+    }))
+    .sort((a, b) => (b.lastRecordAt ?? b.updatedAt) - (a.lastRecordAt ?? a.updatedAt))
 }
 
 export function get(id: string): Feature | null {

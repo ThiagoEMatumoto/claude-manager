@@ -128,10 +128,20 @@ export interface Feature {
   body?: string
 }
 
-// Feature do índice + contagem real de sessões ligadas (sessions.feature_id).
-// Usado pelo board; sem corpo, igual a list().
+// Feature do índice + stats de atividade real. Usado pelo board e pela
+// listagem (ordenação/badges); sem corpo, igual a list().
 export interface FeatureWithStats extends Feature {
   sessionCount: number
+  // Registros em feature_session_records (0 = "sem registros").
+  recordCount: number
+  // session_at do registro mais recente; null sem registros. A listagem ordena
+  // por COALESCE(lastRecordAt, updatedAt) DESC (atividade real > metadado).
+  lastRecordAt: number | null
+}
+
+export interface FeatureListStatsOpts {
+  includeArchived?: boolean
+  includeDrafts?: boolean
 }
 
 export interface CreateFeatureInput {
@@ -933,7 +943,7 @@ export interface Api {
   }
   features: {
     list(projectId?: string): Promise<Feature[]>
-    listWithStats(opts?: { includeArchived?: boolean }): Promise<FeatureWithStats[]>
+    listWithStats(opts?: FeatureListStatsOpts): Promise<FeatureWithStats[]>
     get(id: string): Promise<Feature | null>
     create(input: CreateFeatureInput): Promise<Feature>
     update(input: UpdateFeatureInput): Promise<Feature>

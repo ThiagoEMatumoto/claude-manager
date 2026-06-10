@@ -61,7 +61,12 @@ export const useFeaturesStore = create<FeaturesState>((set, get) => ({
 
   loadStats: async () => {
     try {
-      const withStats = await featuresApi.listWithStats({ includeArchived: true })
+      // includeDrafts: o filtro "Rascunhos" da sidebar deriva os drafts daqui
+      // (origin='auto' + recordCount=0); board e lista os excluem no render.
+      const withStats = await featuresApi.listWithStats({
+        includeArchived: true,
+        includeDrafts: true,
+      })
       const sessionCounts = new Map(withStats.map((f) => [f.id, f.sessionCount]))
       set({ withStats, sessionCounts })
     } catch {

@@ -118,7 +118,7 @@ interface ChipProps {
 }
 
 function Chip({ item, isOpen, isFocused, onOpen, onEnd }: ChipProps) {
-  const title = (item.title ?? item.name ?? item.repo.label) || item.repo.label
+  const title = (item.title ?? item.name ?? item.repo?.label) || (item.repo?.label ?? 'Avulsa')
   const preview = item.lastText?.replace(/\s+/g, ' ').trim()
   const tooltip = `${statusLabel(item.status)} · ${relativeTime(item.lastActivityAt)}${
     preview ? `\n${preview}` : ''

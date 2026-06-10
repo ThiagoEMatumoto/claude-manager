@@ -59,9 +59,9 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
   return (
     <Terminal
       session={pane.session}
-      repoLabel={pane.repo.label}
-      repoPath={pane.repo.path}
-      projectName={pane.projectName}
+      repoLabel={pane.repo?.label ?? 'Avulsa'}
+      repoPath={pane.repo?.path ?? ''}
+      projectName={pane.projectName ?? ''}
       projectIcon={pane.projectIcon}
       projectColor={pane.projectColor}
       onClose={() => closePane(pane.paneId)}
@@ -94,8 +94,9 @@ function TerminalTab(props: IDockviewPanelHeaderProps<PaneParams>) {
 // Título inicial legível pra aba (nunca o paneId). O Terminal sobrescreve ao vivo
 // via onTitleChange assim que o nome do CC chega.
 function paneTabTitle(pane: ActivePane): string {
-  if (!pane.projectName) return pane.repo.label
-  return `${pane.projectIcon ?? ''} ${pane.repo.label}`.trim()
+  const repoLabel = pane.repo?.label ?? 'Avulsa'
+  if (!pane.projectName) return repoLabel
+  return `${pane.projectIcon ?? ''} ${repoLabel}`.trim()
 }
 
 const components = { terminal: TerminalPanel }

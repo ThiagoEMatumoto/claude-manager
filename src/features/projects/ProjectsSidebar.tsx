@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FolderOpen, GripVertical, MoreHorizontal, PanelLeftClose } from 'lucide-react'
+import { FolderOpen, GripVertical, MoreHorizontal, PanelLeftClose, Zap } from 'lucide-react'
 import {
   DndContext,
   PointerSensor,
@@ -29,6 +29,7 @@ export function ProjectsSidebar() {
   const activeProjectId = useAppStore((s) => s.activeProjectId)
   const setActiveProject = useAppStore((s) => s.setActiveProject)
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
+  const openQuickSession = useAppStore((s) => s.openQuickSession)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Project | null>(null)
   // Expansão independente por projeto (vários abertos ao mesmo tempo). O header
@@ -76,6 +77,19 @@ export function ProjectsSidebar() {
           className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
         >
           + Novo
+        </button>
+      </div>
+
+      {/* Sessão avulsa: spawn sem repo, cwd = scratch dir (pref scratch_dir). */}
+      <div className="border-b border-[var(--color-border)] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => void openQuickSession()}
+          title="Abrir uma sessão Claude avulsa (sem projeto)"
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
+        >
+          <Icon as={Zap} size={13} />
+          Sessão rápida
         </button>
       </div>
 

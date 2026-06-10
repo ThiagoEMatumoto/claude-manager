@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import matter from 'gray-matter'
 import chokidar, { FSWatcher } from 'chokidar'
 import { getDb } from './db'
+import { isDraftFeature } from '../../../shared/feature-visibility'
 import type {
   Feature,
   FeatureLinkTargetType,
@@ -326,11 +327,15 @@ export function create(input: CreateFeatureInput): Feature {
 interface ListOpts {
   projectId?: string
   includeArchived?: boolean
+  includeDrafts?: boolean
 }
 
-// Carrega as rows do índice. Por padrão exclui arquivadas (archived_at IS NULL),
-// preservando o comportamento histórico de list(); includeArchived as inclui
-// (usado pela coluna "archived" do board).
+// Carrega as rows do índice. Por padrão exclui arquivadas (archived_at IS NULL)
+// E rascunhos (origin='auto' sem nenhum session record) — a visibilidade do
+// rascunho é derivada por query, sem flag mutável: o 1º saveSessionRecord()
+// torna a feature visível sozinha. includeArchived traz as arquivadas (coluna
+// "archived" do board); includeDrafts traz os rascunhos (filtro da sidebar e
+// resolução de sessões — sessões novas devem linkar no draft, não duplicar).
 function listRows(opts: ListOpts): FeatureRow[] {
   const db = getDb()
   const where: string[] = []
@@ -341,6 +346,11 @@ function listRows(opts: ListOpts): FeatureRow[] {
   }
   if (!opts.includeArchived) {
     where.push('archived_at IS NULL')
+  }
+  if (!opts.includeDrafts) {
+    where.push(
+      `NOT (origin = 'auto' AND id NOT IN (SELECT feature_id FROM feature_session_records))`,
+    )
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
   return db
@@ -401,6 +411,8 @@ export function getRepoPath(repoId: string): string | null {
 
 // Acha a feature NÃO-arquivada cujo feature_repos casa (repo_id, branch).
 // Dedup natural: sessões repetidas na mesma branch caem na mesma feature.
+// INCLUI rascunhos de propósito (query direta, sem o predicado de draft de
+// listRows): a sessão nova deve linkar no draft existente, não duplicá-lo.
 export function findFeatureByRepoBranch(repoId: string, branch: string): Feature | null {
   const row = getDb()
     .prepare(
@@ -415,9 +427,26 @@ export function findFeatureByRepoBranch(repoId: string, branch: string): Feature
   return rowToFeature(row, loadRepos(row.id))
 }
 
-// Features NÃO-arquivadas de um projeto (sem corpo). Reusa list(projectId).
+// Features NÃO-arquivadas de um projeto (sem corpo). INCLUI rascunhos: o fuzzy
+// match da resolução de sessões precisa enxergá-los pra linkar em vez de duplicar.
 export function listActiveFeaturesByProject(projectId: string): Feature[] {
-  return list(projectId)
+  return listRows({ projectId, includeDrafts: true }).map((row) =>
+    rowToFeature(row, loadRepos(row.id)),
+  )
+}
+
+// Quantos session records a feature tem (entrada do predicado de rascunho).
+export function sessionRecordCount(featureId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM feature_session_records WHERE feature_id = ?')
+    .get(featureId) as { n: number }
+  return row.n
+}
+
+// Gate de broadcast: rascunho invisível não deve ir pro renderer (o
+// featuresStore.onUpdated insere qualquer Feature broadcastada na lista).
+export function isVisibleFeature(f: Feature): boolean {
+  return !isDraftFeature(f.origin, sessionRecordCount(f.id))
 }
 
 // ---- Registros de sessão (Stage 1 do two-stage) ----
@@ -658,8 +687,13 @@ class FeatureWatcher {
     for (const p of paths) {
       try {
         const feature = reindexFromFile(p)
-        if (feature) broadcast('feature:updated', feature)
-        else broadcast('feature:updated', { docPath: p })
+        // Rascunho invisível re-indexado por edição externa NÃO é broadcastado
+        // (o renderer inseriria o draft na lista). O índice já foi atualizado.
+        if (feature) {
+          if (isVisibleFeature(feature)) broadcast('feature:updated', feature)
+        } else {
+          broadcast('feature:updated', { docPath: p })
+        }
       } catch (err) {
         console.error('[feature-watcher] reindex failed:', p, err)
       }

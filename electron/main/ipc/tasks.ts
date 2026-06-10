@@ -1,5 +1,6 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import * as taskStore from '../services/task-store'
+import { broadcast, broadcastAffectedObjectives } from '../services/notify'
 import type {
   CreateTaskInput,
   Task,
@@ -8,22 +9,6 @@ import type {
   TaskParentType,
   UpdateTaskInput,
 } from '../../../shared/types/ipc'
-
-function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload)
-  }
-}
-
-// Mutações de tarefa que tocam parents objective/key_result mudam o progresso
-// calculado desses objetivos → além de 'task:updated', emite 'objective:updated'
-// com { id } por objetivo afetado (mesmo canal que o IPC de objectives usa,
-// então a UI de objetivos recarrega sem listener novo).
-function broadcastAffectedObjectives(links: TaskLink[]): void {
-  for (const id of taskStore.affectedObjectiveIds(links)) {
-    broadcast('objective:updated', { id })
-  }
-}
 
 export function registerTasksIpc(): void {
   ipcMain.handle('tasks:list', (_e, filter?: TaskListFilter): Task[] => {

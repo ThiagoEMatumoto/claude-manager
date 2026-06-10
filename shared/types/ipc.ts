@@ -880,6 +880,7 @@ export interface Api {
     symlinkIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
     removeSymlink(target: string): Promise<{ removed: boolean }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
+    createBlank(vaultPath: string, name: string, gitInit: boolean): Promise<{ path: string }>
   }
   workspace: {
     getActive(): Promise<string | null>

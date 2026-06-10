@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon'
 import type { KeyResult, ObjectiveDetail as ObjectiveDetailType } from '../../../shared/types/ipc'
 import { DIRECTION_LABEL, PRIORITY_LABEL, PROGRESS_MODE_LABEL } from './status'
 import { KindBadge, StatusBadge } from './ObjectiveList'
+import { StatusBadge as FeatureStatusBadge } from '../features/FeatureList'
 import { KeyResultRow } from './KeyResultRow'
 import { ProgressBar } from './ProgressBar'
 
@@ -62,6 +63,18 @@ function ManualProgress({
       </span>
     </div>
   )
+}
+
+// Legenda do rollup automático: com KRs o progresso vem deles; sem KRs, das
+// features vinculadas + tarefas diretas (espelha objectiveProgress no main).
+function rollupLegend(detail: ObjectiveDetailType): string {
+  if (detail.keyResults.length > 0) {
+    return `Média ponderada de ${detail.keyResults.length} key result(s).`
+  }
+  if (detail.linkedFeatures.length > 0) {
+    return `Rollup de ${detail.linkedFeatures.length} feature(s) vinculada(s) e tarefas diretas.`
+  }
+  return 'Sem key results — progresso indeterminado.'
 }
 
 function MetricField({ label, value }: { label: string; value: string }) {
@@ -194,11 +207,7 @@ export function ObjectiveDetail({
           )}
 
           {detail.progressMode === 'auto_rollup' && (
-            <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">
-              {detail.keyResults.length === 0
-                ? 'Sem key results — progresso indeterminado.'
-                : `Média ponderada de ${detail.keyResults.length} key result(s).`}
-            </p>
+            <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">{rollupLegend(detail)}</p>
           )}
         </section>
 
@@ -222,6 +231,7 @@ export function ObjectiveDetail({
                 <KeyResultRow
                   key={kr.id}
                   kr={kr}
+                  linkedFeatures={kr.linkedFeatures}
                   onEdit={() => onEditKr(kr)}
                   onDelete={() => onDeleteKr(kr.id)}
                 />
@@ -229,6 +239,28 @@ export function ObjectiveDetail({
             </ul>
           )}
         </section>
+
+        {detail.linkedFeatures.length > 0 && (
+          <section className="mt-6">
+            <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Features</h2>
+            <ul className="flex flex-col gap-2">
+              {detail.linkedFeatures.map((f) => (
+                <li
+                  key={f.id}
+                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">
+                      {f.title}
+                    </span>
+                    <FeatureStatusBadge status={f.status} />
+                  </div>
+                  <ProgressBar value={f.progress} className="mt-2" />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </div>
   )

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  computeFeatureProgress,
   computeProgress,
   computeTaskRollup,
+  featureProgressChild,
   taskProgressChild,
+  type FeatureRollupSource,
   type ProgressChild,
   type ProgressInput,
 } from './progress'
@@ -172,5 +175,77 @@ describe('computeTaskRollup', () => {
 
   it('counts blocked and in_progress as 0', () => {
     expect(computeTaskRollup(['done', 'blocked', 'in_progress', 'todo'])).toBe(25)
+  })
+})
+
+describe('computeFeatureProgress', () => {
+  it('returns the % of done tasks when the feature has tasks', () => {
+    expect(computeFeatureProgress('in-progress', ['done', 'todo'])).toBe(50)
+    expect(computeFeatureProgress('pending', ['done', 'done'])).toBe(100)
+  })
+
+  it('task rollup wins over the feature status when tasks exist', () => {
+    // Feature done com tarefas pendentes reflete as tarefas, não o status.
+    expect(computeFeatureProgress('done', ['todo', 'todo'])).toBe(0)
+  })
+
+  it('without tasks: done → 100, any other status → null', () => {
+    expect(computeFeatureProgress('done', [])).toBe(100)
+    expect(computeFeatureProgress('pending', [])).toBeNull()
+    expect(computeFeatureProgress('in-progress', [])).toBeNull()
+    expect(computeFeatureProgress('blocked', [])).toBeNull()
+    expect(computeFeatureProgress('paused', [])).toBeNull()
+  })
+
+  it('all-cancelled tasks fall back to the status rule', () => {
+    expect(computeFeatureProgress('done', ['cancelled'])).toBe(100)
+    expect(computeFeatureProgress('in-progress', ['cancelled'])).toBeNull()
+  })
+})
+
+describe('featureProgressChild', () => {
+  const feature = (
+    status: FeatureRollupSource['status'],
+    archivedAt: number | null = null,
+  ): FeatureRollupSource => ({ status, archivedAt })
+
+  it('maps an eligible feature to a weight-1 non-cancelled child', () => {
+    expect(featureProgressChild(feature('in-progress'), ['done', 'todo'])).toEqual({
+      status: 'active',
+      weight: null,
+      progress: 50,
+    })
+    expect(featureProgressChild(feature('done'), [])?.progress).toBe(100)
+  })
+
+  it('returns null (out of the rollup) when progress is indeterminate', () => {
+    expect(featureProgressChild(feature('pending'), [])).toBeNull()
+    expect(featureProgressChild(feature('in-progress'), ['cancelled'])).toBeNull()
+  })
+
+  it('returns null for an archived feature even with done tasks', () => {
+    expect(featureProgressChild(feature('done', 123), ['done'])).toBeNull()
+  })
+})
+
+describe('auto_rollup mixing tasks and features', () => {
+  it('averages task and feature children with weight 1 each', () => {
+    const children: ProgressChild[] = [
+      taskProgressChild('done'), // 100
+      taskProgressChild('todo'), // 0
+      featureProgressChild({ status: 'in-progress', archivedAt: null }, ['done', 'done']), // 100
+    ].filter((c): c is ProgressChild => c !== null)
+    expect(computeProgress(input({ progressMode: 'auto_rollup' }), children)).toBe(
+      (100 + 0 + 100) / 3,
+    )
+  })
+
+  it('indeterminate and archived features stay out of the denominator', () => {
+    const children: ProgressChild[] = [
+      taskProgressChild('done'), // 100
+      featureProgressChild({ status: 'pending', archivedAt: null }, []), // null → fora
+      featureProgressChild({ status: 'done', archivedAt: 1 }, ['done']), // arquivada → fora
+    ].filter((c): c is ProgressChild => c !== null)
+    expect(computeProgress(input({ progressMode: 'auto_rollup' }), children)).toBe(100)
   })
 })

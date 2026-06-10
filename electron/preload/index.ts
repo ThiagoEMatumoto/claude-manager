@@ -22,6 +22,7 @@ import type {
   CreateFeatureInput,
   UpdateFeatureInput,
   SetFeatureReposInput,
+  SetFeatureObjectiveLinksInput,
   FeatureSynthError,
   ObjectiveListFilter,
   CreateObjectiveInput,
@@ -163,6 +164,9 @@ const api: Api = {
     update: (input: UpdateFeatureInput) => invoke('features:update', input),
     archive: (id: string) => invoke('features:archive', id),
     setRepos: (input: SetFeatureReposInput) => invoke('features:set-repos', input),
+    setObjectiveLinks: (input: SetFeatureObjectiveLinksInput) =>
+      invoke('features:set-objective-links', input),
+    listObjectiveLinks: (featureId: string) => invoke('features:list-objective-links', featureId),
     backfill: () => invoke('features:backfill'),
     onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
     onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),

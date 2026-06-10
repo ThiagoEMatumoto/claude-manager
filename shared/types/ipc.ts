@@ -175,6 +175,32 @@ export interface FeatureBackfillResult {
   skipped: number
 }
 
+// ---- Vínculos Feature → Objetivo/KR (Fase 3) ----
+
+export type FeatureLinkTargetType = 'objective' | 'key_result'
+
+// Vínculo polimórfico feature → objetivo/KR (sem FK real em targetId, espelho
+// de TaskLink). Alimenta o rollup de objetivos/KRs auto_rollup.
+export interface FeatureObjectiveLink {
+  targetType: FeatureLinkTargetType
+  targetId: string
+}
+
+export interface SetFeatureObjectiveLinksInput {
+  featureId: string
+  links: FeatureObjectiveLink[]
+}
+
+// Projeção enxuta de uma feature vinculada, pronta pra UI de Objetivos.
+// progress = % de tarefas done da feature (ou 100 se status done sem tarefas;
+// null = indeterminado, fica fora do rollup do pai).
+export interface LinkedFeatureSummary {
+  id: string
+  title: string
+  status: FeatureStatus
+  progress: number | null
+}
+
 // ---- Objetivos / Key Results (camada genérica de OKRs, Fase 1) ----
 
 export type ObjectiveKind = 'okr' | 'personal_goal' | 'project' | 'custom'
@@ -237,9 +263,11 @@ export interface ObjectiveWithProgress extends Objective {
   progress: number | null
 }
 
-// Detalhe: objetivo + KRs (cada um com seu progresso calculado).
+// Detalhe: objetivo + KRs (cada um com seu progresso calculado) + features
+// vinculadas (Fase 3) — no nível do objetivo e por KR.
 export interface ObjectiveDetail extends ObjectiveWithProgress {
-  keyResults: Array<KeyResult & { progress: number | null }>
+  keyResults: Array<KeyResult & { progress: number | null; linkedFeatures: LinkedFeatureSummary[] }>
+  linkedFeatures: LinkedFeatureSummary[]
 }
 
 export interface CreateObjectiveInput {
@@ -835,6 +863,8 @@ export interface Api {
     update(input: UpdateFeatureInput): Promise<Feature>
     archive(id: string): Promise<void>
     setRepos(input: SetFeatureReposInput): Promise<Feature>
+    setObjectiveLinks(input: SetFeatureObjectiveLinksInput): Promise<Feature>
+    listObjectiveLinks(featureId: string): Promise<FeatureObjectiveLink[]>
     backfill(): Promise<FeatureBackfillResult>
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void

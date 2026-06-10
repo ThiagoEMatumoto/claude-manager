@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import * as objectiveStore from '../services/objective-store'
+import * as overviewStore from '../services/overview-store'
 import type {
   CreateKeyResultInput,
   CreateObjectiveInput,
@@ -8,6 +9,7 @@ import type {
   ObjectiveDetail,
   ObjectiveListFilter,
   ObjectiveWithProgress,
+  OverviewData,
   UpdateKeyResultInput,
   UpdateObjectiveInput,
 } from '../../../shared/types/ipc'
@@ -28,6 +30,10 @@ export function registerObjectivesIpc(): void {
 
   ipcMain.handle('objectives:get', (_e, id: string): ObjectiveDetail | null => {
     return objectiveStore.get(id)
+  })
+
+  ipcMain.handle('objectives:overview', (): OverviewData => {
+    return overviewStore.getOverview()
   })
 
   ipcMain.handle('objectives:create', (_e, input: CreateObjectiveInput): Objective => {

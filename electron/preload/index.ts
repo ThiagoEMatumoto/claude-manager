@@ -174,6 +174,7 @@ const api: Api = {
   objectives: {
     list: (filter?: ObjectiveListFilter) => invoke('objectives:list', filter),
     get: (id: string) => invoke('objectives:get', id),
+    overview: () => invoke('objectives:overview'),
     create: (input: CreateObjectiveInput) => invoke('objectives:create', input),
     update: (input: UpdateObjectiveInput) => invoke('objectives:update', input),
     archive: (id: string) => invoke('objectives:archive', id),

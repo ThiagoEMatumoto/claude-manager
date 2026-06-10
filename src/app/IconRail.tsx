@@ -1,4 +1,13 @@
-import { BarChart3, Blocks, ClipboardList, Folder, ListTodo, Settings, Target } from 'lucide-react'
+import {
+  BarChart3,
+  Blocks,
+  ClipboardList,
+  Folder,
+  LayoutDashboard,
+  ListTodo,
+  Settings,
+  Target,
+} from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { Area } from '@/store/appStore'
@@ -14,6 +23,7 @@ interface AreaDef {
 const AREAS: AreaDef[] = [
   { id: 'projects', icon: Folder, label: 'Projetos' },
   { id: 'features', icon: ClipboardList, label: 'Features' },
+  { id: 'overview', icon: LayoutDashboard, label: 'Visão geral' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },
   { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },

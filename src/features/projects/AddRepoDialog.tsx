@@ -16,7 +16,7 @@ interface Props {
   onCreate: (input: Omit<CreateRepoInput, 'projectId'>) => Promise<void>
 }
 
-type Origin = 'local' | 'clone'
+type Origin = 'local' | 'clone' | 'create'
 
 function basename(p: string): string {
   return p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p
@@ -40,6 +40,8 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
   const [origin, setOrigin] = useState<Origin>('local')
   const [target, setTarget] = useState<string | null>(null)
   const [url, setUrl] = useState('')
+  const [createName, setCreateName] = useState('')
+  const [gitInit, setGitInit] = useState(true)
   const [label, setLabel] = useState('')
   const [role, setRole] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -54,6 +56,8 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
     setOrigin('local')
     setTarget(null)
     setUrl('')
+    setCreateName('')
+    setGitInit(true)
     setLabel('')
     setRole(null)
     setError(null)
@@ -68,7 +72,9 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
     if (!label.trim()) setLabel(basename(picked))
   }
 
-  const finalLabel = label.trim() || (origin === 'clone' ? repoNameFromUrl(url) : '')
+  const finalLabel =
+    label.trim() ||
+    (origin === 'clone' ? repoNameFromUrl(url) : origin === 'create' ? createName.trim() : '')
 
   async function done(input: Omit<CreateRepoInput, 'projectId'>) {
     await onCreate({ ...input, role })
@@ -117,6 +123,35 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
       return
     }
 
+    if (origin === 'create') {
+      const name = createName.trim()
+      if (!name || !project.vaultPath) return
+      const createDest = joinPath(project.vaultPath, name)
+
+      setSubmitting(true)
+      try {
+        // Pré-check: se já existe uma pasta não-registrada nesse destino, não cria —
+        // oferece adotar a existente (mesmo fluxo da aba Clonar).
+        const existing = (await vaultApi.listUntracked(project.id)).find((f) => f.name === name)
+        if (existing) {
+          setCollision({ label: finalLabel, path: existing.path })
+          return
+        }
+        const { path } = await repoApi.createBlank(project.vaultPath, name, gitInit)
+        await done({ label: finalLabel, path, linkKind: 'inside', source: 'created' })
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e)
+        if (isCollisionError(detail)) {
+          setCollision({ label: finalLabel, path: createDest })
+        } else {
+          setError(`Não foi possível criar a pasta. ${detail}`)
+        }
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
     if (!url.trim() || !project.vaultPath) return
     if (!finalLabel) {
       setError('Defina um label.')
@@ -157,7 +192,11 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
 
   const submitDisabled =
     submitting ||
-    (origin === 'local' ? !target : !url.trim() || !hasVault)
+    (origin === 'local'
+      ? !target
+      : origin === 'create'
+        ? !createName.trim() || !hasVault
+        : !url.trim() || !hasVault)
 
   return (
     <>
@@ -171,7 +210,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
               Cancelar
             </Button>
             <Button onClick={handleSubmit} disabled={submitDisabled} loading={submitting}>
-              {origin === 'clone' ? 'Clonar' : 'Adicionar'}
+              {origin === 'clone' ? 'Clonar' : origin === 'create' ? 'Criar' : 'Adicionar'}
             </Button>
           </>
         }
@@ -186,6 +225,13 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
             onClick={() => hasVault && setOrigin('clone')}
           >
             Clonar URL
+          </TabButton>
+          <TabButton
+            active={origin === 'create'}
+            disabled={!hasVault}
+            onClick={() => hasVault && setOrigin('create')}
+          >
+            Criar do zero
           </TabButton>
         </div>
 
@@ -210,7 +256,7 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
               </p>
             )}
           </div>
-        ) : (
+        ) : origin === 'clone' ? (
           <Input
             label="URL do repositório"
             value={url}
@@ -221,13 +267,38 @@ export function AddRepoDialog({ open, onClose, project, onCreate }: Props) {
             placeholder="https://github.com/user/repo.git"
             className="mb-3"
           />
+        ) : (
+          <div className="mb-3">
+            <Input
+              label="Nome da pasta"
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="meu-repo"
+              className="mb-3"
+            />
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text)]">
+              <input
+                type="checkbox"
+                checked={gitInit}
+                onChange={(e) => setGitInit(e.target.checked)}
+                className="size-4 shrink-0 accent-[var(--color-accent)]"
+              />
+              Inicializar git
+            </label>
+          </div>
         )}
 
         <Input
           label="Label"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder={origin === 'clone' ? repoNameFromUrl(url) || 'nome' : 'nome'}
+          placeholder={
+            origin === 'clone'
+              ? repoNameFromUrl(url) || 'nome'
+              : origin === 'create'
+                ? createName.trim() || 'nome'
+                : 'nome'
+          }
           className="mb-3"
         />
         <RoleSelect value={role} onChange={setRole} />

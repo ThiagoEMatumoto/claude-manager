@@ -5,6 +5,9 @@
 import * as z from 'zod/v4'
 import type { McpServer } from '@modelcontextprotocol/server'
 import * as objectiveStore from '../objective-store'
+import * as overviewStore from '../overview-store'
+import * as taskStore from '../task-store'
+import * as featureStore from '../feature-store'
 import type { FeatureObjectiveLink, TaskLink } from '../../../../shared/types/ipc'
 
 // Injeção do broadcast (testável sem electron/janelas): o server monta a
@@ -199,8 +202,270 @@ function objectiveTools(notify: McpNotify): ToolDef[] {
   ]
 }
 
+// ---- tasks ----
+
+const taskStatus = z.enum(['todo', 'in_progress', 'blocked', 'done', 'cancelled'])
+const taskParentType = z.enum(['objective', 'key_result', 'feature'])
+
+const taskLinkSchema = z.object({
+  parentType: taskParentType,
+  parentId: z.string().min(1),
+})
+
+// Espelha TaskListFilter.
+const taskListSchema = z.object({
+  status: taskStatus.optional(),
+  priority: priority.optional(),
+  tag: z.string().optional(),
+  search: z.string().optional(),
+  parentType: taskParentType.optional(),
+  parentId: z.string().optional(),
+})
+
+// Espelha CreateTaskInput.
+const taskCreateSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().nullish(),
+  status: taskStatus.optional(),
+  priority: priority.nullish(),
+  dueDate: z.number().nullish(),
+  tags: z.array(z.string()).optional(),
+  notes: z.string().nullish(),
+  position: z.number().optional(),
+  links: z.array(taskLinkSchema).optional(),
+})
+
+// Espelha UpdateTaskInput (sem links — vínculos mudam via task_set_links).
+const taskUpdateSchema = taskCreateSchema
+  .partial()
+  .omit({ links: true })
+  .extend({ id: z.string().min(1) })
+
+const taskSetLinksSchema = z.object({
+  taskId: z.string().min(1),
+  links: z.array(taskLinkSchema),
+})
+
+function taskTools(notify: McpNotify): ToolDef[] {
+  return [
+    {
+      name: 'task_list',
+      title: 'List tasks',
+      description:
+        'List tasks. Optional filters: status, priority, tag, free-text search, or parent (parentType objective|key_result|feature + parentId).',
+      inputSchema: taskListSchema,
+      handler: (args) => {
+        const filter = taskListSchema.parse(args)
+        return ok({ items: taskStore.list(filter) })
+      },
+    },
+    {
+      name: 'task_create',
+      title: 'Create task',
+      description:
+        'Create a task. Optional links attach it to objectives/key results/features (feeds auto-rollup progress).',
+      inputSchema: taskCreateSchema,
+      handler: (args) => {
+        const input = taskCreateSchema.parse(args)
+        const task = taskStore.create(input)
+        notify.broadcast('task:updated', task)
+        notify.affectedObjectives(task.links)
+        return ok({ task })
+      },
+    },
+    {
+      name: 'task_update',
+      title: 'Update task',
+      description:
+        'Update fields of an existing task by id (status, priority, dueDate, etc). Links are managed via task_set_links.',
+      inputSchema: taskUpdateSchema,
+      handler: (args) => {
+        const input = taskUpdateSchema.parse(args)
+        const task = taskStore.update(input)
+        notify.broadcast('task:updated', task)
+        notify.affectedObjectives(task.links)
+        return ok({ task })
+      },
+    },
+    {
+      name: 'task_set_links',
+      title: 'Set task links',
+      description:
+        'Replace the full set of parent links of a task (objective/key_result/feature). Pass an empty array to detach.',
+      inputSchema: taskSetLinksSchema,
+      handler: (args) => {
+        const { taskId, links } = taskSetLinksSchema.parse(args)
+        const previous = taskStore.setLinks(taskId, links)
+        const task = taskStore.get(taskId)
+        if (!task) throw new Error(`task not found: ${taskId}`)
+        notify.broadcast('task:updated', task)
+        // Notifica tanto quem ganhou quanto quem perdeu a tarefa.
+        notify.affectedObjectives([...previous, ...links])
+        return ok({ task })
+      },
+    },
+  ]
+}
+
+// ---- features ----
+
+const featureStatus = z.enum(['pending', 'in-progress', 'blocked', 'done', 'paused'])
+const featureSynthMode = z.enum(['auto', 'manual', 'threshold'])
+const featureOrigin = z.enum(['manual', 'auto'])
+const featureLinkTargetType = z.enum(['objective', 'key_result'])
+
+const featureRepoLinkSchema = z.object({
+  repoId: z.string().min(1),
+  branch: z.string().nullable().default(null),
+  worktreePath: z.string().nullable().default(null),
+})
+
+const featureListSchema = z.object({ projectId: z.string().optional() })
+
+// Espelha CreateFeatureInput.
+const featureCreateSchema = z.object({
+  projectId: z.string().min(1),
+  title: z.string().min(1),
+  objective: z.string().nullish(),
+  status: featureStatus.optional(),
+  synthMode: featureSynthMode.optional(),
+  model: z.string().nullish(),
+  repos: z.array(featureRepoLinkSchema).optional(),
+  origin: featureOrigin.optional(),
+  overview: z.string().optional(),
+  businessRules: z.string().optional(),
+  approach: z.string().optional(),
+})
+
+// Espelha UpdateFeatureInput.
+const featureUpdateSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).optional(),
+  status: featureStatus.optional(),
+  objective: z.string().nullish(),
+  synthMode: featureSynthMode.optional(),
+  model: z.string().nullish(),
+})
+
+const featureObjectiveLinkSchema = z.object({
+  targetType: featureLinkTargetType,
+  targetId: z.string().min(1),
+})
+
+const featureSetObjectiveLinksSchema = z.object({
+  featureId: z.string().min(1),
+  links: z.array(featureObjectiveLinkSchema),
+})
+
+function featureTools(notify: McpNotify): ToolDef[] {
+  return [
+    {
+      name: 'feature_list',
+      title: 'List features',
+      description:
+        'List features (index fields only, no markdown body). Optional projectId filter. Archived features and hidden auto-drafts are excluded.',
+      inputSchema: featureListSchema,
+      handler: (args) => {
+        const { projectId } = featureListSchema.parse(args)
+        return ok({ items: featureStore.list(projectId) })
+      },
+    },
+    {
+      name: 'feature_get',
+      title: 'Get feature',
+      description:
+        'Get one feature by id including its markdown body. Returns { feature: null } when not found.',
+      inputSchema: idSchema,
+      handler: (args) => {
+        const { id } = idSchema.parse(args)
+        return ok({ feature: featureStore.get(id) })
+      },
+    },
+    {
+      name: 'feature_create',
+      title: 'Create feature',
+      description:
+        'Create a feature in a project (writes its markdown doc). Optional seed sections: overview, businessRules, approach.',
+      inputSchema: featureCreateSchema,
+      handler: (args) => {
+        const input = featureCreateSchema.parse(args)
+        const feature = featureStore.create(input)
+        notify.broadcast('feature:updated', feature)
+        return ok({ feature })
+      },
+    },
+    {
+      name: 'feature_update',
+      title: 'Update feature',
+      description:
+        'Update index fields of an existing feature by id (title, status, objective, synthMode, model).',
+      inputSchema: featureUpdateSchema,
+      handler: (args) => {
+        const input = featureUpdateSchema.parse(args)
+        const feature = featureStore.update(input)
+        notify.broadcast('feature:updated', feature)
+        return ok({ feature })
+      },
+    },
+    {
+      name: 'feature_archive',
+      title: 'Archive feature',
+      description: 'Archive a feature (reversible soft-delete; it leaves active listings).',
+      inputSchema: idSchema,
+      handler: (args) => {
+        const { id } = idSchema.parse(args)
+        featureStore.archive(id)
+        notify.broadcast('feature:updated', { id, archived: true })
+        return ok({ id, archived: true })
+      },
+    },
+    {
+      name: 'feature_set_objective_links',
+      title: 'Set feature objective links',
+      description:
+        'Replace the full set of objective/key-result links of a feature (feeds auto-rollup progress). Pass an empty array to detach.',
+      inputSchema: featureSetObjectiveLinksSchema,
+      handler: (args) => {
+        const { featureId, links } = featureSetObjectiveLinksSchema.parse(args)
+        const previous = featureStore.setObjectiveLinks(featureId, links)
+        const feature = featureStore.get(featureId)
+        if (!feature) throw new Error(`feature not found: ${featureId}`)
+        notify.broadcast('feature:updated', feature)
+        // Notifica tanto os objetivos que ganharam quanto os que perderam a feature.
+        notify.affectedObjectivesForFeatureLinks([...previous, ...links])
+        return ok({ feature })
+      },
+    },
+  ]
+}
+
+// ---- overview ----
+
+const emptySchema = z.object({})
+
+function overviewTools(): ToolDef[] {
+  return [
+    {
+      name: 'overview_get',
+      title: 'Get overview',
+      description:
+        'Aggregated dashboard snapshot: objective tree with progress, pending tasks (sorted), counts, and active features with session activity.',
+      inputSchema: emptySchema,
+      handler: (args) => {
+        emptySchema.parse(args ?? {})
+        return ok({ overview: overviewStore.getOverview() })
+      },
+    },
+  ]
+}
+
 export function buildTools(notify: McpNotify): ToolDef[] {
-  return [...objectiveTools(notify)]
+  return [
+    ...overviewTools(),
+    ...objectiveTools(notify),
+    ...taskTools(notify),
+    ...featureTools(notify),
+  ]
 }
 
 export function registerTools(server: McpServer, notify: McpNotify): void {

@@ -3,13 +3,11 @@ import { TreeNode } from './TreeNode'
 
 // Árvore hierárquica do dashboard: raízes (objetivos sem pai) expandidas por
 // default; cada nó expande KRs → tarefas/features, tarefas diretas, features
-// vinculadas e sub-objetivos recursivos.
+// vinculadas e sub-objetivos recursivos. O heading é do dono (seção colapsável
+// "Árvore de objetivos" da Home).
 export function ObjectiveTree({ nodes }: { nodes: OverviewObjectiveNode[] }) {
   return (
     <section>
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-dim)]">
-        Objetivos
-      </h2>
       {nodes.length === 0 ? (
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-8 text-center text-sm text-[var(--color-text-dim)]">
           Nenhum objetivo por aqui ainda.

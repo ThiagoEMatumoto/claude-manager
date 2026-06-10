@@ -40,6 +40,10 @@ interface Props {
   onClose: () => void
   // Presente = edição; ausente = criação (standalone se sem vínculo).
   task?: Task | null
+  // Vínculos pré-aplicados na CRIAÇÃO (ex: "Nova tarefa" a partir de uma
+  // feature). Ignorado na edição (os links da task vencem). O caller deve
+  // memoizar — a identidade entra nas deps do reset do form.
+  initialLinks?: TaskLink[]
   objectives: ObjectiveWithProgress[]
   features: Feature[]
   resolveLinkLabel: (link: TaskLink) => string
@@ -57,6 +61,7 @@ export function TaskDialog({
   open,
   onClose,
   task,
+  initialLinks,
   objectives,
   features,
   resolveLinkLabel,
@@ -86,10 +91,10 @@ export function TaskDialog({
     setDueDate(tsToDateInput(task?.dueDate ?? null))
     setTagsText(task?.tags.join(', ') ?? '')
     setNotes(task?.notes ?? '')
-    setLinks(task?.links ?? [])
+    setLinks(task?.links ?? initialLinks ?? [])
     setKrObjectiveId('')
     setTimeout(() => titleRef.current?.focus(), 0)
-  }, [open, task])
+  }, [open, task, initialLinks])
 
   useEffect(() => {
     if (!krObjectiveId) {

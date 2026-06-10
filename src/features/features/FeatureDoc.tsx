@@ -8,6 +8,9 @@ import { Icon } from '@/components/ui/Icon'
 import { shellApi } from '@/lib/ipc'
 import type { Feature, Repo } from '../../../shared/types/ipc'
 import { StatusBadge } from './FeatureList'
+import { FeatureObjectiveLinksSection } from './FeatureObjectiveLinksSection'
+import { FeatureTasksSection } from './FeatureTasksSection'
+import { useObjectiveLookups } from './useObjectiveLookups'
 
 // Links de PR/docs no markdown abrem no browser do sistema. Sem isso, o clique
 // num <a> puro dispara navegação no Electron e a janela do app some / abre em
@@ -77,6 +80,8 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
     () => (feature?.body ? splitHistory(feature.body) : { main: '', history: null }),
     [feature?.body],
   )
+  // Lookup compartilhado pelas seções de Tarefas e Objetivos (uma busca só).
+  const { objectives, krTitles } = useObjectiveLookups()
 
   if (!feature) {
     return (
@@ -167,6 +172,13 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
             )}
           </>
         )}
+
+        <FeatureTasksSection featureId={feature.id} objectives={objectives} krTitles={krTitles} />
+        <FeatureObjectiveLinksSection
+          featureId={feature.id}
+          objectives={objectives}
+          krTitles={krTitles}
+        />
       </div>
     </div>
   )

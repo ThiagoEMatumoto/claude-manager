@@ -95,6 +95,9 @@ export interface SpawnSessionInput {
 
 export type FeatureStatus = 'pending' | 'in-progress' | 'blocked' | 'done' | 'paused'
 export type FeatureSynthMode = 'auto' | 'manual' | 'threshold'
+// 'manual' = criada pelo usuário; 'auto' = auto-criada pela resolução de sessões.
+// Rascunho oculto = origin='auto' E 0 session records (derivado, sem flag mutável).
+export type FeatureOrigin = 'manual' | 'auto'
 
 export interface FeatureRepoLink {
   repoId: string
@@ -115,6 +118,8 @@ export interface Feature {
   synthMode: FeatureSynthMode
   model: string | null
   repos: FeatureRepoLink[]
+  // Vive só no SQLite (como archivedAt) — não vai pro frontmatter do `.md`.
+  origin: FeatureOrigin
   createdAt: number
   updatedAt: number
   completedAt: number | null
@@ -137,6 +142,9 @@ export interface CreateFeatureInput {
   synthMode?: FeatureSynthMode
   model?: string | null
   repos?: FeatureRepoLink[]
+  // Default 'manual'. A resolução automática de sessões passa 'auto' (rascunho
+  // oculto até a feature ganhar o 1º session record).
+  origin?: FeatureOrigin
   // Seções iniciais do corpo (preenchem o esqueleto de headings).
   overview?: string
   businessRules?: string

@@ -9,6 +9,7 @@ import type {
   Feature,
   FeatureLinkTargetType,
   FeatureObjectiveLink,
+  FeatureOrigin,
   FeatureRepoLink,
   FeatureStatus,
   FeatureSynthMode,
@@ -155,6 +156,7 @@ function fromFrontmatter(fm: Partial<Frontmatter>, docPath: string, body: string
     updatedAt: typeof fm.last_updated === 'number' ? fm.last_updated : Date.now(),
     completedAt: typeof fm.completed === 'number' ? fm.completed : null,
     archivedAt: null, // archive vive só no SQLite, não no frontmatter
+    origin: 'manual', // idem: origin vive só no SQLite (reindex preserva o valor da row)
     body,
   }
 }
@@ -197,6 +199,7 @@ interface FeatureRow {
   updated_at: number
   completed_at: number | null
   archived_at: number | null
+  origin: string
 }
 
 function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string): Feature {
@@ -211,6 +214,7 @@ function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string):
     synthMode: row.synth_mode as FeatureSynthMode,
     model: row.model,
     repos,
+    origin: row.origin as FeatureOrigin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -245,9 +249,9 @@ function upsertIndex(f: Feature): void {
     db.prepare(
       `INSERT INTO features
          (id, project_id, slug, title, status, objective, doc_path,
-          synth_mode, model, created_at, updated_at, completed_at, archived_at)
+          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin)
        VALUES (@id, @project_id, @slug, @title, @status, @objective, @doc_path,
-               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at)
+               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin)
        ON CONFLICT(id) DO UPDATE SET
          project_id  = excluded.project_id,
          slug        = excluded.slug,
@@ -272,9 +276,10 @@ function upsertIndex(f: Feature): void {
       created_at: f.createdAt,
       updated_at: f.updatedAt,
       completed_at: f.completedAt,
-      // archived_at não vem do frontmatter; preservado via COALESCE no UPDATE acima
-      // omitido — a coluna não é tocada no DO UPDATE.
+      // archived_at e origin não vêm do frontmatter; ambos são omitidos do
+      // DO UPDATE — a row existente preserva os valores (inseridos só no INSERT).
       archived_at: f.archivedAt,
+      origin: f.origin,
     })
     db.prepare('DELETE FROM feature_repos WHERE feature_id = ?').run(f.id)
     const ins = db.prepare(
@@ -302,6 +307,7 @@ export function create(input: CreateFeatureInput): Feature {
     synthMode: input.synthMode ?? 'threshold',
     model: input.model ?? null,
     repos: input.repos ?? [],
+    origin: input.origin ?? 'manual',
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -588,11 +594,15 @@ export function reindexFromFile(path: string): Feature | null {
   }
   const doc = readDoc(path)
   if (!doc) return null
-  // preserva archived_at existente
+  // preserva archived_at e origin existentes (vivem só no SQLite)
   const existing = getDb()
-    .prepare('SELECT archived_at FROM features WHERE id = ?')
-    .get(doc.feature.id) as { archived_at: number | null } | undefined
-  const feature: Feature = { ...doc.feature, archivedAt: existing?.archived_at ?? null }
+    .prepare('SELECT archived_at, origin FROM features WHERE id = ?')
+    .get(doc.feature.id) as { archived_at: number | null; origin: string } | undefined
+  const feature: Feature = {
+    ...doc.feature,
+    archivedAt: existing?.archived_at ?? null,
+    origin: (existing?.origin as FeatureOrigin) ?? 'manual',
+  }
   upsertIndex(feature)
   return feature
 }

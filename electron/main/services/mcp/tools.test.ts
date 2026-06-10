@@ -221,6 +221,37 @@ describe('mcp tools — tasks', () => {
     expect(notify.calls.at(-1)).toEqual(['task:updated', updated])
   })
 
+  it('round-trip do auto-tracking: task_create com tag "auto" linkada à feature', () => {
+    // Cenário das SERVER_INSTRUCTIONS: a sessão cria uma task de follow-up com
+    // tag "auto" e link parentType "feature" pro featureId do spawn prompt.
+    getDb()
+      .prepare(`INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
+      .run('proj-auto', 'Projeto auto-tracking', Date.now(), Date.now())
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-auto',
+      title: 'Feature rastreada',
+    })
+    const links = [{ parentType: 'feature', parentId: feature.id }]
+    const { task } = call<{ task: Task }>('task_create', {
+      title: 'Follow-up descoberto na sessão',
+      tags: ['auto'],
+      links,
+    })
+    expect(task.tags).toContain('auto')
+    expect(task.links).toEqual(links)
+    expect(notify.affected.at(-1)).toEqual(links)
+
+    // Round-trip: o filtro por parent feature devolve a task com a tag intacta.
+    const { items } = call<{ items: Task[] }>('task_list', {
+      parentType: 'feature',
+      parentId: feature.id,
+    })
+    const found = items.find((t) => t.id === task.id)
+    expect(found).toBeDefined()
+    expect(found?.tags).toContain('auto')
+    expect(found?.links).toEqual(links)
+  })
+
   it('task_set_links substitui vínculos e notifica quem ganhou E quem perdeu', () => {
     const { objective: a } = call<{ objective: Objective }>('objective_create', {
       title: 'Perde tarefa',

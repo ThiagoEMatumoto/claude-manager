@@ -35,7 +35,8 @@ export interface UntrackedFolder {
 
 export interface Session {
   id: string
-  repoId: string
+  // null = sessão avulsa (sem repo), rodando no scratch dir.
+  repoId: string | null
   ccSessionId: string | null
   title: string | null
   paneId: string | null
@@ -80,7 +81,8 @@ export interface ReorderReposInput {
 }
 
 export interface SpawnSessionInput {
-  repoId: string
+  // Ausente/null = sessão avulsa: cwd vira o scratch dir (pref scratch_dir).
+  repoId?: string | null
   name?: string
   featureId?: string
   // Comando inicial injetado no REPL do claude após o spawn (ex.: '/review' ou
@@ -478,7 +480,8 @@ export interface OverviewData {
 }
 
 export interface ResumeSessionInput {
-  repoId: string
+  // null = sessão avulsa: retoma no scratch dir.
+  repoId: string | null
   ccSessionId: string
   cols?: number
   rows?: number
@@ -494,8 +497,9 @@ export interface SessionSummary {
 
 export interface PaneSnapshot {
   ccSessionId: string
-  repo: Repo
-  projectName: string
+  // null = sessão avulsa (sem repo/projeto).
+  repo: Repo | null
+  projectName: string | null
   projectIcon: string | null
   // Opcional: snapshots gravados antes desta feature não têm a cor (fallback null).
   projectColor?: string | null
@@ -542,8 +546,9 @@ export interface LiveSessionInfo {
   name: string | null
   title: string | null
   status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
-  repo: Repo
-  projectName: string
+  // null = sessão avulsa (sem repo/projeto).
+  repo: Repo | null
+  projectName: string | null
   projectIcon: string | null
   projectColor: string | null
   lastActivityAt: number | null

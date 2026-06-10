@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
@@ -16,19 +17,18 @@ import {
   isPidAlive,
   mapStatus,
 } from '../services/session-activity'
+import { mapLiveSessionRepo, type LiveSessionJoinRow } from './live-session-mapping'
 import type {
   Session,
   SpawnSessionInput,
   ResumeSessionInput,
   SessionSummary,
   LiveSessionInfo,
-  Repo,
-  LinkKind,
 } from '../../../shared/types/ipc'
 
 interface SessionRow {
   id: string
-  repo_id: string
+  repo_id: string | null
   cc_session_id: string | null
   title: string | null
   pane_id: string | null
@@ -69,6 +69,21 @@ function resolveClaudeCommand(): string {
     .prepare('SELECT value FROM app_prefs WHERE key = ?')
     .get(CLAUDE_COMMAND_KEY) as { value: string } | undefined
   return row?.value?.trim() || 'claude'
+}
+
+const SCRATCH_DIR_KEY = 'scratch_dir'
+const QUICK_SESSION_NAME = 'Sessão rápida'
+
+// Sessão avulsa (sem repo) roda numa pasta scratch dedicada — configurável via
+// app_prefs (mesmo padrão de claude_command), default ~/ClaudeManager/scratch.
+// Garante a existência antes do spawn (PTY com cwd inexistente falha).
+function resolveScratchDir(): string {
+  const row = getDb()
+    .prepare('SELECT value FROM app_prefs WHERE key = ?')
+    .get(SCRATCH_DIR_KEY) as { value: string } | undefined
+  const dir = row?.value?.trim() || join(homedir(), 'ClaudeManager', 'scratch')
+  mkdirSync(dir, { recursive: true })
+  return dir
 }
 
 // O claude vive em ~/.local/bin e o env do Electron GUI não herda o PATH do rc.
@@ -156,7 +171,7 @@ function injectInitialCommandOnFirstData(sessionId: string, command: string): vo
 // Spawn novo e resume diferem só no innerCmd (--session-id <novo> vs --resume <existente>).
 function startSession(opts: {
   ccSessionId: string
-  repoId: string
+  repoId: string | null
   cwd: string
   innerCmd: string
   featureId?: string | null
@@ -236,9 +251,11 @@ export function registerSessionIpc(): void {
         const link = db
           .prepare('SELECT feature_id, cc_session_id, repo_id FROM sessions WHERE id = ?')
           .get(e.sessionId) as
-          | { feature_id: string | null; cc_session_id: string | null; repo_id: string }
+          | { feature_id: string | null; cc_session_id: string | null; repo_id: string | null }
           | undefined
-        if (link) {
+        // Sessão avulsa (repo_id null) fica fora da síntese de features — a
+        // assinatura de onSessionExit exige repoId string (resolve por repo/branch).
+        if (link && link.repo_id) {
           featureMemory.onSessionExit({
             sessionId: e.sessionId,
             ccSessionId: link.cc_session_id,
@@ -255,13 +272,25 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('sessions:spawn', (_e, input: SpawnSessionInput) => {
     const db = getDb()
-    const repo = db
-      .prepare('SELECT path, label FROM repos WHERE id = ?')
-      .get(input.repoId) as RepoPathRow | undefined
-    if (!repo) throw new Error(`repo not found: ${input.repoId}`)
+    const repoId = input.repoId ?? null
+
+    // Sessão avulsa (repoId null): roda no scratch dir, sem vínculo com repo.
+    let cwd: string
+    let defaultName: string
+    if (repoId) {
+      const repo = db
+        .prepare('SELECT path, label FROM repos WHERE id = ?')
+        .get(repoId) as RepoPathRow | undefined
+      if (!repo) throw new Error(`repo not found: ${repoId}`)
+      cwd = repo.path
+      defaultName = repo.label
+    } else {
+      cwd = resolveScratchDir()
+      defaultName = QUICK_SESSION_NAME
+    }
 
     const sessionId = randomUUID()
-    const name = input.name?.trim() || repo.label
+    const name = input.name?.trim() || defaultName
 
     if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
     const claudeCmd = resolveClaudeCommand()
@@ -283,8 +312,8 @@ export function registerSessionIpc(): void {
 
     return startSession({
       ccSessionId: sessionId,
-      repoId: input.repoId,
-      cwd: repo.path,
+      repoId,
+      cwd,
       innerCmd,
       featureId: input.featureId,
       initialCommand: input.initialCommand,
@@ -295,25 +324,36 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('sessions:resume', (_e, input: ResumeSessionInput) => {
     const db = getDb()
-    const repo = db
-      .prepare('SELECT path, label FROM repos WHERE id = ?')
-      .get(input.repoId) as RepoPathRow | undefined
-    if (!repo) throw new Error(`repo not found: ${input.repoId}`)
+    const repoId = input.repoId ?? null
+
+    let cwd: string
+    let defaultName: string
+    if (repoId) {
+      const repo = db
+        .prepare('SELECT path, label FROM repos WHERE id = ?')
+        .get(repoId) as RepoPathRow | undefined
+      if (!repo) throw new Error(`repo not found: ${repoId}`)
+      cwd = repo.path
+      defaultName = repo.label
+    } else {
+      cwd = resolveScratchDir()
+      defaultName = QUICK_SESSION_NAME
+    }
     if (!UUID_RE.test(input.ccSessionId)) {
       throw new Error(`invalid cc session id: ${input.ccSessionId}`)
     }
 
-    // Nome preferido: o já gravado no JSONL (custom/ai-title), senão o label do repo.
+    // Nome preferido: o já gravado no JSONL (custom/ai-title), senão o default.
     const transcript = findTranscriptPath(input.ccSessionId)
-    const name = (transcript ? readTranscriptTitle(transcript) : null) || repo.label
+    const name = (transcript ? readTranscriptTitle(transcript) : null) || defaultName
 
     const claudeCmd = resolveClaudeCommand()
     const innerCmd = `${claudeCmd} --resume ${input.ccSessionId} -n ${shquote(name)}`
 
     return startSession({
       ccSessionId: input.ccSessionId,
-      repoId: input.repoId,
-      cwd: repo.path,
+      repoId,
+      cwd,
       innerCmd,
       cols: input.cols,
       rows: input.rows,
@@ -375,7 +415,8 @@ export function registerSessionIpc(): void {
     const out: LiveSessionInfo[] = []
 
     // runningIds() = sessions.id (UUID) das PTYs vivas neste app. Para cada uma,
-    // JOIN sessions→repos→projects (mesmo padrão de columns de projects.ts).
+    // LEFT JOIN sessions→repos→projects — sessão avulsa (repo_id null) vem com
+    // as colunas do repo/projeto nulas e vira repo: null no LiveSessionInfo.
     for (const sessionId of ptyManager.runningIds()) {
       const row = db
         .prepare(
@@ -387,43 +428,16 @@ export function registerSessionIpc(): void {
              r.source AS repo_source, r.position AS repo_position, r.created_at AS repo_created_at,
              p.name AS project_name, p.icon AS project_icon, p.color AS project_color
            FROM sessions s
-           JOIN repos r ON r.id = s.repo_id
-           JOIN projects p ON p.id = r.project_id
+           LEFT JOIN repos r ON r.id = s.repo_id
+           LEFT JOIN projects p ON p.id = r.project_id
            WHERE s.id = ? AND s.cc_session_id IS NOT NULL`,
         )
-        .get(sessionId) as
-        | {
-            cc_session_id: string
-            session_title: string | null
-            repo_id: string
-            repo_project_id: string
-            repo_label: string
-            repo_path: string
-            repo_role: string | null
-            repo_link_kind: string
-            repo_source: string | null
-            repo_position: number
-            repo_created_at: number
-            project_name: string
-            project_icon: string | null
-            project_color: string | null
-          }
-        | undefined
+        .get(sessionId) as LiveSessionJoinRow | undefined
 
       if (!row) continue
       const ccSessionId = row.cc_session_id
 
-      const repo: Repo = {
-        id: row.repo_id,
-        projectId: row.repo_project_id,
-        label: row.repo_label,
-        path: row.repo_path,
-        role: row.repo_role,
-        linkKind: row.repo_link_kind as LinkKind,
-        source: row.repo_source,
-        position: row.repo_position,
-        createdAt: row.repo_created_at,
-      }
+      const { repo, projectName, projectIcon, projectColor } = mapLiveSessionRepo(row)
 
       const transcript = findTranscriptPath(ccSessionId)
       const indexed = liveIndex.get(ccSessionId)
@@ -462,9 +476,9 @@ export function registerSessionIpc(): void {
         title,
         status,
         repo,
-        projectName: row.project_name,
-        projectIcon: row.project_icon,
-        projectColor: row.project_color,
+        projectName,
+        projectIcon,
+        projectColor,
         lastActivityAt,
         lastText,
         tokens,

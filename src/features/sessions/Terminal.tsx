@@ -17,6 +17,13 @@ import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
 import { PromptComposer } from './PromptComposer'
+import {
+  ModelPill,
+  MODEL_ALIASES,
+  EFFORT_LEVELS,
+  type ModelAlias,
+  type EffortLevel,
+} from './ModelPill'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
@@ -176,6 +183,23 @@ export function Terminal({
   // Só dá pra injetar /rename quando o claude está no prompt; em 'working' ele
   // está ocupado e a injeção concatenaria no meio de um comando/output.
   const canRename = !activity || activity.status !== 'working'
+
+  // Troca de modelo/esforço é mais restrita que o rename: só em 'idle'. Em
+  // 'waiting' pode haver um prompt de permissão aberto — injetar texto ali
+  // responderia o prompt errado.
+  const canSwitchModel = !exited && activity?.status === 'idle'
+
+  // Injeção sanitizada: os valores vêm EXCLUSIVAMENTE das whitelists literais
+  // do ModelPill — nunca texto livre. \x15 (Ctrl+U) limpa a linha do prompt
+  // antes, pra não concatenar com algo já digitado (mesmo padrão do /rename).
+  function selectModel(alias: ModelAlias) {
+    if (!canSwitchModel || !MODEL_ALIASES.includes(alias)) return
+    write('\x15/model ' + alias + '\r')
+  }
+  function selectEffort(level: EffortLevel) {
+    if (!canSwitchModel || !EFFORT_LEVELS.includes(level)) return
+    write('\x15/effort ' + level + '\r')
+  }
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
@@ -573,6 +597,14 @@ export function Terminal({
               <Icon as={AlertCircle} size={13} />
               {error}
             </span>
+          )}
+          {!exited && (
+            <ModelPill
+              activity={activity}
+              canSwitch={canSwitchModel}
+              onSelectModel={selectModel}
+              onSelectEffort={selectEffort}
+            />
           )}
           {!exited && (
             <button

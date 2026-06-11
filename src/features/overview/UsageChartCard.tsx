@@ -76,7 +76,7 @@ function UsageChart({ perDay }: { perDay: MetricsDayPoint[] }) {
           stroke="var(--color-border)"
           tickLine={false}
           axisLine={false}
-          width={36}
+          width={48}
         />
         <Tooltip
           cursor={{ stroke: 'var(--color-border)' }}

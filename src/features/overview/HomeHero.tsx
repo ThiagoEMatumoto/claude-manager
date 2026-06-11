@@ -28,7 +28,7 @@ export function HomeHero({ counts, onRefresh }: { counts: OverviewCounts; onRefr
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)]">
             {greeting(now.getHours())}
           </h1>
-          <p className="mt-0.5 text-sm capitalize text-[var(--color-text-dim)]">{longDate(now)}</p>
+          <p className="mt-0.5 text-sm text-[var(--color-text-dim)]">{longDate(now)}</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -61,7 +61,8 @@ function greeting(hour: number): string {
 }
 
 function longDate(d: Date): string {
-  return d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+  const text = d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 function LivePill({ working, waiting, live }: { working: number; waiting: number; live: number }) {

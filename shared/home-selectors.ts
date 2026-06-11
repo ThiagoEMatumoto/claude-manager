@@ -89,3 +89,86 @@ export interface ObjectiveNodeInput {
 export function selectActiveObjectives<T extends ObjectiveNodeInput>(roots: T[]): T[] {
   return roots.filter((n) => n.objective.status === 'active')
 }
+
+// ---- Uso do Claude (hero / stats da Home) ----
+
+// Shape estrutural mínimo de MetricsDayPoint (mesmo padrão dos demais inputs).
+export interface UsageDayPoint {
+  day: string
+  tokens: number
+  costUsd: number
+  turns: number
+  sessions: number
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// Chave de dia em UTC — espelha o dayKey do metrics-service (per_day_json é
+// bucketizado por toISOString), senão "hoje" não casaria perto da meia-noite.
+export function usageDayKey(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+export interface TodayUsage {
+  costUsd: number
+  tokens: number
+  turns: number
+}
+
+export function selectTodayUsage(perDay: UsageDayPoint[], now: number): TodayUsage {
+  const key = usageDayKey(now)
+  const point = perDay.find((p) => p.day === key)
+  return point
+    ? { costUsd: point.costUsd, tokens: point.tokens, turns: point.turns }
+    : { costUsd: 0, tokens: 0, turns: 0 }
+}
+
+export interface WindowUsage {
+  costUsd: number
+  tokens: number
+  turns: number
+  // soma dos sessions diários (sessões que tocaram cada dia) — aproximação
+  // suficiente pro tile; sessões multi-dia contam em cada dia tocado.
+  sessions: number
+}
+
+export interface RecentUsage {
+  current: WindowUsage
+  previous: WindowUsage
+  // (current − previous) / previous × 100 sobre custo; null sem base anterior.
+  costDeltaPct: number | null
+}
+
+function emptyWindow(): WindowUsage {
+  return { costUsd: 0, tokens: 0, turns: 0, sessions: 0 }
+}
+
+function addPoint(acc: WindowUsage, p: UsageDayPoint): void {
+  acc.costUsd += p.costUsd
+  acc.tokens += p.tokens
+  acc.turns += p.turns
+  acc.sessions += p.sessions
+}
+
+// Janela corrente = últimos `days` dias UTC (hoje inclusive); anterior = os
+// `days` imediatamente antes. Dias fora das duas janelas são ignorados.
+export function selectRecentUsage(perDay: UsageDayPoint[], now: number, days = 7): RecentUsage {
+  const currentKeys = new Set<string>()
+  const previousKeys = new Set<string>()
+  for (let i = 0; i < days; i++) {
+    currentKeys.add(usageDayKey(now - i * DAY_MS))
+    previousKeys.add(usageDayKey(now - (i + days) * DAY_MS))
+  }
+
+  const current = emptyWindow()
+  const previous = emptyWindow()
+  for (const p of perDay) {
+    if (currentKeys.has(p.day)) addPoint(current, p)
+    else if (previousKeys.has(p.day)) addPoint(previous, p)
+  }
+
+  const costDeltaPct =
+    previous.costUsd > 0 ? ((current.costUsd - previous.costUsd) / previous.costUsd) * 100 : null
+
+  return { current, previous, costDeltaPct }
+}

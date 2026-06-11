@@ -462,6 +462,7 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     : undefined
 
   const subagentTypeMap = new Map<string, number>()
+  const modelMap = new Map<string, number>()
   const perDayMap = new Map<string, MetricsDayPoint>()
   const perSession: MetricsSessionRow[] = []
   const perProjectMap = new Map<string, MetricsProjectRow>()
@@ -512,10 +513,11 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     bucket.costUsd += row.cost_usd
     typeMap.set(sessionType, bucket)
 
-    // modelos sem preço → custo parcial (deriva de models_json, sem schema novo).
+    // models_json → distribuição por modelo + modelos sem preço (custo parcial).
     try {
       const models = JSON.parse(row.models_json) as string[]
       for (const m of models) {
+        modelMap.set(m, (modelMap.get(m) ?? 0) + 1)
         if (!resolvePrice(m)) unknownModels.add(m)
       }
     } catch {
@@ -564,6 +566,10 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count)
 
+  const modelDistribution = [...modelMap.entries()]
+    .map(([model, sessions]) => ({ model, sessions }))
+    .sort((a, b) => b.sessions - a.sessions)
+
   const perDay = [...perDayMap.values()].sort((a, b) => a.day.localeCompare(b.day))
   const perProject = [...perProjectMap.values()].sort((a, b) => b.costUsd - a.costUsd)
   const sessionTypeDistribution = [...typeMap.values()]
@@ -584,6 +590,7 @@ export function aggregate(window: MetricsWindow, scanned: boolean): MetricsSnaps
     perProject,
     sessionTypeDistribution,
     subagentTypeDistribution,
+    modelDistribution,
     topTools,
     unknownModels: [...unknownModels],
   }

@@ -183,6 +183,7 @@ interface TranscriptLine {
   aiTitle?: string
   message?: {
     role?: string
+    model?: string
     content?: ContentItem[]
     usage?: {
       input_tokens?: number
@@ -196,6 +197,7 @@ interface TranscriptEnrichment {
   title: string | null
   lastText: string | null
   tokens: SessionActivity['tokens']
+  model: string | null
 }
 
 // Enriquecimento secundário: lastText, tokens e aiTitle (fallback do name).
@@ -236,7 +238,9 @@ export function deriveEnrichment(tail: string): TranscriptEnrichment {
     }
   }
 
-  return { title, lastText, tokens }
+  // Modelo em uso: a última msg assistant carrega message.model (mesmo formato
+  // que o metrics-service lê). Null até a primeira resposta do assistant no tail.
+  return { title, lastText, tokens, model: lastAssistant?.message?.model ?? null }
 }
 
 interface WatchEntry {
@@ -261,7 +265,7 @@ class SessionActivityService extends EventEmitter {
     if (this.watched.has(ccSessionId)) return
     this.watched.set(ccSessionId, {
       transcriptPath: findTranscriptPath(ccSessionId),
-      enrichment: { title: null, lastText: null, tokens: undefined },
+      enrichment: { title: null, lastText: null, tokens: undefined, model: null },
     })
     this.ensureDirWatcher()
     // Estado inicial imediato (índice já pode estar populado).
@@ -446,6 +450,7 @@ class SessionActivityService extends EventEmitter {
       lastText: entry.enrichment.lastText,
       lastActivityAt,
       tokens: entry.enrichment.tokens,
+      model: entry.enrichment.model,
     }
     broadcast('session:activity', activity)
   }

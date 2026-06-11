@@ -568,6 +568,9 @@ export interface SessionActivity {
   lastText: string | null
   lastActivityAt: number | null
   tokens?: { output: number; context: number }
+  // Model id da última msg assistant do transcript (ex: 'claude-opus-4-...').
+  // Null até a primeira resposta — fonte de verdade pro ModelPill do Terminal.
+  model: string | null
 }
 
 // Snapshot de uma sessão viva (PTY rodando neste app) para a lista global "Agents".

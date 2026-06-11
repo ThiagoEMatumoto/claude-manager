@@ -29,3 +29,29 @@ html, body, #root {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-text-dim); }
+
+/* Entrada stagger da Home: --i (índice do card) escalona o delay. */
+@keyframes home-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.home-rise {
+  animation: home-rise 0.4s ease-out both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+/* Superfície "glass" da Home (gradiente + borda hairline + sombra em camadas).
+   Só CSS vars de tema — compatível com os 4 temas. */
+.glass-card {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-surface-2) 70%, transparent),
+    color-mix(in srgb, var(--color-surface) 50%, transparent)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+}

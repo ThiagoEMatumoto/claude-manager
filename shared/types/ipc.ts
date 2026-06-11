@@ -837,6 +837,8 @@ export interface MetricsSnapshot {
   sessionTypeDistribution: MetricsTypeBucket[]
   // distribuição de subagent_type sobre os tool_use Agent (desc por count)
   subagentTypeDistribution: { type: string; count: number }[]
+  // sessões por modelo (de models_json; sessão multi-modelo conta em cada um)
+  modelDistribution: { model: string; sessions: number }[]
   topTools: MetricsToolRow[]
   // modelos sem preço → custo parcial (aviso na UI)
   unknownModels: string[]

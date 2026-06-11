@@ -7,13 +7,25 @@ import { suggestFeatures } from '@/features/features/fuzzy'
 import { STATUS_META } from '@/features/features/status'
 import type { Feature, Repo } from '../../../shared/types/ipc'
 
+// Opções do segmented control de modelo. '' = Padrão (sem --model no spawn).
+const MODEL_OPTIONS = [
+  { value: '', label: 'Padrão' },
+  { value: 'opus', label: 'Opus' },
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'haiku', label: 'Haiku' },
+] as const
+
 interface Props {
   open: boolean
   onClose: () => void
   repo: Repo
   // Feature já existente neste projeto (filtradas por projeto do repo).
-  // Confirmar dispara o spawn com o name e featureId resolvidos.
-  onConfirm: (name: string | undefined, featureId: string | undefined) => void
+  // Confirmar dispara o spawn com o name, featureId e model resolvidos.
+  onConfirm: (
+    name: string | undefined,
+    featureId: string | undefined,
+    model: string | undefined,
+  ) => void
 }
 
 export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
@@ -22,6 +34,8 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const [features, setFeatures] = useState<Feature[]>([])
   // Vínculo explícito (a): selecionado no dropdown. '' = nenhum.
   const [selectedFeature, setSelectedFeature] = useState<string>('')
+  // Modelo inicial. '' = default do claude (não passa --model).
+  const [model, setModel] = useState<string>('')
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -29,6 +43,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     setName('')
     setObjective('')
     setSelectedFeature('')
+    setModel('')
     // Features ligadas a este repo (linkagem (a) filtrada por repo).
     void featuresApi.list().then((all) => {
       setFeatures(all.filter((f) => f.repos.some((l) => l.repoId === repo.id)))
@@ -47,7 +62,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const featureId = selectedFeature || undefined
 
   function confirm() {
-    onConfirm(name.trim() || undefined, featureId)
+    onConfirm(name.trim() || undefined, featureId, model || undefined)
     onClose()
   }
 
@@ -76,6 +91,26 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
             if (e.key === 'Enter') confirm()
           }}
         />
+
+        <div className="w-full">
+          <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Modelo</label>
+          <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+            {MODEL_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setModel(opt.value)}
+                className={`px-3 py-1.5 text-xs transition ${
+                  model === opt.value
+                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                    : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="w-full">
           <label className="mb-1 block text-xs text-[var(--color-text-dim)]">

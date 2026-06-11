@@ -112,6 +112,29 @@ export function darken(hex: string, amount = 0.22): string {
   return `#${out.toString(16).padStart(6, '0')}`
 }
 
+// Tema do xterm derivado dos tokens do app. Com o preset Ember reproduz
+// byte-a-byte o THEME que era hardcoded no Terminal (bg/text/accent/border/
+// surface/text-dim batem com os antigos background/foreground/cursor/...).
+export function xtermTheme(tokens: ThemeTokens): {
+  background: string
+  foreground: string
+  cursor: string
+  cursorAccent: string
+  selectionBackground: string
+  black: string
+  brightBlack: string
+} {
+  return {
+    background: tokens.bg,
+    foreground: tokens.text,
+    cursor: tokens.accent,
+    cursorAccent: tokens.bg,
+    selectionBackground: tokens.border,
+    black: tokens.surface,
+    brightBlack: tokens['text-dim'],
+  }
+}
+
 export function resolveTokens(pref: ThemePref | null | undefined): ThemeTokens {
   const preset = getPreset(pref?.presetId ?? DEFAULT_PRESET_ID)
   if (!pref?.accent) return preset.tokens

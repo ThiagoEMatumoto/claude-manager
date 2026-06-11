@@ -89,6 +89,10 @@ export interface SpawnSessionInput {
   // o nome de uma skill). Escrito no PTY no primeiro `data` da sessão, não como
   // flag de CLI — slash commands são input interativo do REPL.
   initialCommand?: string
+  // Modelo inicial da sessão (alias: 'opus' | 'sonnet' | 'haiku'). Validado
+  // contra whitelist no main e anexado ao spawn como `--model <alias>`.
+  // Ausente = default do claude.
+  model?: string
   cols?: number
   rows?: number
 }
@@ -568,6 +572,9 @@ export interface SessionActivity {
   lastText: string | null
   lastActivityAt: number | null
   tokens?: { output: number; context: number }
+  // Model id da última msg assistant do transcript (ex: 'claude-opus-4-...').
+  // Null até a primeira resposta — fonte de verdade pro ModelPill do Terminal.
+  model: string | null
 }
 
 // Snapshot de uma sessão viva (PTY rodando neste app) para a lista global "Agents".

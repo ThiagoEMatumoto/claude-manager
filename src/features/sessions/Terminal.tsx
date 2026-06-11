@@ -25,6 +25,8 @@ import {
   type EffortLevel,
 } from './ModelPill'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { xtermTheme } from '@/lib/themes'
+import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
 
 interface Props {
@@ -38,16 +40,6 @@ interface Props {
   onTitleChange?: (title: string) => void
   onReopen?: () => void
   onOpenSettings?: () => void
-}
-
-const THEME = {
-  background: '#0b0b0f',
-  foreground: '#e8e8ef',
-  cursor: '#ff7a45',
-  cursorAccent: '#0b0b0f',
-  selectionBackground: '#2a2a35',
-  black: '#14141b',
-  brightBlack: '#9c9cae',
 }
 
 interface StatusView {
@@ -280,7 +272,8 @@ export function Terminal({
     if (!host) return
 
     const term = new Xterm({
-      theme: THEME,
+      // Tema derivado dos tokens do app (Ember reproduz o antigo hardcoded).
+      theme: xtermTheme(getCurrentThemeTokens()),
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
       fontSize: useTerminalPrefsStore.getState().fontSize,
       scrollback: useTerminalPrefsStore.getState().scrollback,
@@ -435,12 +428,19 @@ export function Terminal({
     })
     observer.observe(host)
 
+    // Tema ao vivo: quando o tema do app muda (Configurações), re-deriva o
+    // tema do xterm sem recriar o terminal.
+    const offTheme = onThemeChange((tokens) => {
+      term.options.theme = xtermTheme(tokens)
+    })
+
     // O cleanup NÃO mata a sessão — só desfaz o xterm e os listeners. A sessão
     // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
       host.removeEventListener('contextmenu', onContextMenu)
       host.removeEventListener('paste', onPaste, true)
       observer.disconnect()
+      offTheme()
       setDataHandler(null)
       term.dispose()
       xtermRef.current = null
@@ -472,7 +472,7 @@ export function Terminal({
   return (
     <div className="flex h-full flex-col">
       <div
-        className="flex items-start justify-between gap-3 border-b border-l-2 border-[var(--color-border)] px-4 py-2 text-xs"
+        className="flex items-start justify-between gap-3 border-b border-l-2 border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-4 py-2 text-xs"
         style={projectColor ? { borderLeftColor: projectColor } : undefined}
       >
         <div className="flex min-w-0 flex-col gap-0.5">
@@ -540,19 +540,25 @@ export function Terminal({
           {!exited && (
             <div className="flex min-w-0 items-center gap-2">
               {statusView ? (
-                <span className={`flex items-center gap-1 ${statusView.className}`}>
+                <span
+                  className={`flex items-center gap-1 text-[11px] uppercase tracking-wider ${statusView.className}`}
+                >
                   <Icon
                     as={statusView.icon}
                     size={13}
-                    className={statusView.spin ? 'animate-spin' : undefined}
+                    className={
+                      statusView.spin ? 'animate-spin' : 'drop-shadow-[0_0_4px_currentColor]'
+                    }
                   />
                   {statusView.label}
                 </span>
               ) : activity?.status === 'ended' ? (
-                <span className="text-[var(--color-text-dim)]">encerrada</span>
+                <span className="text-[11px] uppercase tracking-wider text-[var(--color-text-dim)]">
+                  encerrada
+                </span>
               ) : (
-                <span className="flex items-center gap-1 text-[var(--color-success)]">
-                  <Icon as={Circle} size={9} className="fill-current" />
+                <span className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-[var(--color-success)]">
+                  <Icon as={Circle} size={9} className="fill-current drop-shadow-[0_0_4px_currentColor]" />
                   running
                 </span>
               )}

@@ -3,11 +3,31 @@ import { resolveTokens, type ThemePref, type ThemeTokens } from '@/lib/themes'
 
 const THEME_PREF_KEY = 'theme'
 
+// Sinal de mudança de tema: consumidores que não leem CSS vars (ex: o tema do
+// xterm) assinam aqui e recebem os tokens a cada applyTheme. Module-level
+// porque o tema é global e aplicado fora do React (boot + settings).
+type ThemeListener = (tokens: ThemeTokens) => void
+const listeners = new Set<ThemeListener>()
+let currentTokens: ThemeTokens = resolveTokens(null)
+
+export function getCurrentThemeTokens(): ThemeTokens {
+  return currentTokens
+}
+
+export function onThemeChange(fn: ThemeListener): () => void {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+
 export function applyTheme(tokens: ThemeTokens) {
   const root = document.documentElement
   for (const [key, value] of Object.entries(tokens)) {
     root.style.setProperty(`--color-${key}`, value)
   }
+  currentTokens = tokens
+  for (const fn of listeners) fn(tokens)
 }
 
 export function applyThemePref(pref: ThemePref | null | undefined) {

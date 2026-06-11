@@ -183,6 +183,8 @@ interface AppState {
     featureId?: string,
     name?: string,
     initialCommand?: string,
+    // Modelo inicial ('opus' | 'sonnet' | 'haiku'); validado no main.
+    model?: string,
   ) => Promise<void>
   // Sessão avulsa: spawn sem repo (cwd = scratch dir do backend).
   openQuickSession: () => Promise<void>
@@ -293,6 +295,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     featureId,
     name,
     initialCommand,
+    model,
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
@@ -301,6 +304,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       featureId,
       name,
       initialCommand,
+      model,
     })
     set((s) => ({
       panes: [

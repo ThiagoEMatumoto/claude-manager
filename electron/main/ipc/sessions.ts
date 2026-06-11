@@ -54,6 +54,10 @@ function shquote(s: string): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// Whitelist do --model no spawn: o valor vem do renderer (segmented control),
+// mas o main re-valida — nada fora desta lista chega à linha de comando.
+const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
+
 const toSession = (row: SessionRow): Session => ({
   id: row.id,
   repoId: row.repo_id,
@@ -297,6 +301,12 @@ export function registerSessionIpc(): void {
     if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
     const claudeCmd = resolveClaudeCommand()
     let innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}${mcpConfigArg()}`
+
+    // Modelo inicial: só anexa se o valor passar na whitelist (defesa em
+    // profundidade — o renderer também restringe, mas o main é a autoridade).
+    if (input.model && SPAWN_MODEL_WHITELIST.has(input.model)) {
+      innerCmd += ` --model ${shquote(input.model)}`
+    }
 
     // Fase 6: se a sessão é vinculada a uma feature, escreve um arquivo temporário
     // com o contexto (frontmatter-derivado + seções-chave do doc) e anexa via

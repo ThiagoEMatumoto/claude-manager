@@ -34,6 +34,8 @@ import type {
   TaskLink,
   CreateTaskInput,
   UpdateTaskInput,
+  SyncConfigureInput,
+  SyncResolveConflictInput,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -202,6 +204,14 @@ const api: Api = {
   },
   mcp: {
     status: () => invoke('mcp:status'),
+  },
+  sync: {
+    status: () => invoke('sync:status'),
+    configure: (input: SyncConfigureInput) => invoke('sync:configure', input),
+    now: () => invoke('sync:now'),
+    exportForce: () => invoke('sync:export-force'),
+    importForce: () => invoke('sync:import-force'),
+    resolveConflict: (input: SyncResolveConflictInput) => invoke('sync:resolve-conflict', input),
   },
   window: {
     minimize: () => invoke('window:minimize'),

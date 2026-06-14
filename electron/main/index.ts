@@ -17,6 +17,7 @@ import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
+import { registerSyncIpc, syncOnBoot } from './ipc/sync'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -91,7 +92,7 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
   // textarea do xterm — resultado é colar 2x. Campos de input normais continuam
@@ -118,7 +119,15 @@ app.whenReady().then(() => {
   registerObjectivesIpc()
   registerTasksIpc()
   registerMcpIpc()
+  registerSyncIpc()
   registerWindowIpc()
+
+  // Pull-no-boot CONSERVADOR: importa só fast-forward limpo (sem trabalho local
+  // não-empurrado), bounded por timeout e NÃO-fatal (offline/erro → segue boot
+  // com dados locais). Roda ANTES da janela para que o renderer leia o estado
+  // já reconciliado. Watcher ainda não foi iniciado aqui (startFeatureWatcher
+  // vem depois), então o importBundle reconcilia os .md sem corrida.
+  await syncOnBoot()
 
   createMainWindow()
   initUpdater()

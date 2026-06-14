@@ -875,6 +875,43 @@ export interface McpStatus {
   addCommand: string | null
 }
 
+// ---- Sincronização git-backed (Fase 2) ----
+
+export interface SyncGitStatus {
+  dirty: boolean
+  ahead: number
+  behind: number
+  lastCommit: string | null
+}
+
+// Snapshot agregado para a aba Sync: config machine-local + git + schema.
+export interface SyncStatus {
+  configured: boolean
+  repoUrl: string | null
+  machineId: string
+  lastPullAt: number | null
+  lastPushAt: number | null
+  schemaVersion: number
+  // null quando não configurado ou git indisponível (offline/erro).
+  git: SyncGitStatus | null
+}
+
+export interface SyncConfigureInput {
+  repoUrl: string
+}
+
+export interface SyncResolveConflictInput {
+  keep: 'local' | 'remote'
+}
+
+// Resultado de uma operação de sync. 'conflict' carrega ahead/behind p/ a UI.
+export type SyncNowResult =
+  | { state: 'not-configured' }
+  | { state: 'up-to-date' }
+  | { state: 'pushed' }
+  | { state: 'pulled' }
+  | { state: 'conflict'; ahead: number; behind: number }
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -1021,6 +1058,14 @@ export interface Api {
   }
   mcp: {
     status(): Promise<McpStatus>
+  }
+  sync: {
+    status(): Promise<SyncStatus>
+    configure(input: SyncConfigureInput): Promise<SyncStatus>
+    now(): Promise<SyncNowResult>
+    exportForce(): Promise<SyncNowResult>
+    importForce(): Promise<SyncNowResult>
+    resolveConflict(input: SyncResolveConflictInput): Promise<SyncNowResult>
   }
   window: {
     minimize(): Promise<void>

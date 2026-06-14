@@ -1,21 +1,31 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, AlertTriangle, CloudOff, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
+import {
+  CheckCircle2,
+  AlertTriangle,
+  CloudOff,
+  ArrowUp,
+  ArrowDown,
+  RefreshCw,
+  Download,
+  Upload,
+} from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { dialogApi, syncApi } from '@/lib/ipc'
-import type { SyncStatus, SyncNowResult } from '../../../shared/types/ipc'
+import type { SyncStatus, SyncNowResult, SyncBackupResult } from '../../../shared/types/ipc'
 
 interface Props {
   open: boolean
 }
 
-type ActionKey = 'configure' | 'now' | 'export' | 'import' | 'resolve'
+type ActionKey = 'configure' | 'now' | 'export' | 'import' | 'resolve' | 'backup'
 
 // Confirmação destrutiva inline: qual ação está aguardando confirmação.
 type PendingConfirm =
   | { kind: 'export-force' }
   | { kind: 'import-force' }
   | { kind: 'resolve'; keep: 'local' | 'remote' }
+  | { kind: 'backup-import' }
   | null
 
 function formatTimestamp(ms: number | null): string {
@@ -131,6 +141,31 @@ export function SyncTab({ open }: Props) {
     setPending({ kind: 'resolve', keep })
   }
 
+  function requestBackupImport() {
+    setPending({ kind: 'backup-import' })
+  }
+
+  // Descreve o resultado de um backup (independente do git).
+  function describeBackup(r: SyncBackupResult): string | null {
+    switch (r.state) {
+      case 'canceled':
+        return null // usuário fechou o dialog → sem feedback
+      case 'exported':
+        return `Backup salvo em ${r.path}`
+      case 'imported':
+        return `Backup restaurado de ${r.path}`
+    }
+  }
+
+  // Export de backup: NÃO é destrutivo (não toca dados locais) → sem confirmação.
+  async function backupExport() {
+    await run('backup', async () => {
+      const r = await syncApi.backupExport()
+      const msg = describeBackup(r)
+      if (msg) setMessage(msg)
+    })
+  }
+
   async function confirmPending() {
     if (!pending) return
     const action = pending
@@ -144,6 +179,12 @@ export function SyncTab({ open }: Props) {
       await run('import', async () => {
         const r = await syncApi.importForce()
         applyResult(r)
+      })
+    } else if (action.kind === 'backup-import') {
+      await run('backup', async () => {
+        const r = await syncApi.backupImport()
+        const msg = describeBackup(r)
+        if (msg) setMessage(msg)
       })
     } else {
       await run('resolve', async () => {
@@ -350,6 +391,26 @@ export function SyncTab({ open }: Props) {
           </Section>
         </>
       )}
+
+      {/* Backup manual — independente do sync git; visível sempre. */}
+      {status !== null && (
+        <Section title="Backup manual">
+          <p className="mb-3 text-xs text-[var(--color-text-dim)]">
+            Exporte um arquivo <span className="font-mono">.zip</span> restaurável para onde quiser
+            (não depende de repositório Git). Importar substitui os dados desta máquina.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" loading={busy === 'backup'} onClick={backupExport}>
+              <Download className="h-4 w-4" />
+              Exportar backup (.zip)
+            </Button>
+            <Button variant="ghost" loading={busy === 'backup'} onClick={requestBackupImport}>
+              <Upload className="h-4 w-4" />
+              Importar backup (.zip)
+            </Button>
+          </div>
+        </Section>
+      )}
     </div>
   )
 }
@@ -456,9 +517,11 @@ function ConfirmBanner({
       ? 'Isto vai SOBRESCREVER os dados no repositório remoto com os desta máquina. Continuar?'
       : pending.kind === 'import-force'
         ? 'Isto vai SOBRESCREVER os dados desta máquina com os do remoto. Continuar?'
-        : pending.keep === 'local'
-          ? 'Manter esta máquina vai SOBRESCREVER o remoto. Continuar?'
-          : 'Usar a outra máquina vai SOBRESCREVER os dados locais. Continuar?'
+        : pending.kind === 'backup-import'
+          ? 'Importar o backup vai SOBRESCREVER os dados desta máquina pelos do arquivo .zip. Continuar?'
+          : pending.keep === 'local'
+            ? 'Manter esta máquina vai SOBRESCREVER o remoto. Continuar?'
+            : 'Usar a outra máquina vai SOBRESCREVER os dados locais. Continuar?'
 
   return (
     <div className="rounded-md border border-[var(--color-danger)] bg-[var(--color-danger)]/10 p-3">

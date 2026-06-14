@@ -947,6 +947,13 @@ export type SyncNowResult =
   | { state: 'pulled' }
   | { state: 'conflict'; ahead: number; behind: number }
 
+// Resultado de um backup manual em .zip (independente do git). 'canceled' =
+// o usuário fechou o dialog. 'exported'/'imported' carregam o path do .zip.
+export type SyncBackupResult =
+  | { state: 'canceled' }
+  | { state: 'exported'; path: string }
+  | { state: 'imported'; path: string }
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -1102,6 +1109,9 @@ export interface Api {
     exportForce(): Promise<SyncNowResult>
     importForce(): Promise<SyncNowResult>
     resolveConflict(input: SyncResolveConflictInput): Promise<SyncNowResult>
+    // Backup manual em .zip (independente do git; abre dialog no main).
+    backupExport(): Promise<SyncBackupResult>
+    backupImport(): Promise<SyncBackupResult>
   }
   window: {
     minimize(): Promise<void>

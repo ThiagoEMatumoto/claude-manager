@@ -1,8 +1,9 @@
-import { app, ipcMain } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { startFeatureWatcher, stopFeatureWatcher } from '../services/feature-store'
+import { exportBackup, importBackup } from '../services/sync/backup'
 import {
   applyRemote,
   bundleDirFor,
@@ -15,6 +16,7 @@ import { importBundle } from '../services/sync/importer'
 import { readSyncConfig, updateSyncConfig } from '../services/sync/sync-config'
 import { SyncCoordinator, type SyncCoordinatorState } from '../services/sync/coordinator'
 import type {
+  SyncBackupResult,
   SyncConfigureInput,
   SyncNowResult,
   SyncResolveConflictInput,
@@ -301,6 +303,44 @@ export function registerSyncIpc(): void {
       return { state: 'pulled' }
     },
   )
+
+  // ---- Backup manual em .zip (INDEPENDENTE do git/sync) ----
+  //
+  // Funciona MESMO SEM repo configurado. Export abre um save-dialog; import um
+  // open-dialog (DESTRUTIVO replace-all, a UI confirma antes de chamar).
+
+  ipcMain.handle('sync:backup-export', async (): Promise<SyncBackupResult> => {
+    const defaultName = `claude-manager-backup-${backupDateStamp()}.zip`
+    const res = await dialog.showSaveDialog({
+      title: 'Salvar backup',
+      defaultPath: defaultName,
+      filters: [{ name: 'Zip', extensions: ['zip'] }],
+    })
+    if (res.canceled || !res.filePath) return { state: 'canceled' }
+    const path = exportBackup(getDb(), res.filePath, { projectsRoot: projectsRoot() })
+    return { state: 'exported', path }
+  })
+
+  ipcMain.handle('sync:backup-import', async (): Promise<SyncBackupResult> => {
+    const res = await dialog.showOpenDialog({
+      title: 'Importar backup',
+      properties: ['openFile'],
+      filters: [{ name: 'Zip', extensions: ['zip'] }],
+    })
+    if (res.canceled || res.filePaths.length === 0) return { state: 'canceled' }
+    const path = res.filePaths[0]
+    // Mesmos hooks de watcher do import normal (pausa/reinicia o chokidar) +
+    // projectsRoot local (resolve <CM_ROOT>/... do backup contra esta máquina).
+    importBackup(getDb(), path, watcherHooks())
+    return { state: 'imported', path }
+  })
+}
+
+// AAAA-MM-DD em horário local para o nome default do arquivo de backup.
+function backupDateStamp(): string {
+  const d = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 // ---- boot ----

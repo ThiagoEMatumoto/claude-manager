@@ -214,6 +214,8 @@ const api: Api = {
     exportForce: () => invoke('sync:export-force'),
     importForce: () => invoke('sync:import-force'),
     resolveConflict: (input: SyncResolveConflictInput) => invoke('sync:resolve-conflict', input),
+    backupExport: () => invoke('sync:backup-export'),
+    backupImport: () => invoke('sync:backup-import'),
   },
   window: {
     minimize: () => invoke('window:minimize'),

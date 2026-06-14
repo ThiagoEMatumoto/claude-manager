@@ -11,6 +11,11 @@ export interface SyncConfig {
   machineId: string
   lastPullAt: number | null
   lastPushAt: number | null
+  // Raiz absoluta dos projetos NESTA máquina (ex: /home/x/ClaudeManager no Linux,
+  // /Users/y/ClaudeManager no Mac). Machine-local (NÃO vai pro repo). Paths sob
+  // ela viram <CM_ROOT>/... no bundle → portáveis entre máquinas. null = não
+  // configurada (paths exportados ficam absolutos).
+  projectsRoot: string | null
 }
 
 function defaultConfigPath(): string {
@@ -18,7 +23,13 @@ function defaultConfigPath(): string {
 }
 
 function freshConfig(): SyncConfig {
-  return { repoUrl: null, machineId: randomUUID(), lastPullAt: null, lastPushAt: null }
+  return {
+    repoUrl: null,
+    machineId: randomUUID(),
+    lastPullAt: null,
+    lastPushAt: null,
+    projectsRoot: null,
+  }
 }
 
 // Lê a config (criando uma com machineId novo se ainda não existe). O machineId
@@ -39,6 +50,7 @@ export function readSyncConfig(path: string = defaultConfigPath()): SyncConfig {
     machineId: typeof parsed.machineId === 'string' && parsed.machineId ? parsed.machineId : randomUUID(),
     lastPullAt: typeof parsed.lastPullAt === 'number' ? parsed.lastPullAt : null,
     lastPushAt: typeof parsed.lastPushAt === 'number' ? parsed.lastPushAt : null,
+    projectsRoot: typeof parsed.projectsRoot === 'string' ? parsed.projectsRoot : null,
   }
   if (cfg.machineId !== parsed.machineId) writeSyncConfig(cfg, path)
   return cfg

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, AlertTriangle, CloudOff, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { syncApi } from '@/lib/ipc'
+import { dialogApi, syncApi } from '@/lib/ipc'
 import type { SyncStatus, SyncNowResult } from '../../../shared/types/ipc'
 
 interface Props {
@@ -98,6 +98,16 @@ export function SyncTab({ open }: Props) {
     }
     await run('configure', async () => {
       const s = await syncApi.configure({ repoUrl: url })
+      setStatus(s)
+    })
+  }
+
+  // Abre o folder picker e grava a pasta-raiz dos projetos desta máquina.
+  async function pickProjectsRoot() {
+    const picked = await dialogApi.openDirectory()
+    if (!picked) return
+    await run('configure', async () => {
+      const s = await syncApi.setProjectsRoot({ root: picked })
       setStatus(s)
     })
   }
@@ -228,6 +238,26 @@ export function SyncTab({ open }: Props) {
             </div>
             <div className="mt-2 text-xs text-[var(--color-text-dim)]">
               Esta máquina: <span className="font-mono">{status.machineId}</span>
+            </div>
+          </Section>
+
+          {/* Pasta-raiz dos projetos (portabilidade entre máquinas) */}
+          <Section title="Pasta-raiz dos projetos">
+            <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+              A pasta onde seus projetos vivem NESTA máquina. Caminhos abaixo dela são
+              sincronizados de forma portável (cada máquina resolve contra a sua própria raiz).
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-3 py-1.5 text-sm">
+                {status.projectsRoot ? (
+                  <span className="font-mono">{status.projectsRoot}</span>
+                ) : (
+                  <span className="text-[var(--color-text-dim)]">não definida</span>
+                )}
+              </div>
+              <Button variant="ghost" loading={busy === 'configure'} onClick={pickProjectsRoot}>
+                Escolher pasta…
+              </Button>
             </div>
           </Section>
 

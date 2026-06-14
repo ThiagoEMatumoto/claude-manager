@@ -18,6 +18,7 @@ import type {
   SyncConfigureInput,
   SyncNowResult,
   SyncResolveConflictInput,
+  SyncSetProjectsRootInput,
   SyncState,
   SyncStatus,
 } from '../../../shared/types/ipc'
@@ -80,6 +81,7 @@ async function buildStatus(): Promise<SyncStatus> {
     configured,
     repoUrl: cfg.repoUrl,
     machineId: cfg.machineId,
+    projectsRoot: cfg.projectsRoot,
     lastPullAt: cfg.lastPullAt,
     lastPushAt: cfg.lastPushAt,
     schemaVersion,
@@ -116,6 +118,7 @@ export const syncCoordinator = new SyncCoordinator({
   getDb,
   isConfigured,
   commitMessage,
+  syncOpts: gitSyncOpts,
   onState: (state: SyncCoordinatorState, info) => {
     if (state === 'syncing') setSyncState('syncing')
     else if (state === 'conflict') setSyncState('conflict')
@@ -164,7 +167,7 @@ async function syncNow(): Promise<SyncNowResult> {
   }
 
   // Nada a baixar com segurança → empurra estado local.
-  const res = await pushBundle(workdir(), getDb(), commitMessage())
+  const res = await pushBundle(workdir(), getDb(), commitMessage(), gitSyncOpts())
   if (res.rejected) {
     // origin avançou entre o pull e o push → conflito.
     const after = await pull(workdir())
@@ -185,7 +188,20 @@ function commitMessage(): string {
   return `chore(sync): bundle from ${cfg.machineId} @ ${new Date().toISOString()}`
 }
 
-// Hooks reais do watcher para o importBundle (pausa/reinicia o chokidar).
+// Raiz dos projetos desta máquina (machine-local). Lida fresca a cada uso para
+// refletir mudanças via sync:set-projects-root sem reiniciar.
+function projectsRoot(): string | null {
+  return readSyncConfig().projectsRoot
+}
+
+// Opções de export repassadas ao pushBundle: injeta o projectsRoot local para
+// que os paths sob a raiz virem <CM_ROOT>/... no bundle (portáveis entre máquinas).
+function gitSyncOpts() {
+  return { exportOpts: { projectsRoot: projectsRoot() } }
+}
+
+// Hooks reais do watcher para o importBundle (pausa/reinicia o chokidar) +
+// projectsRoot local (resolve <CM_ROOT>/... do bundle contra esta máquina).
 // `active` = o watcher está rodando AGORA (boot ainda não o iniciou → false,
 // então o import não o reinicia prematuramente; o boot o inicia depois).
 function watcherHooks(active = true) {
@@ -193,6 +209,7 @@ function watcherHooks(active = true) {
     stopWatcher: stopFeatureWatcher,
     startWatcher: startFeatureWatcher,
     watcherWasActive: active,
+    projectsRoot: projectsRoot(),
   }
 }
 
@@ -207,12 +224,26 @@ export function registerSyncIpc(): void {
     return buildStatus()
   })
 
+  // Define a pasta-raiz dos projetos desta máquina (machine-local). String vazia
+  // → null (limpa a raiz). Não dispara sync; o próximo push/import já usa o valor.
+  ipcMain.handle(
+    'sync:set-projects-root',
+    async (_e, input: SyncSetProjectsRootInput): Promise<SyncStatus> => {
+      const root = input.root && input.root.trim().length > 0 ? input.root.trim() : null
+      updateSyncConfig({ projectsRoot: root })
+      return buildStatus()
+    },
+  )
+
   ipcMain.handle('sync:now', (): Promise<SyncNowResult> => syncNow())
 
   // Sobrescreve o REMOTO com o estado local (push --force).
   ipcMain.handle('sync:export-force', async (): Promise<SyncNowResult> => {
     if (!isConfigured()) return { state: 'not-configured' }
-    const res = await pushBundle(workdir(), getDb(), commitMessage(), { force: true })
+    const res = await pushBundle(workdir(), getDb(), commitMessage(), {
+      ...gitSyncOpts(),
+      force: true,
+    })
     if (res.pushed) {
       updateSyncConfig({ lastPushAt: Date.now() })
       setSyncState('in-sync')
@@ -248,7 +279,10 @@ export function registerSyncIpc(): void {
     async (_e, input: SyncResolveConflictInput): Promise<SyncNowResult> => {
       if (!isConfigured()) return { state: 'not-configured' }
       if (input.keep === 'local') {
-        const res = await pushBundle(workdir(), getDb(), commitMessage(), { force: true })
+        const res = await pushBundle(workdir(), getDb(), commitMessage(), {
+          ...gitSyncOpts(),
+          force: true,
+        })
         if (res.pushed) updateSyncConfig({ lastPushAt: Date.now() })
         setSyncState('in-sync')
         return { state: 'pushed' }

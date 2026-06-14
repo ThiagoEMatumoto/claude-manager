@@ -327,3 +327,199 @@ describe('sync bundle export/import', () => {
     dbB.close()
   })
 })
+
+// ---- Portabilidade de paths (raiz por máquina) ----
+//
+// Seed específico de portabilidade: paths de projeto/repo/worktree, alguns SOB
+// a raiz e outros FORA dela, para exercitar portablize/localize.
+function seedPortable(db: Database.Database, root: string): void {
+  const t = 1_700_000_000_000
+  // proj-1: vault SOB a raiz; proj-2: vault FORA da raiz (path absoluto alheio).
+  db.prepare(
+    `INSERT INTO projects (id, name, vault_path, created_at, updated_at, position) VALUES (?,?,?,?,?,?)`,
+  ).run('proj-1', 'P1', join(root, 'projetos', 'p1'), t, t, 0)
+  db.prepare(
+    `INSERT INTO projects (id, name, vault_path, created_at, updated_at, position) VALUES (?,?,?,?,?,?)`,
+  ).run('proj-2', 'P2', '/opt/elsewhere/p2', t, t, 1)
+  // proj-3: vault NULL (campo opcional) — deve passar intacto.
+  db.prepare(
+    `INSERT INTO projects (id, name, created_at, updated_at, position) VALUES (?,?,?,?,?)`,
+  ).run('proj-3', 'P3', t, t, 2)
+
+  // repo-1 SOB a raiz; repo-2 FORA.
+  db.prepare(
+    `INSERT INTO repos (id, project_id, label, path, position, created_at, link_kind) VALUES (?,?,?,?,?,?,?)`,
+  ).run('repo-1', 'proj-1', 'core', join(root, 'projetos', 'p1', 'core'), 0, t, 'inside')
+  db.prepare(
+    `INSERT INTO repos (id, project_id, label, path, position, created_at, link_kind) VALUES (?,?,?,?,?,?,?)`,
+  ).run('repo-2', 'proj-2', 'ext', '/opt/elsewhere/p2/ext', 1, t, 'external')
+
+  db.prepare(
+    `INSERT INTO features (id, project_id, slug, title, status, doc_path, synth_mode, created_at, updated_at, origin)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  ).run('feat-1', 'proj-1', 'f', 'F', 'pending', '/x/proj-1/f.md', 'manual', t, t, 'manual')
+  // worktree SOB a raiz.
+  db.prepare(
+    `INSERT INTO feature_repos (feature_id, repo_id, branch, worktree_path) VALUES (?,?,?,?)`,
+  ).run('feat-1', 'repo-1', 'feat/x', join(root, 'projetos', 'p1', 'core', '.worktrees', 'x'))
+  // worktree NULL — deve passar intacto.
+  db.prepare(
+    `INSERT INTO feature_repos (feature_id, repo_id, branch, worktree_path) VALUES (?,?,?,?)`,
+  ).run('feat-1', 'repo-2', null, null)
+}
+
+function ndjson(bundleDir: string, table: string): Array<Record<string, unknown>> {
+  const raw = readFileSync(join(bundleDir, 'tables', `${table}.ndjson`), 'utf8')
+  return raw
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
+}
+
+describe('sync portabilidade de paths (raiz por máquina)', () => {
+  const rootA = '/home/x/ClaudeManager'
+  const rootB = '/Users/y/ClaudeManager'
+
+  it('1. export sob raiz vira <CM_ROOT>/...; fora da raiz fica absoluto; NULL intacto', () => {
+    const db = newDb()
+    seedPortable(db, rootA)
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(db, bundleDir, {
+      featuresRoot: tmp('sync-feat-'),
+      exportedAt: 1,
+      projectsRoot: rootA,
+    })
+
+    const repos = ndjson(bundleDir, 'repos')
+    const r1 = repos.find((r) => r.id === 'repo-1')!
+    const r2 = repos.find((r) => r.id === 'repo-2')!
+    expect(r1.path).toBe('<CM_ROOT>/projetos/p1/core') // sob a raiz → portável
+    expect(r2.path).toBe('/opt/elsewhere/p2/ext') // fora → absoluto inalterado
+
+    const projects = ndjson(bundleDir, 'projects')
+    expect(projects.find((p) => p.id === 'proj-1')!.vault_path).toBe('<CM_ROOT>/projetos/p1')
+    expect(projects.find((p) => p.id === 'proj-2')!.vault_path).toBe('/opt/elsewhere/p2')
+    expect(projects.find((p) => p.id === 'proj-3')!.vault_path).toBe(null) // NULL intacto
+
+    const fr = ndjson(bundleDir, 'feature_repos')
+    const w1 = fr.find((f) => f.repo_id === 'repo-1')!
+    const w2 = fr.find((f) => f.repo_id === 'repo-2')!
+    expect(w1.worktree_path).toBe('<CM_ROOT>/projetos/p1/core/.worktrees/x')
+    expect(w2.worktree_path).toBe(null) // NULL intacto
+
+    db.close()
+  })
+
+  it('2. import resolve <CM_ROOT>/... contra raiz LOCAL diferente (cross-root)', () => {
+    const dbA = newDb()
+    seedPortable(dbA, rootA)
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(dbA, bundleDir, {
+      featuresRoot: tmp('sync-feat-'),
+      exportedAt: 1,
+      projectsRoot: rootA,
+    })
+
+    const dbB = newDb()
+    importBundle(dbB, bundleDir, {
+      featuresRoot: tmp('sync-feat-b-'),
+      ...noopWatcher,
+      projectsRoot: rootB, // raiz da OUTRA máquina
+    })
+
+    const r1 = dbB.prepare(`SELECT path FROM repos WHERE id='repo-1'`).get() as { path: string }
+    const r2 = dbB.prepare(`SELECT path FROM repos WHERE id='repo-2'`).get() as { path: string }
+    expect(r1.path).toBe(join(rootB, 'projetos/p1/core')) // resolveu contra rootB
+    expect(r2.path).toBe('/opt/elsewhere/p2/ext') // absoluto alheio inalterado
+
+    const p1 = dbB
+      .prepare(`SELECT vault_path FROM projects WHERE id='proj-1'`)
+      .get() as { vault_path: string }
+    expect(p1.vault_path).toBe(join(rootB, 'projetos/p1'))
+    const p3 = dbB
+      .prepare(`SELECT vault_path FROM projects WHERE id='proj-3'`)
+      .get() as { vault_path: string | null }
+    expect(p3.vault_path).toBe(null)
+
+    const w1 = dbB
+      .prepare(`SELECT worktree_path FROM feature_repos WHERE repo_id='repo-1'`)
+      .get() as { worktree_path: string }
+    expect(w1.worktree_path).toBe(join(rootB, 'projetos/p1/core/.worktrees/x'))
+
+    dbA.close()
+    dbB.close()
+  })
+
+  it('3. determinismo cross-root: mesmos dados sob raízes diferentes → ndjson idêntico', () => {
+    // Máquina A: dados sob rootA. Máquina B: dados estruturalmente iguais sob rootB.
+    const dbA = newDb()
+    seedPortable(dbA, rootA)
+    const dbB = newDb()
+    seedPortable(dbB, rootB)
+
+    const bA = tmp('sync-bundle-a-')
+    const bB = tmp('sync-bundle-b-')
+    exportBundle(dbA, bA, { featuresRoot: tmp('feat-a-'), exportedAt: 7, projectsRoot: rootA })
+    exportBundle(dbB, bB, { featuresRoot: tmp('feat-b-'), exportedAt: 7, projectsRoot: rootB })
+
+    // Os ndjson das tabelas com path são IDÊNTICOS: o sentinela some a diferença
+    // de máquina (o que mantém o diff git limpo no commit cross-máquina).
+    for (const table of ['projects', 'repos', 'feature_repos']) {
+      const fA = readFileSync(join(bA, 'tables', `${table}.ndjson`), 'utf8')
+      const fB = readFileSync(join(bB, 'tables', `${table}.ndjson`), 'utf8')
+      expect(fB, `ndjson ${table} cross-root`).toBe(fA)
+    }
+
+    dbA.close()
+    dbB.close()
+  })
+
+  it('4. backward-compat: bundle legado (paths absolutos, sem sentinela) importa intacto', () => {
+    // Export SEM projectsRoot → paths ficam absolutos (como bundles pré-feature).
+    const dbA = newDb()
+    seedPortable(dbA, rootA)
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(dbA, bundleDir, { featuresRoot: tmp('sync-feat-'), exportedAt: 1 })
+
+    // Sem projectsRoot no export, nenhum path tem sentinela.
+    const repos = ndjson(bundleDir, 'repos')
+    expect(repos.find((r) => r.id === 'repo-1')!.path).toBe(join(rootA, 'projetos/p1/core'))
+
+    // Import COM raiz local: como não há sentinela, paths absolutos passam intactos.
+    const dbB = newDb()
+    importBundle(dbB, bundleDir, {
+      featuresRoot: tmp('sync-feat-b-'),
+      ...noopWatcher,
+      projectsRoot: rootB,
+    })
+    const r1 = dbB.prepare(`SELECT path FROM repos WHERE id='repo-1'`).get() as { path: string }
+    expect(r1.path).toBe(join(rootA, 'projetos/p1/core')) // absoluto legado inalterado
+
+    dbA.close()
+    dbB.close()
+  })
+
+  it('5. round-trip same-root: A → export(rootA) → import(rootA) → igualdade linha-a-linha', () => {
+    const dbA = newDb()
+    seedPortable(dbA, rootA)
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(dbA, bundleDir, {
+      featuresRoot: tmp('sync-feat-'),
+      exportedAt: 1,
+      projectsRoot: rootA,
+    })
+
+    const dbB = newDb()
+    importBundle(dbB, bundleDir, {
+      featuresRoot: tmp('sync-feat-b-'),
+      ...noopWatcher,
+      projectsRoot: rootA, // MESMA raiz → deve reconstruir exatamente o original
+    })
+
+    for (const table of ['projects', 'repos', 'feature_repos', 'features']) {
+      expect(dumpTable(dbB, table), `tabela ${table}`).toEqual(dumpTable(dbA, table))
+    }
+    dbA.close()
+    dbB.close()
+  })
+})

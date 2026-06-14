@@ -6,10 +6,12 @@ import { join } from 'node:path'
 import {
   type BundleManifest,
   type SyncedTable,
+  PATH_COLUMNS,
   SYNCED_TABLES,
   TABLE_PRIMARY_KEYS,
   featuresDir,
   manifestPath,
+  portablizePath,
   stableStringify,
   tableFilePath,
   tablesDir,
@@ -23,6 +25,10 @@ export interface ExportOpts {
   appVersion?: string
   machineId?: string
   exportedAt?: number // injetável p/ testes de determinismo; default = Date.now()
+  // Raiz absoluta dos projetos NESTA máquina. Paths sob ela viram <CM_ROOT>/...
+  // (determinístico entre máquinas). null/ausente = paths exportados ficam
+  // absolutos. Injetável p/ teste; produção passa o projectsRoot da sync-config.
+  projectsRoot?: string | null
 }
 
 function resolveFeaturesRoot(opts?: ExportOpts): string {
@@ -52,20 +58,31 @@ function tableColumns(db: Database.Database, table: string): string[] {
 // Escreve uma tabela como .ndjson determinístico: SELECT * ORDER BY <pk>, cada
 // row é um objeto {coluna: valor} serializado com stableStringify (chaves
 // ordenadas), uma por linha, com \n final.
-function writeTable(db: Database.Database, bundleDir: string, table: SyncedTable): void {
+function writeTable(
+  db: Database.Database,
+  bundleDir: string,
+  table: SyncedTable,
+  projectsRoot: string | null,
+): void {
   const cols = tableColumns(db, table)
   const pk = TABLE_PRIMARY_KEYS[table]
   const orderBy = pk.map((c) => `"${c}" ASC`).join(', ')
   const rows = db.prepare(`SELECT * FROM "${table}" ORDER BY ${orderBy}`).all() as Array<
     Record<string, unknown>
   >
+  const pathCols = new Set(PATH_COLUMNS[table] ?? [])
 
   const lines = rows.map((row) => {
     // Reconstrói o objeto na ordem de colunas do schema (stableStringify
     // reordena alfabeticamente de qualquer forma; isto só garante presença das
     // colunas mesmo quando o valor é null/undefined no driver).
     const obj: Record<string, unknown> = {}
-    for (const c of cols) obj[c] = row[c] ?? null
+    for (const c of cols) {
+      const v = row[c] ?? null
+      // Paths sob a raiz desta máquina viram <CM_ROOT>/... → portáveis entre
+      // máquinas (some do diff). NULL passa intacto (portablizePath é no-op).
+      obj[c] = pathCols.has(c) ? portablizePath(v, projectsRoot) : v
+    }
     return stableStringify(obj)
   })
 
@@ -130,8 +147,9 @@ export function exportBundle(
 
   mkdirSync(tablesDir(bundleDir), { recursive: true })
 
+  const projectsRoot = opts?.projectsRoot ?? null
   for (const table of SYNCED_TABLES) {
-    writeTable(db, bundleDir, table)
+    writeTable(db, bundleDir, table, projectsRoot)
   }
 
   copyFeatures(bundleDir, resolveFeaturesRoot(opts))

@@ -265,9 +265,16 @@ describe('git-sync', () => {
     const reread = readSyncConfig(cfgPath)
     expect(reread).toEqual(updated)
 
-    // O arquivo NÃO contém nenhum token/segredo (só os 4 campos da config).
+    // O arquivo NÃO contém nenhum token/segredo (só os campos machine-local da
+    // config: repoUrl, machineId, timestamps e a raiz local dos projetos).
     const raw = JSON.parse(readFileSync(cfgPath, 'utf8'))
-    expect(Object.keys(raw).sort()).toEqual(['lastPullAt', 'lastPushAt', 'machineId', 'repoUrl'])
+    expect(Object.keys(raw).sort()).toEqual([
+      'lastPullAt',
+      'lastPushAt',
+      'machineId',
+      'projectsRoot',
+      'repoUrl',
+    ])
   })
 
   it('status reporta ahead após commit local não-empurrado', async () => {

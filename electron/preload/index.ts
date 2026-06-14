@@ -36,6 +36,7 @@ import type {
   UpdateTaskInput,
   SyncConfigureInput,
   SyncResolveConflictInput,
+  SyncSetProjectsRootInput,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -208,6 +209,7 @@ const api: Api = {
   sync: {
     status: () => invoke('sync:status'),
     configure: (input: SyncConfigureInput) => invoke('sync:configure', input),
+    setProjectsRoot: (input: SyncSetProjectsRootInput) => invoke('sync:set-projects-root', input),
     now: () => invoke('sync:now'),
     exportForce: () => invoke('sync:export-force'),
     importForce: () => invoke('sync:import-force'),

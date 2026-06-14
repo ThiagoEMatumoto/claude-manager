@@ -12,8 +12,10 @@ import { join } from 'node:path'
 import { markSelfWrite, startFeatureWatcher, stopFeatureWatcher } from '../feature-store'
 import {
   type SyncedTable,
+  PATH_COLUMNS,
   SYNCED_TABLES,
   featuresDir,
+  localizePath,
   manifestPath,
   tableFilePath,
 } from './bundle-format'
@@ -28,6 +30,11 @@ export interface ImportOpts {
   markSelfWrite?: (path: string) => void
   // Indica se o watcher estava ativo (para reiniciar no finally). Default false.
   watcherWasActive?: boolean
+  // Raiz absoluta dos projetos NESTA máquina. Paths <CM_ROOT>/... do bundle são
+  // resolvidos contra ela (portabilidade cross-root). null/ausente = sentinela
+  // resolvido best-effort (path relativo). Paths absolutos legados passam
+  // intactos. Injetável p/ teste; produção passa o projectsRoot da sync-config.
+  projectsRoot?: string | null
 }
 
 function resolveFeaturesRoot(opts?: ImportOpts): string {
@@ -129,6 +136,7 @@ export function importBundle(db: Database.Database, bundleDir: string, opts?: Im
   const stop = opts?.stopWatcher ?? stopFeatureWatcher
   const start = opts?.startWatcher ?? startFeatureWatcher
   const mark = opts?.markSelfWrite ?? markSelfWrite
+  const projectsRoot = opts?.projectsRoot ?? null
 
   const { schemaVersion } = readManifest(bundleDir)
   const local = localSchemaVersion(db)
@@ -160,12 +168,19 @@ export function importBundle(db: Database.Database, bundleDir: string, opts?: Im
         const rows = tableData.get(table) ?? []
         if (rows.length === 0) continue
         const cols = tableColumns(db, table)
+        const pathCols = new Set(PATH_COLUMNS[table] ?? [])
         const placeholders = cols.map((c) => `@${c}`).join(', ')
         const colList = cols.map((c) => `"${c}"`).join(', ')
         const ins = db.prepare(`INSERT INTO "${table}" (${colList}) VALUES (${placeholders})`)
         for (const row of rows) {
           const params: Record<string, unknown> = {}
-          for (const c of cols) params[c] = row[c] ?? null
+          for (const c of cols) {
+            const v = row[c] ?? null
+            // <CM_ROOT>/... → resolve contra a raiz LOCAL; absoluto legado passa
+            // intacto; NULL intacto. (unresolved é ignorado aqui — sem raiz local
+            // o path fica relativo/quebrado, mas o import não falha.)
+            params[c] = pathCols.has(c) ? localizePath(v, projectsRoot).value : v
+          }
           ins.run(params)
         }
       }

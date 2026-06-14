@@ -82,6 +82,75 @@ export const TABLE_PRIMARY_KEYS: Record<SyncedTable, readonly string[]> = {
 // Conjunto para checagem rápida "essa tabela é sincronizada?".
 export const SYNCED_TABLE_SET: ReadonlySet<string> = new Set(SYNCED_TABLES)
 
+// ---- Portabilidade de paths (raiz por máquina) ----
+//
+// Três colunas guardam paths ABSOLUTOS que quebram entre máquinas (Linux ↔ Mac).
+// No export, paths sob a raiz desta máquina viram um sentinela portável; no
+// import, o sentinela é resolvido contra a raiz LOCAL. Paths fora da raiz (ou
+// quando não há raiz configurada) ficam absolutos — backward-compat com bundles
+// legados (todos absolutos) é preservada.
+export const ROOT_SENTINEL = '<CM_ROOT>'
+
+// Colunas de path por tabela, derivadas do schema real (vault_path / path /
+// worktree_path). Só estas recebem portablize/localize.
+export const PATH_COLUMNS: Partial<Record<SyncedTable, readonly string[]>> = {
+  projects: ['vault_path'],
+  repos: ['path'],
+  feature_repos: ['worktree_path'],
+}
+
+// Remove uma única barra final de `p` (mantém intacto se já não tiver). Usado
+// para normalizar a raiz antes de comparar/cortar — evita `//` no resultado e
+// trata `root` com ou sem `/` final de forma idêntica.
+function stripTrailingSlash(p: string): string {
+  return p.endsWith('/') ? p.slice(0, -1) : p
+}
+
+// Converte um path absoluto em portável (sentinela) SE estiver sob `root`.
+//  - NULL → NULL (campos opcionais como worktree_path/vault_path passam intactos).
+//  - root vazio/null → retorna `abs` inalterado (máquina sem raiz configurada).
+//  - abs === root (path é a própria raiz) → ROOT_SENTINEL.
+//  - abs sob root (abs começa com `root/`) → ROOT_SENTINEL + resto (com `/`).
+//  - senão → `abs` inalterado (path fora da raiz fica absoluto).
+export function portablizePath(abs: unknown, root: string | null | undefined): unknown {
+  if (typeof abs !== 'string' || abs.length === 0) return abs
+  if (!root) return abs
+  const r = stripTrailingSlash(root)
+  if (abs === r) return ROOT_SENTINEL
+  const prefix = r + '/'
+  if (abs.startsWith(prefix)) {
+    return ROOT_SENTINEL + abs.slice(r.length) // mantém a `/` inicial do resto
+  }
+  return abs
+}
+
+// Inverte portablizePath usando a raiz LOCAL desta máquina.
+//  - NULL → NULL.
+//  - começa com ROOT_SENTINEL:
+//      * root definido → root (sem barra final) + resto.
+//      * root NÃO definido → best-effort: retorna o resto sem o sentinela
+//        (path relativo "resto/..."), o que é claramente quebrado mas evita
+//        manter o sentinela cru no DB. Sinaliza via `unresolved`.
+//  - senão (path absoluto legado) → inalterado.
+export function localizePath(
+  stored: unknown,
+  root: string | null | undefined,
+): { value: unknown; unresolved: boolean } {
+  if (typeof stored !== 'string' || stored.length === 0) {
+    return { value: stored, unresolved: false }
+  }
+  if (!stored.startsWith(ROOT_SENTINEL)) {
+    return { value: stored, unresolved: false }
+  }
+  const rest = stored.slice(ROOT_SENTINEL.length) // ex: '/repo/x' ou '' (raiz exata)
+  if (!root) {
+    // Sem raiz local: remove o sentinela (best-effort). `rest` começa com `/`
+    // ou é vazio; tiramos a barra inicial pra não virar um absoluto enganoso.
+    return { value: rest.startsWith('/') ? rest.slice(1) : rest, unresolved: true }
+  }
+  return { value: stripTrailingSlash(root) + rest, unresolved: false }
+}
+
 // ---- Serialização determinística ----
 
 // JSON com chaves ordenadas alfabeticamente (em qualquer profundidade), sem

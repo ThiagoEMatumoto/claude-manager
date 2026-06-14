@@ -910,6 +910,9 @@ export interface SyncStatus {
   configured: boolean
   repoUrl: string | null
   machineId: string
+  // Raiz absoluta dos projetos NESTA máquina (machine-local). null = não definida.
+  // Paths sob ela viram <CM_ROOT>/... no bundle → portáveis entre máquinas.
+  projectsRoot: string | null
   lastPullAt: number | null
   lastPushAt: number | null
   schemaVersion: number
@@ -929,6 +932,11 @@ export interface SyncConfigureInput {
 
 export interface SyncResolveConflictInput {
   keep: 'local' | 'remote'
+}
+
+// Define a pasta-raiz dos projetos desta máquina. root vazio → limpa (null).
+export interface SyncSetProjectsRootInput {
+  root: string
 }
 
 // Resultado de uma operação de sync. 'conflict' carrega ahead/behind p/ a UI.
@@ -1089,6 +1097,7 @@ export interface Api {
   sync: {
     status(): Promise<SyncStatus>
     configure(input: SyncConfigureInput): Promise<SyncStatus>
+    setProjectsRoot(input: SyncSetProjectsRootInput): Promise<SyncStatus>
     now(): Promise<SyncNowResult>
     exportForce(): Promise<SyncNowResult>
     importForce(): Promise<SyncNowResult>

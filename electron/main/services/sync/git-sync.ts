@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import simpleGit, { type SimpleGit } from 'simple-git'
 import { exportBundle, type ExportOpts } from './exporter'
@@ -35,62 +34,103 @@ export interface GitStatus {
 }
 
 export interface GitSyncOpts {
-  // Token efêmero (ex: do `gh auth token`). NUNCA é escrito em sync-config nem
-  // logado; injetado por GIT_ASKPASS num script temp apagado após o uso.
-  authToken?: string
   // Repassado ao exportBundle (featuresRoot/appVersion/machineId injetáveis p/ teste).
   exportOpts?: ExportOpts
 }
 
-// ---- Auth efêmero ----
+// ---- Auth via credential helper do gh ----
 //
-// O token NUNCA toca o disco do app (sync-config) nem é logado. Para o push/clone
-// HTTPS autenticado, criamos um GIT_ASKPASS temporário num tmpdir do OS que apenas
-// ecoa o token, setamos GIT_ASKPASS apontando pra ele + GIT_TERMINAL_PROMPT=0, e
-// REMOVEMOS o script (e seu dir) no finally. O git invoca o askpass para
-// username e password; respondemos token nos dois (GitHub aceita o PAT como
-// senha; o usuário é irrelevante). O token vive só na env do processo git filho.
-async function withEphemeralAuth<T>(
-  git: SimpleGit,
-  authToken: string | undefined,
-  fn: (git: SimpleGit) => Promise<T>,
-): Promise<T> {
-  if (!authToken) return fn(git)
+// Usamos `gh` como credential helper em vez de embutir um token: o gh gerencia o
+// segredo (efêmero, por chamada) e NADA toca disco. Por operação de rede
+// (clone/fetch/push) injetamos via `-c`:
+//   credential.helper=                          → limpa helpers herdados do env
+//   credential.helper=!gh auth git-credential   → resolve a credencial pelo gh
+// `GIT_TERMINAL_PROMPT=0` garante falha (em vez de prompt) se o gh não responder.
+//
+// Esse caminho é o MESMO exercido pelo E2E real contra o GitHub — a auth de
+// produção é, portanto, testada de verdade.
+const AUTH_CONFIG: string[] = [
+  '-c',
+  'credential.helper=',
+  '-c',
+  'credential.helper=!gh auth git-credential',
+]
 
-  const dir = mkdtempSync(join(tmpdir(), 'cm-git-askpass-'))
-  const askpass = join(dir, 'askpass.sh')
-  // Script lê o token de uma env var (CM_GIT_TOKEN) em vez de embutí-lo no
-  // arquivo — o token não fica em disco nem mesmo dentro do script.
-  writeFileSync(askpass, '#!/bin/sh\nprintf %s "$CM_GIT_TOKEN"\n', { mode: 0o700 })
-  chmodSync(askpass, 0o700)
+// Instância simple-git para operações de REDE (clone/fetch/push). Precisa de
+// `allowUnsafeCredentialHelper` porque injetamos `-c credential.helper=...` (o
+// helper do gh) — o plugin "unsafe" do simple-git bloqueia essa config por
+// padrão. Também limpamos GIT_EDITOR/EDITOR/PAGER/ASKPASS do env (o mesmo plugin
+// recusa rodar com essas vars setadas), e setamos GIT_TERMINAL_PROMPT=0 para que
+// uma credencial ausente FALHE em vez de abrir prompt.
+function netGit(workdir: string): SimpleGit {
+  const env: Record<string, string | undefined> = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  for (const k of UNSAFE_GIT_ENV) delete env[k]
+  return simpleGit(workdir, { unsafe: { allowUnsafeCredentialHelper: true } }).env(env)
+}
+
+// Vars que o plugin "unsafe" do simple-git recusa quando presentes no env. Como
+// passamos um env custom ao filho git e a auth é via credential helper (não
+// askpass/editor), limpamos essas vars em vez de habilitar o modo unsafe.
+const UNSAFE_GIT_ENV = [
+  'GIT_EDITOR',
+  'EDITOR',
+  'GIT_SEQUENCE_EDITOR',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  'GIT_PAGER',
+  'PAGER',
+  'GIT_SSH',
+  'GIT_SSH_COMMAND',
+] as const
+
+// Remotes file:// (usados nos testes de unidade) não exigem credencial: git
+// ignora credential helper no transporte local. Só http(s) precisa do gh.
+function needsAuth(remoteUrl: string): boolean {
+  return /^https?:\/\//i.test(remoteUrl)
+}
+
+// Args de config a prefixar numa operação de rede. Para remotes http(s) garante
+// que o gh está autenticado (erro claro caso contrário) e injeta o credential
+// helper. Para file:// retorna [] (sem dependência do gh).
+function authArgs(remoteUrl: string): string[] {
+  if (!needsAuth(remoteUrl)) return []
+  ensureGhReady()
+  return AUTH_CONFIG
+}
+
+// Garante que o gh está disponível E autenticado antes de uma operação http(s).
+// Lança erro claro caso contrário — a auth real acontece via credential helper,
+// esta é só uma verificação de pré-requisito.
+function ensureGhReady(): void {
+  let status: number | null
   try {
-    git.env({
-      ...process.env,
-      GIT_ASKPASS: askpass,
-      GIT_TERMINAL_PROMPT: '0',
-      CM_GIT_TOKEN: authToken,
-    })
-    return await fn(git)
-  } finally {
-    git.env({ ...process.env, GIT_TERMINAL_PROMPT: '0' })
-    rmSync(dir, { recursive: true, force: true })
+    status = spawnSync('gh', ['auth', 'token'], { encoding: 'utf8' }).status
+  } catch {
+    status = null
+  }
+  if (status !== 0) {
+    throw new Error('gh não autenticado — rode `gh auth login` para habilitar o sync git.')
   }
 }
 
-// Resolve o token de auth via `gh auth token` (efêmero). Retorna undefined se o
-// gh não está disponível/autenticado — o caller decide se segue sem token
-// (remotes file:// em teste não precisam).
-export function ghAuthToken(): string | undefined {
+// Resolve a URL do remote origin (para decidir se a operação precisa de auth).
+async function originUrl(git: SimpleGit): Promise<string> {
   try {
-    const r = spawnSync('gh', ['auth', 'token'], { encoding: 'utf8' })
-    if (r.status === 0) {
-      const tok = r.stdout.trim()
-      return tok || undefined
-    }
+    const remotes = await git.getRemotes(true)
+    return remotes.find((r) => r.name === 'origin')?.refs.fetch ?? ''
   } catch {
-    // gh ausente — sem token.
+    return ''
   }
-  return undefined
+}
+
+// Probe: `gh` disponível e autenticado? Mantido para callers que precisam decidir
+// se há auth antes de tentar uma operação (não retorna o token em si).
+export function ghAvailable(): boolean {
+  try {
+    return spawnSync('gh', ['auth', 'token'], { encoding: 'utf8' }).status === 0
+  } catch {
+    return false
+  }
 }
 
 // ---- branch helper ----
@@ -116,7 +156,7 @@ async function defaultBranch(git: SimpleGit): Promise<string> {
 export async function ensureRepo(
   workdir: string,
   repoUrl: string,
-  opts?: GitSyncOpts,
+  _opts?: GitSyncOpts,
 ): Promise<void> {
   mkdirSync(workdir, { recursive: true })
 
@@ -129,15 +169,15 @@ export async function ensureRepo(
   // Tenta clonar. Se o remote tem conteúdo, clona e pronto. Se o remote está
   // VAZIO (bare recém-criado), o `git clone` "sucede" mas deixa um repo sem
   // commits (HEAD órfão) — nesse caso seedamos o commit inicial.
-  const cloned = await tryClone(workdir, repoUrl, opts)
+  const cloned = await tryClone(workdir, repoUrl)
   if (cloned) {
     if (await hasCommits(simpleGit(workdir))) return
     // Clone de remote vazio: garante remote + commit inicial.
-    await seedInitialCommit(workdir, repoUrl, opts)
+    await seedInitialCommit(workdir, repoUrl)
     return
   }
 
-  await initAndSeed(workdir, repoUrl, opts)
+  await initAndSeed(workdir, repoUrl)
 }
 
 async function ensureOrigin(git: SimpleGit, repoUrl: string): Promise<void> {
@@ -150,13 +190,11 @@ async function ensureOrigin(git: SimpleGit, repoUrl: string): Promise<void> {
   }
 }
 
-async function tryClone(workdir: string, repoUrl: string, opts?: GitSyncOpts): Promise<boolean> {
-  const into = simpleGit(workdir)
+async function tryClone(workdir: string, repoUrl: string, _opts?: GitSyncOpts): Promise<boolean> {
   try {
     // Clona NO PRÓPRIO workdir (já criado), usando '.' como destino dentro do cwd.
-    await withEphemeralAuth(into, opts?.authToken, async (g) => {
-      await g.clone(repoUrl, '.', ['--no-single-branch'])
-    })
+    // Os -c de auth (se http(s)) vêm ANTES do subcomando `clone`.
+    await netGit(workdir).raw([...authArgs(repoUrl), 'clone', '--no-single-branch', repoUrl, '.'])
     // Clone só "vale" se trouxe um .git utilizável.
     return existsSync(join(workdir, '.git'))
   } catch {
@@ -179,7 +217,7 @@ async function hasCommits(git: SimpleGit): Promise<boolean> {
   }
 }
 
-async function initAndSeed(workdir: string, repoUrl: string, opts?: GitSyncOpts): Promise<void> {
+async function initAndSeed(workdir: string, repoUrl: string): Promise<void> {
   const git = simpleGit(workdir)
   await git.init()
   // Garante uma branch 'main' determinística.
@@ -188,16 +226,12 @@ async function initAndSeed(workdir: string, repoUrl: string, opts?: GitSyncOpts)
   } catch {
     // versões antigas do git: ignora.
   }
-  await seedInitialCommit(workdir, repoUrl, opts)
+  await seedInitialCommit(workdir, repoUrl)
 }
 
 // Garante remote=origin + um commit inicial do bundle (estrutura vazia). Usado
 // tanto no init from-scratch quanto após clonar um remote vazio.
-async function seedInitialCommit(
-  workdir: string,
-  repoUrl: string,
-  opts?: GitSyncOpts,
-): Promise<void> {
+async function seedInitialCommit(workdir: string, repoUrl: string): Promise<void> {
   const git = simpleGit(workdir)
   await ensureOrigin(git, repoUrl)
   try {
@@ -222,10 +256,10 @@ async function seedInitialCommit(
   // clonariam um repo vazio e re-seedariam em loop. Tolera falha de rede: o
   // pushBundle subsequente reempurra.
   try {
-    await withEphemeralAuth(git, opts?.authToken, async (g) => {
-      await g.push(['origin', 'HEAD:main'])
-      await g.fetch(['origin'])
-    })
+    const a = authArgs(repoUrl)
+    const g = netGit(workdir)
+    await g.raw([...a, 'push', 'origin', 'HEAD:main'])
+    await g.raw([...a, 'fetch', 'origin'])
   } catch {
     // offline / sem permissão de push agora — segue; pushBundle empurra depois.
   }
@@ -233,11 +267,10 @@ async function seedInitialCommit(
 
 // ---- pull (read-only: fetch + compara, NÃO muta working tree) ----
 
-export async function pull(workdir: string, opts?: GitSyncOpts): Promise<PullState> {
+export async function pull(workdir: string, _opts?: GitSyncOpts): Promise<PullState> {
   const git = simpleGit(workdir)
-  await withEphemeralAuth(git, opts?.authToken, async (g) => {
-    await g.fetch(['origin'])
-  })
+  const a = authArgs(await originUrl(git))
+  await netGit(workdir).raw([...a, 'fetch', 'origin'])
   return computePullState(git)
 }
 
@@ -326,11 +359,9 @@ export async function pushBundle(
   }
 
   try {
-    await withEphemeralAuth(git, opts?.authToken, async (g) => {
-      const args = ['origin', `HEAD:${branch}`]
-      if (opts?.force) args.push('--force')
-      await g.push(args)
-    })
+    const pushArgs = [...authArgs(await originUrl(git)), 'push', 'origin', `HEAD:${branch}`]
+    if (opts?.force) pushArgs.push('--force')
+    await netGit(workdir).raw(pushArgs)
     return { pushed: true, rejected: false }
   } catch (err) {
     // Distingue rejeição por non-fast-forward (esperada em conflito) de erro

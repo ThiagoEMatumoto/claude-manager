@@ -7,11 +7,9 @@ import {
   applyRemote,
   bundleDirFor,
   ensureRepo,
-  ghAuthToken,
   pull,
   pushBundle,
   status as gitStatus,
-  type GitSyncOpts,
 } from '../services/sync/git-sync'
 import { importBundle } from '../services/sync/importer'
 import { readSyncConfig, updateSyncConfig } from '../services/sync/sync-config'
@@ -34,11 +32,6 @@ export function setSyncWorkdir(dir: string | null): void {
 
 function workdir(): string {
   return workdirOverride ?? join(app.getPath('userData'), 'sync')
-}
-
-function authOpts(): GitSyncOpts {
-  const authToken = ghAuthToken()
-  return authToken ? { authToken } : {}
 }
 
 function isConfigured(): boolean {
@@ -115,13 +108,13 @@ function effectiveState(configured: boolean, git: SyncStatus['git']): SyncState 
 // ---- coordinator (auto-sync on-idle) ----
 //
 // Singleton: recebe pings de mutação (notifyMutation) e empurra após debounce.
-// Reusa workdir/getDb/isConfigured/authOpts/commitMessage da IPC; reflete o
-// estado do push no estado persistente acima.
+// Reusa workdir/getDb/isConfigured/commitMessage da IPC; reflete o estado do
+// push no estado persistente acima. A auth git é resolvida internamente pelo
+// git-sync (credential helper do gh), sem opts.
 export const syncCoordinator = new SyncCoordinator({
   workdir,
   getDb,
   isConfigured,
-  authOpts,
   commitMessage,
   onState: (state: SyncCoordinatorState, info) => {
     if (state === 'syncing') setSyncState('syncing')
@@ -147,8 +140,7 @@ export function notifySyncMutation(): void {
 //  - ahead>0 e behind==0 (ou em sync)          → export + push.
 async function syncNow(): Promise<SyncNowResult> {
   if (!isConfigured()) return { state: 'not-configured' }
-  const opts = authOpts()
-  const st = await pull(workdir(), opts)
+  const st = await pull(workdir())
 
   if (st.diverged) {
     setSyncState('conflict')
@@ -172,10 +164,10 @@ async function syncNow(): Promise<SyncNowResult> {
   }
 
   // Nada a baixar com segurança → empurra estado local.
-  const res = await pushBundle(workdir(), getDb(), commitMessage(), opts)
+  const res = await pushBundle(workdir(), getDb(), commitMessage())
   if (res.rejected) {
     // origin avançou entre o pull e o push → conflito.
-    const after = await pull(workdir(), opts)
+    const after = await pull(workdir())
     setSyncState('conflict')
     return { state: 'conflict', ahead: after.ahead, behind: after.behind }
   }
@@ -210,8 +202,7 @@ export function registerSyncIpc(): void {
   ipcMain.handle('sync:status', (): Promise<SyncStatus> => buildStatus())
 
   ipcMain.handle('sync:configure', async (_e, input: SyncConfigureInput): Promise<SyncStatus> => {
-    const opts = authOpts()
-    await ensureRepo(workdir(), input.repoUrl, opts)
+    await ensureRepo(workdir(), input.repoUrl)
     updateSyncConfig({ repoUrl: input.repoUrl })
     return buildStatus()
   })
@@ -221,7 +212,7 @@ export function registerSyncIpc(): void {
   // Sobrescreve o REMOTO com o estado local (push --force).
   ipcMain.handle('sync:export-force', async (): Promise<SyncNowResult> => {
     if (!isConfigured()) return { state: 'not-configured' }
-    const res = await pushBundle(workdir(), getDb(), commitMessage(), { ...authOpts(), force: true })
+    const res = await pushBundle(workdir(), getDb(), commitMessage(), { force: true })
     if (res.pushed) {
       updateSyncConfig({ lastPushAt: Date.now() })
       setSyncState('in-sync')
@@ -234,7 +225,7 @@ export function registerSyncIpc(): void {
   // Sobrescreve o LOCAL com o remoto (applyRemote + importBundle).
   ipcMain.handle('sync:import-force', async (): Promise<SyncNowResult> => {
     if (!isConfigured()) return { state: 'not-configured' }
-    await pull(workdir(), authOpts())
+    await pull(workdir())
     await applyRemote(workdir())
     try {
       importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
@@ -257,16 +248,13 @@ export function registerSyncIpc(): void {
     async (_e, input: SyncResolveConflictInput): Promise<SyncNowResult> => {
       if (!isConfigured()) return { state: 'not-configured' }
       if (input.keep === 'local') {
-        const res = await pushBundle(workdir(), getDb(), commitMessage(), {
-          ...authOpts(),
-          force: true,
-        })
+        const res = await pushBundle(workdir(), getDb(), commitMessage(), { force: true })
         if (res.pushed) updateSyncConfig({ lastPushAt: Date.now() })
         setSyncState('in-sync')
         return { state: 'pushed' }
       }
       // keep === 'remote'
-      await pull(workdir(), authOpts())
+      await pull(workdir())
       await applyRemote(workdir())
       try {
         importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
@@ -294,8 +282,7 @@ export async function syncOnBoot(timeoutMs = 8000): Promise<void> {
 
   const work = async (): Promise<void> => {
     const dir = workdir()
-    const opts = authOpts()
-    const st = await pull(dir, opts)
+    const st = await pull(dir)
     // Só importa no caminho fast-forward limpo (sem trabalho local pendente).
     if (st.behind > 0 && st.ahead === 0 && !st.diverged) {
       await applyRemote(dir)

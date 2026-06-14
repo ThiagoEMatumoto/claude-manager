@@ -16,8 +16,10 @@ export interface SyncCoordinatorDeps {
   getDb: () => Database.Database
   // true só quando há repoUrl + .git no workdir (não dispara antes da config).
   isConfigured: () => boolean
-  // Opções de auth/export repassadas ao pushBundle.
-  authOpts: () => GitSyncOpts
+  // Opções de export repassadas ao pushBundle (featuresRoot etc; injetável p/
+  // teste). A auth git é resolvida internamente pelo git-sync (helper do gh).
+  // Opcional: produção usa o default ({}).
+  syncOpts?: () => GitSyncOpts
   // Mensagem de commit (inclui machineId + timestamp).
   commitMessage: () => string
   // Callback de transição de estado (atualiza lastSyncState do IPC + lastPushAt).
@@ -95,7 +97,7 @@ export class SyncCoordinator {
         this.deps.workdir(),
         this.deps.getDb(),
         this.deps.commitMessage(),
-        this.deps.authOpts(),
+        this.deps.syncOpts?.(),
       )
     } catch (err) {
       error = String((err as Error)?.message ?? err)

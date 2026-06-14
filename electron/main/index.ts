@@ -17,7 +17,8 @@ import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
-import { registerSyncIpc, syncOnBoot } from './ipc/sync'
+import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
+import { setSyncMutationHook } from './services/notify'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -120,6 +121,10 @@ app.whenReady().then(async () => {
   registerTasksIpc()
   registerMcpIpc()
   registerSyncIpc()
+  // Wire o ponto único de mutação → coordinator (auto-sync on-idle). Cobre
+  // objectives/tasks/features (via notify.broadcast) e projects/repos (via
+  // pingSyncMutation), tanto pela camada IPC quanto pelo MCP server.
+  setSyncMutationHook(notifySyncMutation)
   registerWindowIpc()
 
   // Pull-no-boot CONSERVADOR: importa só fast-forward limpo (sem trabalho local
@@ -139,10 +144,16 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', () => {
+// Shutdown síncrono final: roda DEPOIS do flush de sync (que lê o DB), porque a
+// última operação fecha o DB. Idempotente via flag `didShutdown`.
+let didShutdown = false
+function runFinalShutdown(): void {
+  if (didShutdown) return
+  didShutdown = true
   void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
+  syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()
   sessionActivityService.closeAll()
@@ -151,6 +162,35 @@ app.on('before-quit', () => {
     .run(Date.now())
   markWorkspaceCleanShutdown()
   closeDb()
+}
+
+// Bounded ~6s + não-fatal: nunca trava o fechamento indefinidamente. Resolve
+// quando o flush termina OU quando o timeout estoura, o que vier primeiro.
+const QUIT_FLUSH_TIMEOUT_MS = 6000
+
+let quitFlushStarted = false
+app.on('before-quit', (event) => {
+  if (didShutdown) return // shutdown já concluído → deixa o quit prosseguir
+  if (quitFlushStarted) return // flush em andamento → não re-entra
+  quitFlushStarted = true
+
+  // Adia o quit para empurrar a última edição (best-effort) ANTES de fechar o
+  // DB — sem isso, trocar de máquina perderia a última mutação. O flush lê o DB,
+  // então DEVE rodar antes do closeDb (em runFinalShutdown).
+  event.preventDefault()
+
+  const flushDone = syncCoordinator.flush().catch((err) => {
+    console.warn('[sync] flush no quit falhou (não-fatal):', String((err as Error)?.message ?? err))
+  })
+  const bounded = Promise.race([
+    flushDone,
+    new Promise<void>((resolve) => setTimeout(resolve, QUIT_FLUSH_TIMEOUT_MS)),
+  ])
+
+  void bounded.then(() => {
+    runFinalShutdown()
+    app.quit() // re-dispara o quit; didShutdown=true → before-quit é no-op agora
+  })
 })
 
 app.on('window-all-closed', () => {

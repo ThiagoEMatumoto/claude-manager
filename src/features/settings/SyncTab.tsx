@@ -256,6 +256,17 @@ export function SyncTab({ open }: Props) {
                 Git indisponível (offline ou erro). Operando com dados locais.
               </div>
             )}
+            {status.lastSyncState === 'schema-mismatch' && (
+              <div className="mt-2 text-xs text-[var(--color-danger)]">
+                O outro dispositivo gravou dados de uma versão mais nova do app. Atualize este app
+                antes de sincronizar.
+              </div>
+            )}
+            {status.lastError && status.lastSyncState === 'stale' && (
+              <div className="mt-2 break-words text-xs text-[var(--color-text-dim)]">
+                Último erro: {status.lastError}
+              </div>
+            )}
           </Section>
 
           {/* Resolução de conflito */}
@@ -342,17 +353,27 @@ function StateBadge({
 }) {
   const git = status.git
 
-  // schema-mismatch é inferido do estado vindo do backend via conflito/erro;
-  // aqui derivamos badge a partir dos campos reais disponíveis.
   let label: string
   let tone: 'ok' | 'warn' | 'danger' | 'dim'
   let Icon = CheckCircle2
 
-  if (conflict) {
+  // O estado PERSISTENTE do backend (lastSyncState) tem prioridade — sobrevive a
+  // reabrir o dialog e carrega conflict/schema-mismatch/syncing detectados no
+  // boot ou no auto-sync, que o git status sozinho não expressa. O `conflict`
+  // local (de uma ação recém-feita) reforça o estado de conflito.
+  if (status.lastSyncState === 'schema-mismatch') {
+    label = 'Atualize o app antes de sincronizar'
+    tone = 'danger'
+    Icon = AlertTriangle
+  } else if (conflict || status.lastSyncState === 'conflict') {
     label = 'Conflito'
     tone = 'danger'
     Icon = AlertTriangle
-  } else if (git === null) {
+  } else if (status.lastSyncState === 'syncing') {
+    label = 'Sincronizando…'
+    tone = 'warn'
+    Icon = RefreshCw
+  } else if (status.lastSyncState === 'stale' || git === null) {
     label = 'Offline (stale)'
     tone = 'dim'
     Icon = CloudOff
@@ -360,11 +381,11 @@ function StateBadge({
     label = 'Divergente'
     tone = 'danger'
     Icon = AlertTriangle
-  } else if (git.ahead > 0 || git.dirty) {
+  } else if (git.ahead > 0 || git.dirty || status.lastSyncState === 'ahead') {
     label = 'À frente (não enviado)'
     tone = 'warn'
     Icon = ArrowUp
-  } else if (git.behind > 0) {
+  } else if (git.behind > 0 || status.lastSyncState === 'behind') {
     label = 'Atrás (importar)'
     tone = 'warn'
     Icon = ArrowDown

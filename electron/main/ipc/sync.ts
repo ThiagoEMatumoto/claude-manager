@@ -15,10 +15,12 @@ import {
 } from '../services/sync/git-sync'
 import { importBundle } from '../services/sync/importer'
 import { readSyncConfig, updateSyncConfig } from '../services/sync/sync-config'
+import { SyncCoordinator, type SyncCoordinatorState } from '../services/sync/coordinator'
 import type {
   SyncConfigureInput,
   SyncNowResult,
   SyncResolveConflictInput,
+  SyncState,
   SyncStatus,
 } from '../../../shared/types/ipc'
 
@@ -41,6 +43,25 @@ function authOpts(): GitSyncOpts {
 
 function isConfigured(): boolean {
   return existsSync(join(workdir(), '.git'))
+}
+
+// ---- estado persistente de sync (sobrevive a reabrir o dialog) ----
+//
+// Atualizado por: syncOnBoot, o coordinator (auto-sync) e os handlers de ação.
+// Vive no main (módulo), não na UI — a aba Sync apenas o lê via sync:status.
+let lastSyncState: SyncState = 'idle'
+let lastError: string | null = null
+let lastSyncAt: number | null = null
+
+function setSyncState(state: SyncState, error: string | null = null): void {
+  lastSyncState = state
+  lastError = error
+  lastSyncAt = Date.now()
+}
+
+// Reconhece a mensagem do importer p/ schemaVersion remoto > local (app antigo).
+function isSchemaMismatch(err: unknown): boolean {
+  return /schemaVersion \d+ > local/.test(String((err as Error)?.message ?? err))
 }
 
 // ---- status agregado (config + git + schema) ----
@@ -70,7 +91,52 @@ async function buildStatus(): Promise<SyncStatus> {
     lastPushAt: cfg.lastPushAt,
     schemaVersion,
     git,
+    lastSyncState: effectiveState(configured, git),
+    lastError,
+    lastSyncAt,
   }
+}
+
+// O estado persistente (conflict/schema-mismatch/syncing/stale) tem prioridade —
+// são sinais que o git status sozinho não expressa. Quando o estado é "neutro"
+// (idle/in-sync/ahead/behind), derivamos do git status fresco para refletir
+// ahead/behind reais sem depender de uma ação ter ocorrido.
+function effectiveState(configured: boolean, git: SyncStatus['git']): SyncState {
+  if (!configured) return 'idle'
+  if (lastSyncState === 'conflict' || lastSyncState === 'schema-mismatch') return lastSyncState
+  if (lastSyncState === 'syncing' || lastSyncState === 'stale') return lastSyncState
+  if (git === null) return 'stale'
+  if (git.ahead > 0 && git.behind > 0) return 'conflict'
+  if (git.ahead > 0 || git.dirty) return 'ahead'
+  if (git.behind > 0) return 'behind'
+  return 'in-sync'
+}
+
+// ---- coordinator (auto-sync on-idle) ----
+//
+// Singleton: recebe pings de mutação (notifyMutation) e empurra após debounce.
+// Reusa workdir/getDb/isConfigured/authOpts/commitMessage da IPC; reflete o
+// estado do push no estado persistente acima.
+export const syncCoordinator = new SyncCoordinator({
+  workdir,
+  getDb,
+  isConfigured,
+  authOpts,
+  commitMessage,
+  onState: (state: SyncCoordinatorState, info) => {
+    if (state === 'syncing') setSyncState('syncing')
+    else if (state === 'conflict') setSyncState('conflict')
+    else if (state === 'stale') setSyncState('stale', info?.error ?? null)
+    else if (state === 'in-sync') {
+      setSyncState('in-sync')
+      if (info?.pushedAt) updateSyncConfig({ lastPushAt: info.pushedAt })
+    }
+  },
+})
+
+// Ponto único de ping de mutação (chamado por notify.ts e projects.ts).
+export function notifySyncMutation(): void {
+  syncCoordinator.notifyMutation()
 }
 
 // ---- sync:now — pull → decidir import vs push, reportar conflito ----
@@ -85,13 +151,23 @@ async function syncNow(): Promise<SyncNowResult> {
   const st = await pull(workdir(), opts)
 
   if (st.diverged) {
+    setSyncState('conflict')
     return { state: 'conflict', ahead: st.ahead, behind: st.behind }
   }
 
   if (st.behind > 0 && st.ahead === 0) {
     await applyRemote(workdir())
-    importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+    try {
+      importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+    } catch (err) {
+      if (isSchemaMismatch(err)) {
+        setSyncState('schema-mismatch', String((err as Error)?.message ?? err))
+        return { state: 'conflict', ahead: st.ahead, behind: st.behind }
+      }
+      throw err
+    }
     updateSyncConfig({ lastPullAt: Date.now() })
+    setSyncState('in-sync')
     return { state: 'pulled' }
   }
 
@@ -100,12 +176,15 @@ async function syncNow(): Promise<SyncNowResult> {
   if (res.rejected) {
     // origin avançou entre o pull e o push → conflito.
     const after = await pull(workdir(), opts)
+    setSyncState('conflict')
     return { state: 'conflict', ahead: after.ahead, behind: after.behind }
   }
   if (res.pushed) {
     updateSyncConfig({ lastPushAt: Date.now() })
+    setSyncState('in-sync')
     return { state: 'pushed' }
   }
+  setSyncState('in-sync')
   return { state: 'up-to-date' }
 }
 
@@ -145,8 +224,10 @@ export function registerSyncIpc(): void {
     const res = await pushBundle(workdir(), getDb(), commitMessage(), { ...authOpts(), force: true })
     if (res.pushed) {
       updateSyncConfig({ lastPushAt: Date.now() })
+      setSyncState('in-sync')
       return { state: 'pushed' }
     }
+    setSyncState('in-sync')
     return { state: 'up-to-date' }
   })
 
@@ -155,8 +236,17 @@ export function registerSyncIpc(): void {
     if (!isConfigured()) return { state: 'not-configured' }
     await pull(workdir(), authOpts())
     await applyRemote(workdir())
-    importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+    try {
+      importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+    } catch (err) {
+      if (isSchemaMismatch(err)) {
+        setSyncState('schema-mismatch', String((err as Error)?.message ?? err))
+        throw err
+      }
+      throw err
+    }
     updateSyncConfig({ lastPullAt: Date.now() })
+    setSyncState('in-sync')
     return { state: 'pulled' }
   })
 
@@ -172,13 +262,20 @@ export function registerSyncIpc(): void {
           force: true,
         })
         if (res.pushed) updateSyncConfig({ lastPushAt: Date.now() })
+        setSyncState('in-sync')
         return { state: 'pushed' }
       }
       // keep === 'remote'
       await pull(workdir(), authOpts())
       await applyRemote(workdir())
-      importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+      try {
+        importBundle(getDb(), bundleDirFor(workdir()), watcherHooks())
+      } catch (err) {
+        if (isSchemaMismatch(err)) setSyncState('schema-mismatch', String((err as Error)?.message ?? err))
+        throw err
+      }
       updateSyncConfig({ lastPullAt: Date.now() })
+      setSyncState('in-sync')
       return { state: 'pulled' }
     },
   )
@@ -202,17 +299,37 @@ export async function syncOnBoot(timeoutMs = 8000): Promise<void> {
     // Só importa no caminho fast-forward limpo (sem trabalho local pendente).
     if (st.behind > 0 && st.ahead === 0 && !st.diverged) {
       await applyRemote(dir)
-      // Watcher ainda não iniciado no boot → active=false (o boot o inicia depois).
-      importBundle(getDb(), bundleDirFor(dir), watcherHooks(false))
+      try {
+        // Watcher ainda não iniciado no boot → active=false (o boot o inicia depois).
+        importBundle(getDb(), bundleDirFor(dir), watcherHooks(false))
+      } catch (err) {
+        // Bundle remoto exige app mais novo → registra schema-mismatch (a UI
+        // mostra "atualize o app"), NÃO derruba o boot, mantém dados locais.
+        if (isSchemaMismatch(err)) {
+          setSyncState('schema-mismatch', String((err as Error)?.message ?? err))
+          return
+        }
+        throw err
+      }
       updateSyncConfig({ lastPullAt: Date.now() })
+      setSyncState('in-sync')
+    } else if (st.diverged) {
+      // Divergência detectada no boot: persiste conflict para a UI mostrar SEM
+      // precisar de "Sincronizar agora" (fecha o gap da Parte C).
+      setSyncState('conflict')
+    } else if (st.ahead > 0) {
+      // Trabalho local não-empurrado (o coordinator empurrará no idle).
+      setSyncState('ahead')
+    } else {
+      setSyncState('in-sync')
     }
-    // diverged | localAhead | in-sync → não toca nos dados.
   }
 
   try {
     await Promise.race([work(), new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))])
   } catch (err) {
     // Offline/erro de git/import → boot segue com dados locais (status stale).
+    setSyncState('stale', String((err as Error)?.message ?? err))
     console.warn('[sync] syncOnBoot falhou (não-fatal):', String((err as Error)?.message ?? err))
   }
 }

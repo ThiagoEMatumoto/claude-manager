@@ -8,10 +8,38 @@ import type { FeatureObjectiveLink, TaskLink } from '../../../shared/types/ipc'
 
 export type Broadcast = (channel: string, payload: unknown) => void
 
+// Ping de mutação para o coordinator de sync (auto-sync on-idle). Injetável via
+// setSyncMutationHook para evitar dependência circular (ipc/sync importa este
+// módulo? não — mas o coordinator vive no main e é wired no boot). Default no-op
+// até o boot registrar o hook real (notifySyncMutation do ipc/sync).
+let syncMutationHook: () => void = () => {}
+
+export function setSyncMutationHook(fn: () => void): void {
+  syncMutationHook = fn
+}
+
+// Ping direto para handlers que NÃO passam por broadcast (ex: projects/repos,
+// que não broadcastam mutação). Mesmo destino que o ping embutido em broadcast().
+export function pingSyncMutation(): void {
+  syncMutationHook()
+}
+
+// Canais cujos payloads correspondem a entidades SINCRONIZADAS (objectives,
+// tasks, features). Só esses pingam o coordinator — broadcasts de session/
+// metrics/window etc. não devem disparar push.
+function isSyncedChannel(channel: string): boolean {
+  return (
+    channel.startsWith('objective:') ||
+    channel.startsWith('task:') ||
+    channel.startsWith('feature:')
+  )
+}
+
 export function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, payload)
   }
+  if (isSyncedChannel(channel)) syncMutationHook()
 }
 
 // Mutações de tarefa que tocam parents objective/key_result mudam o progresso

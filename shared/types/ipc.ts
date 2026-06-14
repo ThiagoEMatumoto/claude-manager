@@ -884,7 +884,28 @@ export interface SyncGitStatus {
   lastCommit: string | null
 }
 
-// Snapshot agregado para a aba Sync: config machine-local + git + schema.
+// Estado persistente de sync, atualizado pelo boot, pelo coordinator (auto-sync)
+// e pelas ações manuais. Sobrevive a reabrir o dialog (mora no main, não na UI).
+//  - idle            — sem repo configurado.
+//  - in-sync         — em paridade com o remoto.
+//  - ahead           — trabalho local não-empurrado.
+//  - behind          — remoto à frente (há o que importar).
+//  - syncing         — operação em andamento.
+//  - conflict        — divergência (escolha do usuário necessária).
+//  - schema-mismatch — bundle remoto exige app mais novo (bloqueado).
+//  - stale           — offline/erro não-fatal; opera com dados locais.
+export type SyncState =
+  | 'idle'
+  | 'in-sync'
+  | 'ahead'
+  | 'behind'
+  | 'syncing'
+  | 'conflict'
+  | 'schema-mismatch'
+  | 'stale'
+
+// Snapshot agregado para a aba Sync: config machine-local + git + schema +
+// estado persistente derivado do boot/coordinator/ações.
 export interface SyncStatus {
   configured: boolean
   repoUrl: string | null
@@ -894,6 +915,12 @@ export interface SyncStatus {
   schemaVersion: number
   // null quando não configurado ou git indisponível (offline/erro).
   git: SyncGitStatus | null
+  // Estado persistente (último resultado conhecido de boot/auto-sync/ação).
+  lastSyncState: SyncState
+  // Mensagem do último erro não-fatal (offline/transport), se houver.
+  lastError: string | null
+  // Quando o último estado foi registrado.
+  lastSyncAt: number | null
 }
 
 export interface SyncConfigureInput {

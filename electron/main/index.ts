@@ -17,6 +17,8 @@ import { registerFeaturesIpc } from './ipc/features'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
+import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
+import { setSyncMutationHook, broadcast } from './services/notify'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -91,7 +93,7 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
   // textarea do xterm — resultado é colar 2x. Campos de input normais continuam
@@ -118,22 +120,49 @@ app.whenReady().then(() => {
   registerObjectivesIpc()
   registerTasksIpc()
   registerMcpIpc()
+  registerSyncIpc()
+  // Wire o ponto único de mutação → coordinator (auto-sync on-idle). Cobre
+  // objectives/tasks/features (via notify.broadcast) e projects/repos (via
+  // pingSyncMutation), tanto pela camada IPC quanto pelo MCP server.
+  setSyncMutationHook(notifySyncMutation)
   registerWindowIpc()
 
+  // A janela é criada PRIMEIRO (sem await no sync) para não pintar tela preta
+  // até 8s em rede lenta. O watcher inicia já — o syncOnBoot pausa/reinicia o
+  // watcher via watcherHooks internamente quando importa.
   createMainWindow()
   initUpdater()
   startUsageMonitor()
   startFeatureWatcher()
+
+  // Pull-no-boot CONSERVADOR em BACKGROUND: importa só fast-forward limpo (sem
+  // trabalho local não-empurrado), bounded por timeout e NÃO-fatal (offline/erro
+  // → segue com dados locais). Roda sob o mutex de sync (não corre com o
+  // coordinator). Se IMPORTOU (mudou dados), faz broadcast dos canais das
+  // entidades sincronizadas para o renderer recarregar ao vivo — as stores de
+  // features/objectives/tasks tratam um payload-sinal como "refresh()".
+  void syncOnBoot().then((imported) => {
+    if (!imported) return
+    broadcast('feature:updated', { backfill: true })
+    broadcast('objective:updated', { reload: true })
+    broadcast('task:updated', { reload: true })
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })
 
-app.on('before-quit', () => {
+// Shutdown síncrono final: roda DEPOIS do flush de sync (que lê o DB), porque a
+// última operação fecha o DB. Idempotente via flag `didShutdown`.
+let didShutdown = false
+function runFinalShutdown(): void {
+  if (didShutdown) return
+  didShutdown = true
   void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
+  syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()
   sessionActivityService.closeAll()
@@ -142,6 +171,40 @@ app.on('before-quit', () => {
     .run(Date.now())
   markWorkspaceCleanShutdown()
   closeDb()
+}
+
+// Bounded ~6s + não-fatal: nunca trava o fechamento indefinidamente. Resolve
+// quando o flush termina OU quando o timeout estoura, o que vier primeiro.
+const QUIT_FLUSH_TIMEOUT_MS = 6000
+
+let quitFlushStarted = false
+app.on('before-quit', (event) => {
+  if (didShutdown) return // shutdown já concluído → deixa o quit prosseguir
+  if (quitFlushStarted) {
+    // Flush em andamento: um 2º quit não pode escapar o shutdown limpo (sem o
+    // preventDefault o Electron prosseguiria e fecharia o DB no meio do flush).
+    event.preventDefault()
+    return
+  }
+  quitFlushStarted = true
+
+  // Adia o quit para empurrar a última edição (best-effort) ANTES de fechar o
+  // DB — sem isso, trocar de máquina perderia a última mutação. O flush lê o DB,
+  // então DEVE rodar antes do closeDb (em runFinalShutdown).
+  event.preventDefault()
+
+  const flushDone = syncCoordinator.flush().catch((err) => {
+    console.warn('[sync] flush no quit falhou (não-fatal):', String((err as Error)?.message ?? err))
+  })
+  const bounded = Promise.race([
+    flushDone,
+    new Promise<void>((resolve) => setTimeout(resolve, QUIT_FLUSH_TIMEOUT_MS)),
+  ])
+
+  void bounded.then(() => {
+    runFinalShutdown()
+    app.quit() // re-dispara o quit; didShutdown=true → before-quit é no-op agora
+  })
 })
 
 app.on('window-all-closed', () => {

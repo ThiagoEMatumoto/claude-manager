@@ -24,5 +24,6 @@ export const tasksApi = api.tasks
 export const windowApi = api.window
 export const notificationsApi = api.notifications
 export const mcpApi = api.mcp
+export const syncApi = api.sync
 
 export { api }

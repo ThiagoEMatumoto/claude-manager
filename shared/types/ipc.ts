@@ -875,6 +875,85 @@ export interface McpStatus {
   addCommand: string | null
 }
 
+// ---- Sincronização git-backed (Fase 2) ----
+
+export interface SyncGitStatus {
+  dirty: boolean
+  ahead: number
+  behind: number
+  lastCommit: string | null
+}
+
+// Estado persistente de sync, atualizado pelo boot, pelo coordinator (auto-sync)
+// e pelas ações manuais. Sobrevive a reabrir o dialog (mora no main, não na UI).
+//  - idle            — sem repo configurado.
+//  - in-sync         — em paridade com o remoto.
+//  - ahead           — trabalho local não-empurrado.
+//  - behind          — remoto à frente (há o que importar).
+//  - syncing         — operação em andamento.
+//  - conflict        — divergência (escolha do usuário necessária).
+//  - schema-mismatch — bundle remoto exige app mais novo (bloqueado).
+//  - stale           — offline/erro não-fatal; opera com dados locais.
+export type SyncState =
+  | 'idle'
+  | 'in-sync'
+  | 'ahead'
+  | 'behind'
+  | 'syncing'
+  | 'conflict'
+  | 'schema-mismatch'
+  | 'stale'
+
+// Snapshot agregado para a aba Sync: config machine-local + git + schema +
+// estado persistente derivado do boot/coordinator/ações.
+export interface SyncStatus {
+  configured: boolean
+  repoUrl: string | null
+  machineId: string
+  // Raiz absoluta dos projetos NESTA máquina (machine-local). null = não definida.
+  // Paths sob ela viram <CM_ROOT>/... no bundle → portáveis entre máquinas.
+  projectsRoot: string | null
+  lastPullAt: number | null
+  lastPushAt: number | null
+  schemaVersion: number
+  // null quando não configurado ou git indisponível (offline/erro).
+  git: SyncGitStatus | null
+  // Estado persistente (último resultado conhecido de boot/auto-sync/ação).
+  lastSyncState: SyncState
+  // Mensagem do último erro não-fatal (offline/transport), se houver.
+  lastError: string | null
+  // Quando o último estado foi registrado.
+  lastSyncAt: number | null
+}
+
+export interface SyncConfigureInput {
+  repoUrl: string
+}
+
+export interface SyncResolveConflictInput {
+  keep: 'local' | 'remote'
+}
+
+// Define a pasta-raiz dos projetos desta máquina. root vazio → limpa (null).
+export interface SyncSetProjectsRootInput {
+  root: string
+}
+
+// Resultado de uma operação de sync. 'conflict' carrega ahead/behind p/ a UI.
+export type SyncNowResult =
+  | { state: 'not-configured' }
+  | { state: 'up-to-date' }
+  | { state: 'pushed' }
+  | { state: 'pulled' }
+  | { state: 'conflict'; ahead: number; behind: number }
+
+// Resultado de um backup manual em .zip (independente do git). 'canceled' =
+// o usuário fechou o dialog. 'exported'/'imported' carregam o path do .zip.
+export type SyncBackupResult =
+  | { state: 'canceled' }
+  | { state: 'exported'; path: string }
+  | { state: 'imported'; path: string }
+
 export interface Api {
   projects: {
     list(): Promise<Project[]>
@@ -1021,6 +1100,18 @@ export interface Api {
   }
   mcp: {
     status(): Promise<McpStatus>
+  }
+  sync: {
+    status(): Promise<SyncStatus>
+    configure(input: SyncConfigureInput): Promise<SyncStatus>
+    setProjectsRoot(input: SyncSetProjectsRootInput): Promise<SyncStatus>
+    now(): Promise<SyncNowResult>
+    exportForce(): Promise<SyncNowResult>
+    importForce(): Promise<SyncNowResult>
+    resolveConflict(input: SyncResolveConflictInput): Promise<SyncNowResult>
+    // Backup manual em .zip (independente do git; abre dialog no main).
+    backupExport(): Promise<SyncBackupResult>
+    backupImport(): Promise<SyncBackupResult>
   }
   window: {
     minimize(): Promise<void>

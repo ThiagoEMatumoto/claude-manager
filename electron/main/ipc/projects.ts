@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, lstatSync, unlinkSync, readdirSync } from 'node:fs'
 import { z } from 'zod'
 import { getDb } from '../services/db'
+import { pingSyncMutation } from '../services/notify'
 import { normalizePath, selectUntracked } from './untracked-folders'
 import type {
   Project,
@@ -117,6 +118,7 @@ export function registerProjectIpc(): void {
       row.created_at,
       row.updated_at,
     )
+    pingSyncMutation()
     return toProject(row)
   })
 
@@ -125,6 +127,7 @@ export function registerProjectIpc(): void {
     const db = getDb()
     const setPos = db.prepare('UPDATE projects SET position = ? WHERE id = ?')
     db.transaction(() => ids.forEach((id, i) => setPos.run(i, id)))()
+    pingSyncMutation()
   })
 
   ipcMain.handle('projects:update', (_e, raw: unknown) => {
@@ -155,11 +158,13 @@ export function registerProjectIpc(): void {
 
     db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...values, input.id)
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(input.id) as ProjectRow
+    pingSyncMutation()
     return toProject(row)
   })
 
   ipcMain.handle('projects:delete', (_e, id: string) => {
     getDb().prepare('DELETE FROM projects WHERE id = ?').run(id)
+    pingSyncMutation()
   })
 
   ipcMain.handle('projects:repos:list', (_e, projectId: string) => {
@@ -211,6 +216,7 @@ export function registerProjectIpc(): void {
       row.position,
       row.created_at,
     )
+    pingSyncMutation()
     return toRepo(row)
   })
 
@@ -231,6 +237,7 @@ export function registerProjectIpc(): void {
 
     if (sets.length > 0) {
       db.prepare(`UPDATE repos SET ${sets.join(', ')} WHERE id = ?`).run(...values, input.id)
+      pingSyncMutation()
     }
     const row = db.prepare('SELECT * FROM repos WHERE id = ?').get(input.id) as RepoRow
     return toRepo(row)
@@ -256,6 +263,7 @@ export function registerProjectIpc(): void {
     }
 
     db.prepare('DELETE FROM repos WHERE id = ?').run(id)
+    pingSyncMutation()
   })
 
   ipcMain.handle('projects:repos:reorder', (_e, raw: unknown) => {
@@ -265,6 +273,7 @@ export function registerProjectIpc(): void {
       'UPDATE repos SET position = ? WHERE id = ? AND project_id = ?',
     )
     db.transaction(() => input.repoIds.forEach((id, i) => setPos.run(i, id, input.projectId)))()
+    pingSyncMutation()
   })
 
   // Lista pastas que existem no primeiro nível do vault do projeto mas ainda não

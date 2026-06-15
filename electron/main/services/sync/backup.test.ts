@@ -123,6 +123,15 @@ function dumpTable(db: Database.Database, table: string): unknown[] {
   return db.prepare(`SELECT * FROM "${table}" ORDER BY ${orderBy}`).all()
 }
 
+// features.doc_path é RECOMPUTADO no import contra a featuresRoot local (#1),
+// então NÃO é byte-igual entre origem e destino com roots diferentes. Para a
+// paridade linha-a-linha do resto, comparamos sem doc_path.
+function dumpTableSansDocPath(db: Database.Database, table: string): unknown[] {
+  const rows = dumpTable(db, table) as Array<Record<string, unknown>>
+  if (table !== 'features') return rows
+  return rows.map(({ doc_path: _doc, ...rest }) => rest)
+}
+
 let dirs: string[] = []
 function tmp(prefix: string): string {
   const d = mkdtempSync(join(tmpdir(), prefix))
@@ -162,8 +171,15 @@ describe('backup .zip export/import', () => {
     importBackup(dbB, zipPath, { featuresRoot: featRootB, ...noopWatcher })
 
     for (const table of SYNCED_TABLES) {
-      expect(dumpTable(dbB, table), `tabela ${table}`).toEqual(dumpTable(dbA, table))
+      expect(dumpTableSansDocPath(dbB, table), `tabela ${table}`).toEqual(
+        dumpTableSansDocPath(dbA, table),
+      )
     }
+    // doc_path recomputado contra a featuresRoot LOCAL (#1).
+    expect(
+      (dbB.prepare(`SELECT doc_path FROM features WHERE id='feat-1'`).get() as { doc_path: string })
+        .doc_path,
+    ).toBe(join(featRootB, 'proj-1', 'minha-feature.md'))
 
     // .md restaurado byte-a-byte.
     const importedMd = readFileSync(join(featRootB, 'proj-1', 'minha-feature.md'), 'utf8')
@@ -209,9 +225,11 @@ describe('backup .zip export/import', () => {
     const after2 = SYNCED_TABLES.map((t) => dumpTable(dbB, t))
 
     expect(after2).toEqual(after1)
-    // E paridade com a origem após a 2ª importação.
+    // E paridade com a origem após a 2ª importação (doc_path recomputado → fora).
     for (const table of SYNCED_TABLES) {
-      expect(dumpTable(dbB, table), `tabela ${table}`).toEqual(dumpTable(dbA, table))
+      expect(dumpTableSansDocPath(dbB, table), `tabela ${table}`).toEqual(
+        dumpTableSansDocPath(dbA, table),
+      )
     }
     dbA.close()
     dbB.close()

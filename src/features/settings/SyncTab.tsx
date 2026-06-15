@@ -218,6 +218,29 @@ export function SyncTab({ open }: Props) {
         />
       )}
 
+      {/* Pasta-raiz dos projetos — sempre visível (inclusive no wizard), pois define
+          a portabilidade de paths já no primeiro export. */}
+      {status !== null && (
+        <Section title="Pasta-raiz dos projetos">
+          <p className="mb-2 text-xs text-[var(--color-text-dim)]">
+            A pasta onde seus projetos vivem NESTA máquina. Caminhos abaixo dela são
+            sincronizados de forma portável (cada máquina resolve contra a sua própria raiz).
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-3 py-1.5 text-sm">
+              {status.projectsRoot ? (
+                <span className="font-mono">{status.projectsRoot}</span>
+              ) : (
+                <span className="text-[var(--color-text-dim)]">não definida</span>
+              )}
+            </div>
+            <Button variant="ghost" loading={busy === 'configure'} onClick={pickProjectsRoot}>
+              Escolher pasta…
+            </Button>
+          </div>
+        </Section>
+      )}
+
       {status === null ? (
         <div className="text-sm text-[var(--color-text-dim)]">carregando…</div>
       ) : !configured ? (
@@ -279,26 +302,6 @@ export function SyncTab({ open }: Props) {
             </div>
             <div className="mt-2 text-xs text-[var(--color-text-dim)]">
               Esta máquina: <span className="font-mono">{status.machineId}</span>
-            </div>
-          </Section>
-
-          {/* Pasta-raiz dos projetos (portabilidade entre máquinas) */}
-          <Section title="Pasta-raiz dos projetos">
-            <p className="mb-2 text-xs text-[var(--color-text-dim)]">
-              A pasta onde seus projetos vivem NESTA máquina. Caminhos abaixo dela são
-              sincronizados de forma portável (cada máquina resolve contra a sua própria raiz).
-            </p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-3 py-1.5 text-sm">
-                {status.projectsRoot ? (
-                  <span className="font-mono">{status.projectsRoot}</span>
-                ) : (
-                  <span className="text-[var(--color-text-dim)]">não definida</span>
-                )}
-              </div>
-              <Button variant="ghost" loading={busy === 'configure'} onClick={pickProjectsRoot}>
-                Escolher pasta…
-              </Button>
             </div>
           </Section>
 

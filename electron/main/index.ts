@@ -18,7 +18,7 @@ import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
 import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
-import { setSyncMutationHook } from './services/notify'
+import { setSyncMutationHook, broadcast } from './services/notify'
 import { startFeatureWatcher, stopFeatureWatcher } from './services/feature-store'
 import { featureMemory } from './services/feature-memory'
 import {
@@ -127,17 +127,26 @@ app.whenReady().then(async () => {
   setSyncMutationHook(notifySyncMutation)
   registerWindowIpc()
 
-  // Pull-no-boot CONSERVADOR: importa só fast-forward limpo (sem trabalho local
-  // não-empurrado), bounded por timeout e NÃO-fatal (offline/erro → segue boot
-  // com dados locais). Roda ANTES da janela para que o renderer leia o estado
-  // já reconciliado. Watcher ainda não foi iniciado aqui (startFeatureWatcher
-  // vem depois), então o importBundle reconcilia os .md sem corrida.
-  await syncOnBoot()
-
+  // A janela é criada PRIMEIRO (sem await no sync) para não pintar tela preta
+  // até 8s em rede lenta. O watcher inicia já — o syncOnBoot pausa/reinicia o
+  // watcher via watcherHooks internamente quando importa.
   createMainWindow()
   initUpdater()
   startUsageMonitor()
   startFeatureWatcher()
+
+  // Pull-no-boot CONSERVADOR em BACKGROUND: importa só fast-forward limpo (sem
+  // trabalho local não-empurrado), bounded por timeout e NÃO-fatal (offline/erro
+  // → segue com dados locais). Roda sob o mutex de sync (não corre com o
+  // coordinator). Se IMPORTOU (mudou dados), faz broadcast dos canais das
+  // entidades sincronizadas para o renderer recarregar ao vivo — as stores de
+  // features/objectives/tasks tratam um payload-sinal como "refresh()".
+  void syncOnBoot().then((imported) => {
+    if (!imported) return
+    broadcast('feature:updated', { backfill: true })
+    broadcast('objective:updated', { reload: true })
+    broadcast('task:updated', { reload: true })
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
@@ -171,7 +180,12 @@ const QUIT_FLUSH_TIMEOUT_MS = 6000
 let quitFlushStarted = false
 app.on('before-quit', (event) => {
   if (didShutdown) return // shutdown já concluído → deixa o quit prosseguir
-  if (quitFlushStarted) return // flush em andamento → não re-entra
+  if (quitFlushStarted) {
+    // Flush em andamento: um 2º quit não pode escapar o shutdown limpo (sem o
+    // preventDefault o Electron prosseguiria e fecharia o DB no meio do flush).
+    event.preventDefault()
+    return
+  }
   quitFlushStarted = true
 
   // Adia o quit para empurrar a última edição (best-effort) ANTES de fechar o

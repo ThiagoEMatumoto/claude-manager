@@ -114,13 +114,12 @@ function ensureGhReady(): void {
 }
 
 // Resolve a URL do remote origin (para decidir se a operação precisa de auth).
+// NÃO engole erro de getRemotes: se a resolução falhar, `needsAuth('')` daria
+// false e a operação de rede correria SEM credential helper (falha silenciosa de
+// auth em http(s)). Propagar o erro faz a operação falhar alto e claro.
 async function originUrl(git: SimpleGit): Promise<string> {
-  try {
-    const remotes = await git.getRemotes(true)
-    return remotes.find((r) => r.name === 'origin')?.refs.fetch ?? ''
-  } catch {
-    return ''
-  }
+  const remotes = await git.getRemotes(true)
+  return remotes.find((r) => r.name === 'origin')?.refs.fetch ?? ''
 }
 
 // Probe: `gh` disponível e autenticado? Mantido para callers que precisam decidir

@@ -20,6 +20,12 @@ import {
   tableFilePath,
 } from './bundle-format'
 
+export interface ImportResult {
+  // Quantos paths <CM_ROOT>/... não puderam ser resolvidos (sem projectsRoot
+  // local). >0 sinaliza que a UI deve pedir a configuração da pasta-raiz.
+  unresolvedPaths: number
+}
+
 export interface ImportOpts {
   // Raiz local dos `.md` (destino da reconciliação). Injetável p/ teste.
   featuresRoot?: string | (() => string)
@@ -129,14 +135,22 @@ function reconcileFeatures(
 //   1. valida schema (manifest vs MAX(_migrations) local; bundle MAIOR => erro)
 //   2. pausa watcher
 //   3. foreign_keys = OFF
-//   4. transação: DELETE em ordem REVERSA de FK; INSERT em ordem de FK
-//   5. reconcilia .md (sobrescreve via markSelfWrite, remove órfãos)
-//   6. finally: foreign_keys = ON, foreign_key_check (lança se violar), reinicia watcher
-export function importBundle(db: Database.Database, bundleDir: string, opts?: ImportOpts): void {
+//   4. transação: DELETE em ordem REVERSA de FK; INSERT em ordem de FK;
+//      foreign_key_check DENTRO da tx (viola → throw → ROLLBACK automático,
+//      dados locais preservados)
+//   5. reconcilia .md (sobrescreve via markSelfWrite, remove órfãos) — SÓ após
+//      a tx ter sucesso
+//   6. finally: foreign_keys = ON, reinicia watcher
+export function importBundle(
+  db: Database.Database,
+  bundleDir: string,
+  opts?: ImportOpts,
+): ImportResult {
   const stop = opts?.stopWatcher ?? stopFeatureWatcher
   const start = opts?.startWatcher ?? startFeatureWatcher
   const mark = opts?.markSelfWrite ?? markSelfWrite
   const projectsRoot = opts?.projectsRoot ?? null
+  const localFeaturesRoot = resolveFeaturesRoot(opts)
 
   const { schemaVersion } = readManifest(bundleDir)
   const local = localSchemaVersion(db)
@@ -155,6 +169,8 @@ export function importBundle(db: Database.Database, bundleDir: string, opts?: Im
   for (const table of SYNCED_TABLES) {
     tableData.set(table, readTable(bundleDir, table))
   }
+
+  let unresolvedPaths = 0
 
   db.pragma('foreign_keys = OFF')
   try {
@@ -176,29 +192,56 @@ export function importBundle(db: Database.Database, bundleDir: string, opts?: Im
           const params: Record<string, unknown> = {}
           for (const c of cols) {
             const v = row[c] ?? null
-            // <CM_ROOT>/... → resolve contra a raiz LOCAL; absoluto legado passa
-            // intacto; NULL intacto. (unresolved é ignorado aqui — sem raiz local
-            // o path fica relativo/quebrado, mas o import não falha.)
-            params[c] = pathCols.has(c) ? localizePath(v, projectsRoot).value : v
+            if (pathCols.has(c)) {
+              // <CM_ROOT>/... → resolve contra a raiz LOCAL; absoluto legado passa
+              // intacto; NULL intacto. Conta os não-resolvidos (sem raiz local o
+              // path fica relativo/quebrado, mas o import não falha).
+              const r = localizePath(v, projectsRoot)
+              if (r.unresolved) unresolvedPaths++
+              params[c] = r.value
+            } else {
+              params[c] = v
+            }
+          }
+          // features.doc_path é absoluto sob <userData>/features (FORA da
+          // <CM_ROOT>), então não está em PATH_COLUMNS — recomputamos a partir
+          // da raiz de features LOCAL + project_id + slug, em vez de gravar o
+          // path da máquina de origem (que apontaria pro userData dela).
+          if (table === 'features') {
+            params.doc_path = join(
+              localFeaturesRoot,
+              String(row.project_id),
+              `${String(row.slug)}.md`,
+            )
           }
           ins.run(params)
         }
       }
+      // FK check DENTRO da tx: violação → throw → ROLLBACK automático (o DELETE
+      // não é commitado, dados locais ficam intactos). Funciona com o pragma OFF.
+      const violations = db.pragma('foreign_key_check') as unknown[]
+      if (violations.length > 0) {
+        throw new Error(
+          `[sync] import deixou ${violations.length} violação(ões) de FK: ` +
+            JSON.stringify(violations.slice(0, 5)),
+        )
+      }
     })
     tx()
 
-    reconcileFeatures(bundleDir, resolveFeaturesRoot(opts), mark)
+    // Só após a tx ter sucesso (se lançou, os .md locais ficam intactos).
+    reconcileFeatures(bundleDir, localFeaturesRoot, mark)
   } finally {
     db.pragma('foreign_keys = ON')
-    const violations = db.pragma('foreign_key_check') as unknown[]
-    if (violations.length > 0) {
-      // Reinicia o watcher antes de propagar (mantém o app consistente).
-      if (opts?.watcherWasActive) start()
-      throw new Error(
-        `[sync] import deixou ${violations.length} violação(ões) de FK: ` +
-          JSON.stringify(violations.slice(0, 5)),
-      )
-    }
     if (opts?.watcherWasActive) start()
   }
+
+  if (unresolvedPaths > 0) {
+    console.warn(
+      `[sync] import: ${unresolvedPaths} caminho(s) não resolvido(s) — ` +
+        'configure a pasta-raiz dos projetos para resolver paths portáveis.',
+    )
+  }
+
+  return { unresolvedPaths }
 }

@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }))
 
-import { SYNCED_TABLES, TABLE_PRIMARY_KEYS, stableStringify } from './bundle-format'
+import { PATH_COLUMNS, SYNCED_TABLES, TABLE_PRIMARY_KEYS, stableStringify } from './bundle-format'
 import { exportBundle } from './exporter'
 import { importBundle } from './importer'
 import { migrations } from '../migrations/index'
@@ -141,6 +141,14 @@ function dumpTable(db: Database.Database, table: string): unknown[] {
   return db.prepare(`SELECT * FROM "${table}" ORDER BY ${orderBy}`).all()
 }
 
+// features.doc_path é RECOMPUTADO no import contra a featuresRoot local (#1) →
+// não é byte-igual com roots diferentes. Comparação de paridade sem doc_path.
+function dumpTableSansDocPath(db: Database.Database, table: string): unknown[] {
+  const rows = dumpTable(db, table) as Array<Record<string, unknown>>
+  if (table !== 'features') return rows
+  return rows.map(({ doc_path: _doc, ...rest }) => rest)
+}
+
 let dirs: string[] = []
 function tmp(prefix: string): string {
   const d = mkdtempSync(join(tmpdir(), prefix))
@@ -179,8 +187,15 @@ describe('sync bundle export/import', () => {
     importBundle(dbB, bundleDir, { featuresRoot: featRootB, ...noopWatcher })
 
     for (const table of SYNCED_TABLES) {
-      expect(dumpTable(dbB, table), `tabela ${table}`).toEqual(dumpTable(dbA, table))
+      expect(dumpTableSansDocPath(dbB, table), `tabela ${table}`).toEqual(
+        dumpTableSansDocPath(dbA, table),
+      )
     }
+    // doc_path recomputado contra a featuresRoot LOCAL (#1).
+    expect(
+      (dbB.prepare(`SELECT doc_path FROM features WHERE id='feat-1'`).get() as { doc_path: string })
+        .doc_path,
+    ).toBe(join(featRootB, 'proj-1', 'minha-feature.md'))
 
     // .md reconciliado byte-a-byte.
     const importedMd = readFileSync(join(featRootB, 'proj-1', 'minha-feature.md'), 'utf8')
@@ -324,6 +339,102 @@ describe('sync bundle export/import', () => {
     importBundle(dbB, bundleDir, { featuresRoot: featRootB, ...noopWatcher })
     expect(existsSync(join(featRootB, 'proj-9', 'stale.md'))).toBe(false)
     db.close()
+    dbB.close()
+  })
+
+  // ---- #1: features.doc_path recomputado a partir da featuresRoot LOCAL ----
+  it('#1: doc_path é recomputado contra a featuresRoot local (não o path da origem)', () => {
+    const dbA = newDb()
+    seed(dbA) // feat-1: project_id=proj-1, slug=minha-feature, doc_path=/tmp/whatever/...
+    const featRootA = tmp('sync-feat-a-')
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(dbA, bundleDir, { featuresRoot: featRootA, exportedAt: 1 })
+
+    // O bundle carrega o doc_path da MÁQUINA A (verbatim).
+    const exported = ndjson(bundleDir, 'features').find((f) => f.id === 'feat-1')!
+    expect(exported.doc_path).toBe('/tmp/whatever/proj-1/minha-feature.md')
+
+    // Import na máquina B com featuresRoot DIFERENTE → doc_path aponta pra B.
+    const dbB = newDb()
+    const featRootB = tmp('sync-feat-b-')
+    importBundle(dbB, bundleDir, { featuresRoot: featRootB, ...noopWatcher })
+
+    const row = dbB.prepare(`SELECT doc_path FROM features WHERE id='feat-1'`).get() as {
+      doc_path: string
+    }
+    expect(row.doc_path).toBe(join(featRootB, 'proj-1', 'minha-feature.md'))
+    expect(row.doc_path).not.toContain('/tmp/whatever') // não vazou o path da origem
+    dbA.close()
+    dbB.close()
+  })
+
+  // ---- #5: localizePath unresolved é contado e retornado ----
+  it('#5: import de bundle portável SEM projectsRoot → unresolvedPaths > 0', () => {
+    const dbA = newDb()
+    seedPortable(dbA, '/home/x/ClaudeManager')
+    const bundleDir = tmp('sync-bundle-')
+    // Export COM raiz → paths viram <CM_ROOT>/... (portáveis).
+    exportBundle(dbA, bundleDir, {
+      featuresRoot: tmp('sync-feat-'),
+      exportedAt: 1,
+      projectsRoot: '/home/x/ClaudeManager',
+    })
+
+    // Import SEM projectsRoot local → sentinelas não resolvem.
+    const dbB = newDb()
+    const res = importBundle(dbB, bundleDir, {
+      featuresRoot: tmp('sync-feat-b-'),
+      ...noopWatcher,
+      projectsRoot: null,
+    })
+    expect(res.unresolvedPaths).toBeGreaterThan(0)
+    dbA.close()
+    dbB.close()
+  })
+
+  // ---- #3: FK violation → rollback, DB local INALTERADO ----
+  it('#3: bundle com FK órfã → lança E o DB local fica inalterado (rollback)', () => {
+    const dbA = newDb()
+    seed(dbA)
+    const bundleDir = tmp('sync-bundle-')
+    exportBundle(dbA, bundleDir, { featuresRoot: tmp('sync-feat-'), exportedAt: 1 })
+
+    // Corrompe o bundle: aponta repos.project_id para um projeto inexistente.
+    const reposFile = join(bundleDir, 'tables', 'repos.ndjson')
+    const lines = readFileSync(reposFile, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => {
+        const o = JSON.parse(l) as Record<string, unknown>
+        o.project_id = 'proj-ORPHAN'
+        return stableStringify(o)
+      })
+    writeFileSync(reposFile, lines.join('\n') + '\n')
+
+    // DB local de destino com dados próprios (devem sobreviver ao import falho).
+    const dbB = newDb()
+    seed(dbB)
+    const countBefore = (t: string): number =>
+      (dbB.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get() as { c: number }).c
+    const projBefore = countBefore('projects')
+    const reposBefore = countBefore('repos')
+    const nameBefore = (
+      dbB.prepare(`SELECT name FROM projects WHERE id='proj-1'`).get() as { name: string }
+    ).name
+
+    expect(() =>
+      importBundle(dbB, bundleDir, { featuresRoot: tmp('sync-feat-b-'), ...noopWatcher }),
+    ).toThrow(/violação\(ões\) de FK/)
+
+    // Rollback provado: contagens e dados idênticos ao estado pré-import.
+    expect(countBefore('projects')).toBe(projBefore)
+    expect(countBefore('repos')).toBe(reposBefore)
+    expect(
+      (dbB.prepare(`SELECT name FROM projects WHERE id='proj-1'`).get() as { name: string }).name,
+    ).toBe(nameBefore)
+    const violations = dbB.pragma('foreign_key_check') as unknown[]
+    expect(violations).toEqual([])
+    dbA.close()
     dbB.close()
   })
 })
@@ -517,9 +628,85 @@ describe('sync portabilidade de paths (raiz por máquina)', () => {
     })
 
     for (const table of ['projects', 'repos', 'feature_repos', 'features']) {
-      expect(dumpTable(dbB, table), `tabela ${table}`).toEqual(dumpTable(dbA, table))
+      expect(dumpTableSansDocPath(dbB, table), `tabela ${table}`).toEqual(
+        dumpTableSansDocPath(dbA, table),
+      )
     }
     dbA.close()
     dbB.close()
+  })
+})
+
+// ---- #10: guard de drift entre as listas de sync e o schema REAL ----
+//
+// Cruza SYNCED_TABLES/PATH_COLUMNS contra o schema materializado pelas migrations
+// reais. Pega: tabela removida do schema mas ainda em SYNCED_TABLES; coluna de
+// path em PATH_COLUMNS que não existe; e — heurística que teria pego o #1 — uma
+// coluna TEXT cujo nome cheira a path (path/dir/root) numa tabela sincronizada
+// que NÃO está em PATH_COLUMNS nem na allowlist documentada.
+describe('#10: drift schema vs listas de sync', () => {
+  // Colunas TEXT "tipo path" cujo NÃO-pertencimento a PATH_COLUMNS é INTENCIONAL.
+  // Cada entrada exige justificativa — senão a heurística falha (anti-#1).
+  const PATH_ALLOWLIST: Record<string, string> = {
+    // features.doc_path vive sob <userData>/features (FORA da <CM_ROOT>), então
+    // não é portablizado; é RECOMPUTADO no import a partir da featuresRoot local
+    // + project_id + slug. Por isso fica fora de PATH_COLUMNS de propósito (#1).
+    'features.doc_path': 'recomputado no import (não portablizado)',
+  }
+
+  function tableExists(db: Database.Database, t: string): boolean {
+    const r = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+      .get(t) as { name: string } | undefined
+    return !!r
+  }
+
+  function columns(db: Database.Database, t: string): Array<{ name: string; type: string }> {
+    return db.pragma(`table_info(${t})`) as Array<{ name: string; type: string }>
+  }
+
+  it('toda tabela em SYNCED_TABLES existe no schema real', () => {
+    const db = newDb()
+    for (const t of SYNCED_TABLES) {
+      expect(tableExists(db, t), `tabela ${t} ausente no schema`).toBe(true)
+    }
+    db.close()
+  })
+
+  it('toda coluna em PATH_COLUMNS existe na sua tabela', () => {
+    const db = newDb()
+    for (const [table, cols] of Object.entries(PATH_COLUMNS)) {
+      const have = new Set(columns(db, table).map((c) => c.name))
+      for (const c of cols ?? []) {
+        expect(have.has(c), `coluna de path ${table}.${c} ausente no schema`).toBe(true)
+      }
+    }
+    db.close()
+  })
+
+  it('heurística anti-#1: coluna TEXT path/dir/root sincronizada ⊆ PATH_COLUMNS ∪ allowlist', () => {
+    const db = newDb()
+    const offenders: string[] = []
+    for (const t of SYNCED_TABLES) {
+      const pathCols = new Set(PATH_COLUMNS[t] ?? [])
+      for (const col of columns(db, t)) {
+        const isTextish = /TEXT|CHAR|CLOB/i.test(col.type) || col.type === ''
+        // "cheira a path": contém o token path, OU termina/usa dir|root como
+        // sufixo de palavra (`_dir`, `worktree`, `*root`). Evita falsos-positivos
+        // como `direction` (substring "dir" mas não é path).
+        const n = col.name.toLowerCase()
+        const smellsPath =
+          /path/.test(n) || /(^|_)(dir|root)$/.test(n) || /_(dir|root)(_|$)/.test(n)
+        if (!isTextish || !smellsPath) continue
+        const key = `${t}.${col.name}`
+        if (pathCols.has(col.name)) continue
+        if (PATH_ALLOWLIST[key]) continue
+        offenders.push(key)
+      }
+    }
+    // Qualquer coluna de path nova numa tabela sincronizada quebra aqui até ser
+    // adicionada a PATH_COLUMNS (portabilizar) OU à allowlist (com justificativa).
+    expect(offenders, `colunas de path não-cobertas: ${offenders.join(', ')}`).toEqual([])
+    db.close()
   })
 })

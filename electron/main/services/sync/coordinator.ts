@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { pushBundle, type GitSyncOpts, type PushResult } from './git-sync'
+import { withSyncLock } from './sync-lock'
 
 // Estado do coordinator, espelhado em sync:status (sobrevive a reabrir o dialog).
 //  - idle        — sem repo configurado / nada a fazer.
@@ -41,6 +42,10 @@ export class SyncCoordinator {
   private dirty = false
   // Mutex: um push de cada vez. Pings durante o push re-armam o debounce depois.
   private pushing = false
+  // Promise do push em curso (null quando ocioso). flush() aguarda-o em vez de
+  // retornar imediato, garantindo que o before-quit não feche o DB no meio do
+  // export (que lê o DB).
+  private inflight: Promise<void> | null = null
 
   constructor(deps: SyncCoordinatorDeps) {
     this.deps = deps
@@ -66,18 +71,27 @@ export class SyncCoordinator {
 
   // Flush best-effort: empurra o estado pendente AGORA (cancela o debounce).
   // Usado pelo before-quit. Resolve mesmo em erro (não-fatal). Se já há um push
-  // em andamento, aguarda-o e empurra o que ainda estiver pendente.
+  // em andamento, AGUARDA-O (sem retornar antes do fim — senão o closeDb do quit
+  // correria com o export que lê o DB) e então empurra o que ainda restar.
   async flush(): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
+    // Aguarda um push em curso antes de tentar empurrar o pendente. O inflight
+    // serializa: não há push concorrente.
+    if (this.inflight) await this.inflight
     await this.flushInternal()
   }
 
   // Núcleo: respeita o mutex; só empurra se dirty + configurado. Não-fatal.
   private async flushInternal(): Promise<void> {
-    if (this.pushing) return // mutex: o push em curso reavalia dirty ao final
+    if (this.pushing) {
+      // mutex: aguarda o push em curso (que reavalia dirty ao final). Não
+      // retorna antes — o flush do quit precisa do fim real do push.
+      if (this.inflight) await this.inflight
+      return
+    }
     if (!this.dirty) return
     if (!this.deps.isConfigured()) {
       this.dirty = false
@@ -90,26 +104,47 @@ export class SyncCoordinator {
     this.dirty = false
     this.deps.onState('syncing')
 
-    let result: PushResult | null = null
-    let error: string | null = null
-    try {
-      result = await pushBundle(
-        this.deps.workdir(),
-        this.deps.getDb(),
-        this.deps.commitMessage(),
-        this.deps.syncOpts?.(),
-      )
-    } catch (err) {
-      error = String((err as Error)?.message ?? err)
-    } finally {
-      this.pushing = false
+    const run = async (): Promise<void> => {
+      let result: PushResult | null = null
+      let error: string | null = null
+      try {
+        // withSyncLock serializa contra os handlers IPC que também tocam o
+        // working tree do git (sync:now etc) — sem isso seria git concorrente.
+        result = await withSyncLock(() =>
+          pushBundle(
+            this.deps.workdir(),
+            this.deps.getDb(),
+            this.deps.commitMessage(),
+            this.deps.syncOpts?.(),
+          ),
+        )
+      } catch (err) {
+        error = String((err as Error)?.message ?? err)
+      } finally {
+        this.pushing = false
+      }
+      this.settle(result, error)
     }
 
+    const p = run()
+    this.inflight = p
+    try {
+      await p
+    } finally {
+      if (this.inflight === p) this.inflight = null
+    }
+  }
+
+  // Aplica o resultado do push ao estado (extraído de flushInternal para que o
+  // inflight envolva só o trabalho de rede + a transição de estado).
+  private settle(result: PushResult | null, error: string | null): void {
     if (error) {
       // Offline / erro de transporte → stale; o ping ficou marcado de novo se
       // algo chegou durante o push, senão re-marcamos para tentar no próximo idle.
       this.dirty = true
       this.deps.onState('stale', { error })
+      // Re-agenda para retentar no próximo idle sem depender de nova mutação.
+      this.schedule()
       return
     }
 

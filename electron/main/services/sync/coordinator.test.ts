@@ -23,6 +23,7 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }))
 
+import * as gitSync from './git-sync'
 import { ensureRepo, pushBundle, type GitSyncOpts } from './git-sync'
 import { SyncCoordinator, type SyncCoordinatorState } from './coordinator'
 import { migrations } from '../migrations/index'
@@ -267,6 +268,88 @@ describe('SyncCoordinator', () => {
 
     expect(rec.states.filter((s) => s.state === 'syncing')).toHaveLength(1)
     expect(rec.last()?.state).toBe('in-sync')
+    db.close()
+  })
+
+  it('6. (#2) flush aguarda o push em curso (não retorna no meio do export)', async () => {
+    const db = newDb()
+    const rec = recorder()
+
+    // pushBundle lento e controlável: resolve só quando liberarmos.
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const order: string[] = []
+    const spy = vi.spyOn(gitSync, 'pushBundle').mockImplementation(async () => {
+      order.push('push-start')
+      await gate
+      order.push('push-end')
+      return { pushed: true, rejected: false }
+    })
+
+    const coord = new SyncCoordinator({
+      workdir: () => tmp('cm-coord-wk-'),
+      getDb: () => db,
+      isConfigured: () => true,
+      syncOpts: () => ({}),
+      commitMessage: () => 'inflight',
+      onState: rec.onState,
+      debounceMs: 5,
+    })
+
+    // Dispara um push via mutação + debounce curto.
+    coord.notifyMutation()
+    await vi.waitFor(() => expect(order).toContain('push-start'))
+
+    // flush() concorrente ENQUANTO o push roda: deve aguardar o push terminar.
+    let flushResolved = false
+    const fp = coord.flush().then(() => {
+      flushResolved = true
+      order.push('flush-resolved')
+    })
+    // Ainda preso no push → flush não resolveu.
+    await sleep(20)
+    expect(flushResolved).toBe(false)
+
+    release() // libera o push em curso
+    await fp
+
+    // flush só resolveu DEPOIS de push-end.
+    expect(order.indexOf('flush-resolved')).toBeGreaterThan(order.indexOf('push-end'))
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(1)
+    db.close()
+  })
+
+  it('7. (#7) push falha (offline) → estado stale E re-agenda (retenta no próximo idle)', async () => {
+    const db = newDb()
+    const rec = recorder()
+
+    // 1ª chamada falha (offline), 2ª sucede — prova que o re-agendamento retenta.
+    let calls = 0
+    vi.spyOn(gitSync, 'pushBundle').mockImplementation(async () => {
+      calls++
+      if (calls === 1) throw new Error('offline: could not resolve host')
+      return { pushed: true, rejected: false }
+    })
+
+    const coord = new SyncCoordinator({
+      workdir: () => tmp('cm-coord-wk-'),
+      getDb: () => db,
+      isConfigured: () => true,
+      syncOpts: () => ({}),
+      commitMessage: () => 'retry',
+      onState: rec.onState,
+      debounceMs: 15,
+    })
+
+    coord.notifyMutation()
+    // 1ª tentativa → stale (offline).
+    await vi.waitFor(() => expect(rec.has('stale')).toBe(true))
+
+    // SEM nova mutação: o re-agendamento do branch de erro retenta sozinho até
+    // suceder (prova o this.schedule() do branch de erro — #7). Sem ele o estado
+    // ficaria preso em stale para sempre.
+    await vi.waitFor(() => expect(rec.last()?.state).toBe('in-sync'), { timeout: 2000 })
+    expect(calls).toBeGreaterThanOrEqual(2)
     db.close()
   })
 

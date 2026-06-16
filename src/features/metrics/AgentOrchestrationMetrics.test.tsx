@@ -17,6 +17,8 @@ function makeTotals(overrides: Partial<MetricsTotals> = {}): MetricsTotals {
     cacheHitRate: 0,
     parallelizationRatio: 0,
     inlineDelegationRatio: 0,
+    subagentTurns: 0,
+    managerModeScore: 0,
     ...overrides,
   }
 }
@@ -76,6 +78,28 @@ describe('AgentOrchestrationMetrics', () => {
     )
     const target = screen.getAllByTestId('kpi-target')[0]
     expect(target.textContent).toContain('Meta >')
+  })
+
+  it('card manager-mode usa cor de warning na band watch (>=0.15 e <0.30)', () => {
+    render(
+      <AgentOrchestrationMetrics
+        totals={makeTotals({ managerModeScore: 0.2 })}
+        subagentTypeDistribution={[]}
+      />,
+    )
+    const value = screen.getAllByTestId('kpi-value')[2]
+    expect(value.style.color).toContain('--color-warning')
+  })
+
+  it('card manager-mode usa cor de success na band good (>=0.30)', () => {
+    render(
+      <AgentOrchestrationMetrics
+        totals={makeTotals({ managerModeScore: 0.35 })}
+        subagentTypeDistribution={[]}
+      />,
+    )
+    const value = screen.getAllByTestId('kpi-value')[2]
+    expect(value.style.color).toContain('--color-success')
   })
 
   it('marca o baseline no track', () => {

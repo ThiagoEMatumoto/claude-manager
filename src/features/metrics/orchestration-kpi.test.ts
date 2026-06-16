@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDelta, formatDelta, formatPct, kpiStatus } from './orchestration-kpi'
+import { bandFor, computeDelta, formatDelta, formatPct, kpiStatus } from './orchestration-kpi'
 
 describe('kpiStatus', () => {
   it('marca above quando valor >= alvo', () => {
@@ -35,6 +35,31 @@ describe('computeDelta', () => {
     const d = computeDelta(0.3, 0.3)
     expect(d!.dir).toBe('flat')
     expect(d!.abs).toBeCloseTo(0, 9)
+  })
+})
+
+describe('bandFor', () => {
+  // Thresholds canônicos (kz_dashboard health.py band_manager):
+  // >=0.30 good | >=0.15 watch | <0.15 bad
+  it('good na borda >= 0.30 e acima', () => {
+    expect(bandFor(0.3).label).toBe('good')
+    expect(bandFor(0.5).label).toBe('good')
+  })
+
+  it('watch na borda >= 0.15 e abaixo de 0.30', () => {
+    expect(bandFor(0.15).label).toBe('watch')
+    expect(bandFor(0.299).label).toBe('watch')
+  })
+
+  it('bad abaixo de 0.15', () => {
+    expect(bandFor(0.149).label).toBe('bad')
+    expect(bandFor(0).label).toBe('bad')
+  })
+
+  it('cada band tem um tone associado', () => {
+    expect(bandFor(0.3).tone).toBe('good')
+    expect(bandFor(0.2).tone).toBe('watch')
+    expect(bandFor(0).tone).toBe('bad')
   })
 })
 

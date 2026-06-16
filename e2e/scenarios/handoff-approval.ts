@@ -1,5 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import initSqlJs from 'sql.js'
@@ -65,16 +64,56 @@ try {
   const sawPrompt = await page.getByText('crawler_callback', { exact: false }).count()
   console.log('[handoff] label visível?', sawRepo > 0, '| prompt visível?', sawPrompt > 0)
 
-  // Rejeita (caminho seguro — NÃO spawna processo claude real).
-  const reject = page.getByRole('button', { name: /rejeitar/i }).first()
-  if (await reject.count()) {
-    await reject.click()
-    await page.waitForTimeout(800)
-    await screenshot(page, 'handoff-02-after-reject')
-    const status = await queryDb(userDataCopy, "SELECT status FROM handoffs WHERE id='seed-h1'")
-    console.log('[handoff] status após rejeitar:', JSON.stringify(status))
+  // Aprova: spawna a sessão-filha real no repo-alvo. O claude pode não autenticar,
+  // mas o arquivo de system-prompt é ESCRITO ANTES do spawn — é o que provamos.
+  const approve = page.getByRole('button', { name: /aprovar e abrir sess/i }).first()
+  if (await approve.count()) {
+    await approve.click()
+    await page.waitForTimeout(6000)
+    await screenshot(page, 'handoff-02-after-approve')
+
+    // (a) Sessão nova criada pro repo-alvo. Lido via IPC do app vivo (não via
+    // queryDb): o app usa SQLite em WAL e os writes recentes ficam no -wal, que o
+    // sql.js do queryDb NÃO enxerga. A API IPC lê o estado real (WAL incluído).
+    const sessions = (await page.evaluate(async (repoId) => {
+      const all = await window.api.sessions.list()
+      return all.filter((s: { repoId: string | null }) => s.repoId === repoId)
+    }, target.id)) as Array<{ id: string; status: string; repoId: string | null }>
+    console.log('[handoff] sessões IPC pro target:', JSON.stringify(sessions))
+
+    // (b) Arquivo de system-prompt íntegro em <userData>/tmp/handoff-*.md.
+    const tmpDir = join(userDataCopy, 'tmp')
+    let handoffFile: string | null = null
+    if (existsSync(tmpDir)) {
+      const f = readdirSync(tmpDir).find((n) => n.startsWith('handoff-') && n.endsWith('.md'))
+      if (f) handoffFile = join(tmpDir, f)
+    }
+    if (handoffFile) {
+      const content = readFileSync(handoffFile, 'utf8')
+      const hasContexto = content.includes('## Contexto')
+      const hasRestricoes = content.includes('## Restrições')
+      const hasReporte = content.includes('## Reporte')
+      const hasHandoffId = content.includes('seed-h1')
+      console.log('[handoff] arquivo:', handoffFile)
+      console.log(
+        '[handoff] conteúdo íntegro? Contexto=%s Restrições=%s Reporte=%s handoffId=%s',
+        hasContexto,
+        hasRestricoes,
+        hasReporte,
+        hasHandoffId,
+      )
+    } else {
+      console.log('[handoff] ARQUIVO handoff-*.md NÃO encontrado em', tmpDir)
+    }
+
+    // (c) Handoff foi a running. Também via IPC (mesma razão do WAL acima).
+    const handoffStatus = (await page.evaluate(async () => {
+      const list = await window.api.handoffs.list()
+      return list.find((h: { id: string }) => h.id === 'seed-h1')?.status ?? null
+    })) as string | null
+    console.log('[handoff] status IPC após aprovar:', JSON.stringify(handoffStatus))
   } else {
-    console.log('[handoff] botão Rejeitar não encontrado')
+    console.log('[handoff] botão Aprovar não encontrado')
   }
 } finally {
   stop()

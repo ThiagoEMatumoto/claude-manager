@@ -187,6 +187,10 @@ interface AppState {
     initialCommand?: string,
     // Modelo inicial ('opus' | 'sonnet' | 'haiku'); validado no main.
     model?: string,
+    // Texto de system-prompt anexado via arquivo (--append-system-prompt-file).
+    // Trailing/opcional: callers existentes omitem. Usado pelo handoff pra
+    // entregar o prompt completo íntegro (sem quebrar no REPL).
+    systemPromptText?: string,
     // Retorna o id da sessão criada. Callers existentes ignoram o retorno; o fluxo
     // de handoff usa pra marcar mark-running com o childSessionId.
   ) => Promise<string>
@@ -300,6 +304,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     name,
     initialCommand,
     model,
+    systemPromptText,
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
@@ -309,6 +314,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       name,
       initialCommand,
       model,
+      systemPromptText,
     })
     set((s) => ({
       panes: [

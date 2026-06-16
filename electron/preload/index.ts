@@ -26,6 +26,8 @@ import type {
   FeatureSynthError,
   CreateRepoDependencyInput,
   UpdateRepoDependencyInput,
+  SetRepoHubInput,
+  ConnectHubToAllInput,
   HandoffStatus,
   ObjectiveListFilter,
   CreateObjectiveInput,
@@ -66,6 +68,7 @@ const api: Api = {
     updateRepo: (input: UpdateRepoInput) => invoke('projects:repos:update', input),
     deleteRepo: (id: string) => invoke('projects:repos:delete', id),
     reorderRepos: (input: ReorderReposInput) => invoke('projects:repos:reorder', input),
+    listAllRepos: () => invoke('projects:repos:list-all'),
   },
   sessions: {
     spawn: (input: SpawnSessionInput) => invoke('sessions:spawn', input),
@@ -186,11 +189,15 @@ const api: Api = {
   },
   repoDeps: {
     list: (projectId: string) => invoke('repo-deps:list', projectId),
+    listAll: () => invoke('repo-deps:list-all'),
     create: (input: CreateRepoDependencyInput) => invoke('repo-deps:create', input),
     update: (input: UpdateRepoDependencyInput) => invoke('repo-deps:update', input),
     delete: (input: { id: string; projectId: string }) => invoke('repo-deps:delete', input),
     setRepoPosition: (input: { repoId: string; x: number; y: number; projectId: string }) =>
       invoke('repos:set-position', input),
+    setRepoHub: (input: SetRepoHubInput) => invoke('repos:set-hub', input),
+    connectHubToAll: (input: ConnectHubToAllInput) =>
+      invoke('repo-deps:connect-hub-to-all', input),
     onUpdated: (handler) => subscribe<{ projectId: string | null }>('repo-deps:updated', handler),
   },
   handoffs: {

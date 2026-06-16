@@ -42,6 +42,14 @@ export function listByProject(projectId: string): RepoDependency[] {
   return rows.map(toEntity)
 }
 
+// Todas as arestas de todos os projetos (vista de arquitetura global).
+export function listAll(): RepoDependency[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM repo_dependencies ORDER BY created_at ASC')
+    .all() as RepoDependencyRow[]
+  return rows.map(toEntity)
+}
+
 // Todas as arestas que tocam este repo (como origem OU destino). Usado pelo
 // contexto de handoff e pelo repo_connections_get da MCP.
 export function listByRepo(repoId: string): RepoDependency[] {
@@ -79,6 +87,31 @@ export function create(input: CreateRepoDependencyInput): RepoDependency {
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(row.id, row.from_repo_id, row.to_repo_id, row.kind, row.label, row.created_at)
   return toEntity(row)
+}
+
+// Conecta o hub a cada OUTRO repo do escopo (projeto se projectId dado, senão
+// global), criando arestas hub → repo do kind dado. Idempotente: reusa o guard
+// de duplicata de `create` (mesmo par+kind devolve a existente, não duplica).
+// Retorna só as arestas (criadas ou já-existentes) — nunca a auto-aresta.
+export function connectHubToAll(
+  hubRepoId: string,
+  kind: RepoDependencyKind,
+  projectId?: string,
+): RepoDependency[] {
+  const db = getDb()
+  const targets = (
+    projectId
+      ? (db
+          .prepare('SELECT id FROM repos WHERE project_id = ?')
+          .all(projectId) as Array<{ id: string }>)
+      : (db.prepare('SELECT id FROM repos').all() as Array<{ id: string }>)
+  )
+    .map((r) => r.id)
+    .filter((id) => id !== hubRepoId)
+
+  return targets.map((toId) =>
+    create({ fromRepoId: hubRepoId, toRepoId: toId, kind }),
+  )
 }
 
 // Atualiza kind e/ou label de uma aresta existente.

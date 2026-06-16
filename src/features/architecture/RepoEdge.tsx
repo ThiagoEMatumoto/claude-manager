@@ -9,20 +9,30 @@ import { Menu, type MenuItem } from '@/components/ui/Menu'
 import { useArchitectureStore } from '@/store/architectureStore'
 import type { RepoDependencyKind } from '../../../shared/types/ipc'
 
-// Mapa kind → token de cor do design system (nunca cor hardcoded).
+// Mapa kind → token de cor do design system (nunca cor hardcoded). Cada kind tem
+// um token distinto onde possível pra leitura rápida no canvas.
 export const KIND_COLOR_VAR: Record<RepoDependencyKind, string> = {
   'calls-api': 'var(--color-accent)',
   'shares-types': 'var(--color-info)',
   'depends-on': 'var(--color-warning)',
   'deploys-to': 'var(--color-success)',
+  // Kinds da Wave A — tokens refinados na Wave B.
+  'work-hub': 'var(--color-accent)', // hub: cor de destaque/coordenação
+  infra: 'var(--color-danger)', // infra/provisiona: cor "pesada" (provisionamento)
+  monorepo: 'var(--color-info)', // monorepo/contém: estrutural
+  documents: 'var(--color-success)', // documenta: relação "boa"/de apoio
   custom: 'var(--color-text-dim)',
 }
 
 export const KIND_LABEL: Record<RepoDependencyKind, string> = {
-  'calls-api': 'calls API',
-  'shares-types': 'shares types',
-  'depends-on': 'depends on',
-  'deploys-to': 'deploys to',
+  'calls-api': 'chama API',
+  'shares-types': 'compartilha tipos',
+  'depends-on': 'depende de',
+  'deploys-to': 'faz deploy em',
+  'work-hub': 'Hub de trabalho',
+  infra: 'Infra/provisiona',
+  monorepo: 'Monorepo/contém',
+  documents: 'Documenta',
   custom: 'custom',
 }
 
@@ -31,6 +41,10 @@ const KINDS: RepoDependencyKind[] = [
   'shares-types',
   'depends-on',
   'deploys-to',
+  'work-hub',
+  'infra',
+  'monorepo',
+  'documents',
   'custom',
 ]
 
@@ -85,7 +99,7 @@ export function RepoEdge({
             pointerEvents: 'all',
           }}
         >
-          <Menu open={menuOpen} onClose={() => setMenuOpen(false)} items={items}>
+          <Menu open={menuOpen} onClose={() => setMenuOpen(false)} items={items} portal>
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}

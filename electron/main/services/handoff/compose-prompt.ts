@@ -28,6 +28,10 @@ const KIND_PHRASE: Record<string, string> = {
   'shares-types': 'compartilha tipos',
   'depends-on': 'depende de',
   'deploys-to': 'faz deploy para',
+  'work-hub': 'coordena o trabalho sobre',
+  infra: 'provisiona a infra de',
+  monorepo: 'contém',
+  documents: 'documenta',
   custom: 'se relaciona com',
 }
 

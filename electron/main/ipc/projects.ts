@@ -56,6 +56,7 @@ interface RepoRow {
   created_at: number
   canvas_x: number | null
   canvas_y: number | null
+  is_hub: number
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -81,6 +82,7 @@ const toRepo = (row: RepoRow): Repo => ({
   createdAt: row.created_at,
   canvasX: row.canvas_x ?? null,
   canvasY: row.canvas_y ?? null,
+  isHub: row.is_hub === 1,
 })
 
 export function registerProjectIpc(): void {
@@ -171,6 +173,14 @@ export function registerProjectIpc(): void {
     pingSyncMutation()
   })
 
+  // Todos os repos de todos os projetos — alimenta a vista de arquitetura global.
+  ipcMain.handle('projects:repos:list-all', () => {
+    const rows = getDb()
+      .prepare('SELECT * FROM repos ORDER BY project_id ASC, position ASC')
+      .all() as RepoRow[]
+    return rows.map(toRepo)
+  })
+
   ipcMain.handle('projects:repos:list', (_e, projectId: string) => {
     const rows = getDb()
       .prepare(
@@ -208,6 +218,7 @@ export function registerProjectIpc(): void {
       created_at: Date.now(),
       canvas_x: null,
       canvas_y: null,
+      is_hub: 0,
     }
     db.prepare(
       'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

@@ -9,11 +9,16 @@ import type {
   UpdateRepoDependencyInput,
 } from '../../../shared/types/ipc'
 
-const repoDependencyKind = z.enum([
+// Exportado pra teste de contrato (garante que os kinds novos são aceitos).
+export const repoDependencyKind = z.enum([
   'calls-api',
   'shares-types',
   'depends-on',
   'deploys-to',
+  'work-hub',
+  'infra',
+  'monorepo',
+  'documents',
   'custom',
 ])
 
@@ -42,9 +47,42 @@ const setPositionSchema = z.object({
   projectId: z.string().min(1),
 })
 
+const setHubSchema = z.object({
+  repoId: z.string().min(1),
+  isHub: z.boolean(),
+})
+
+const connectHubToAllSchema = z.object({
+  hubRepoId: z.string().min(1),
+  kind: repoDependencyKind,
+  projectId: z.string().min(1).optional(),
+})
+
 export function registerRepoDependenciesIpc(): void {
   ipcMain.handle('repo-deps:list', (_e, projectId: string): RepoDependency[] => {
     return store.listByProject(projectId)
+  })
+
+  ipcMain.handle('repo-deps:list-all', (): RepoDependency[] => {
+    return store.listAll()
+  })
+
+  ipcMain.handle('repo-deps:connect-hub-to-all', (_e, raw: unknown): RepoDependency[] => {
+    const { hubRepoId, kind, projectId } = connectHubToAllSchema.parse(raw)
+    const created = store.connectHubToAll(hubRepoId, kind, projectId)
+    broadcast('repo-deps:updated', { projectId: projectId ?? null })
+    pingSyncMutation()
+    return created
+  })
+
+  // Marca/desmarca um repo como hub. Resolve o projeto do repo p/ o broadcast.
+  ipcMain.handle('repos:set-hub', (_e, raw: unknown): void => {
+    const { repoId, isHub } = setHubSchema.parse(raw)
+    getDb()
+      .prepare('UPDATE repos SET is_hub = ? WHERE id = ?')
+      .run(isHub ? 1 : 0, repoId)
+    broadcast('repo-deps:updated', { projectId: projectIdForRepo(repoId) })
+    pingSyncMutation()
   })
 
   ipcMain.handle('repo-deps:create', (_e, raw: unknown): RepoDependency => {

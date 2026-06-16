@@ -17,6 +17,7 @@ interface RepoJoinRow {
   created_at: number
   canvas_x: number | null
   canvas_y: number | null
+  is_hub: number
   project_name: string
   project_icon: string | null
   project_color: string | null
@@ -35,6 +36,7 @@ function toRepo(row: RepoJoinRow): Repo {
     createdAt: row.created_at,
     canvasX: row.canvas_x ?? null,
     canvasY: row.canvas_y ?? null,
+    isHub: row.is_hub === 1,
   }
 }
 

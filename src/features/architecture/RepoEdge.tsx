@@ -1,0 +1,102 @@
+import { useState } from 'react'
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  type EdgeProps,
+} from '@xyflow/react'
+import { Menu, type MenuItem } from '@/components/ui/Menu'
+import { useArchitectureStore } from '@/store/architectureStore'
+import type { RepoDependencyKind } from '../../../shared/types/ipc'
+
+// Mapa kind → token de cor do design system (nunca cor hardcoded).
+export const KIND_COLOR_VAR: Record<RepoDependencyKind, string> = {
+  'calls-api': 'var(--color-accent)',
+  'shares-types': 'var(--color-info)',
+  'depends-on': 'var(--color-warning)',
+  'deploys-to': 'var(--color-success)',
+  custom: 'var(--color-text-dim)',
+}
+
+export const KIND_LABEL: Record<RepoDependencyKind, string> = {
+  'calls-api': 'calls API',
+  'shares-types': 'shares types',
+  'depends-on': 'depends on',
+  'deploys-to': 'deploys to',
+  custom: 'custom',
+}
+
+const KINDS: RepoDependencyKind[] = [
+  'calls-api',
+  'shares-types',
+  'depends-on',
+  'deploys-to',
+  'custom',
+]
+
+export interface RepoEdgeData {
+  kind: RepoDependencyKind
+  label: string | null
+  [key: string]: unknown
+}
+
+// Aresta tipada: cor por kind, label clicável que abre Menu pra trocar o kind
+// (chama updateDep). Mostra o label custom opcional quando existir.
+export function RepoEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  data,
+}: EdgeProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const updateDep = useArchitectureStore((s) => s.updateDep)
+
+  const edgeData = (data ?? { kind: 'custom', label: null }) as RepoEdgeData
+  const kind = edgeData.kind
+  const color = KIND_COLOR_VAR[kind] ?? KIND_COLOR_VAR.custom
+
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+
+  const items: MenuItem[] = KINDS.map((k) => ({
+    label: KIND_LABEL[k],
+    active: k === kind,
+    onClick: () => void updateDep({ id, kind: k }),
+  }))
+
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={{ stroke: color }} />
+      <EdgeLabelRenderer>
+        <div
+          className="nodrag nopan absolute"
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+        >
+          <Menu open={menuOpen} onClose={() => setMenuOpen(false)} items={items}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+              style={{ borderColor: color }}
+            >
+              {edgeData.label ? `${KIND_LABEL[kind]} · ${edgeData.label}` : KIND_LABEL[kind]}
+            </button>
+          </Menu>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}

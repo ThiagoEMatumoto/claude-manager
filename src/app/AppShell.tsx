@@ -18,6 +18,7 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { MetricsArea } from '@/features/metrics/MetricsArea'
 import { FeaturesArea } from '@/features/features/FeaturesArea'
 import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
+import { ArchitectureArea } from '@/features/architecture/ArchitectureArea'
 import { OverviewArea } from '@/features/overview/OverviewArea'
 import { TasksArea } from '@/features/tasks/TasksArea'
 import { Terminal } from '@/features/sessions/Terminal'
@@ -611,6 +612,8 @@ export function AppShell() {
       {area === 'overview' && <OverviewArea />}
 
       {area === 'objectives' && <ObjectivesArea />}
+
+      {area === 'architecture' && <ArchitectureArea />}
 
       {area === 'tasks' && <TasksArea />}
 

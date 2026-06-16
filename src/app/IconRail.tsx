@@ -5,6 +5,7 @@ import {
   Folder,
   Home,
   ListTodo,
+  Network,
   Settings,
   Target,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ const AREAS: AreaDef[] = [
   // Home primeiro: é a área default no boot.
   { id: 'overview', icon: Home, label: 'Home' },
   { id: 'projects', icon: Folder, label: 'Projetos' },
+  { id: 'architecture', icon: Network, label: 'Arquitetura' },
   { id: 'features', icon: ClipboardList, label: 'Features' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },

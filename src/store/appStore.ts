@@ -10,6 +10,7 @@ export type Area =
   | 'overview'
   | 'objectives'
   | 'tasks'
+  | 'architecture'
 
 // Persistência leve do estado colapsado da sidebar (mesmo padrão do
 // keybindings-store: localStorage no renderer, sem IPC/DB).

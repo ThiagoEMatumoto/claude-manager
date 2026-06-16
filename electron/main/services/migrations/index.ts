@@ -14,6 +14,7 @@ import * as tasks from './012_tasks'
 import * as featureLinks from './013_feature_links'
 import * as sessionsRepoNullable from './014_sessions_repo_nullable'
 import * as featureOrigin from './015_feature_origin'
+import * as metricsSubagentTurns from './016_metrics_subagent_turns'
 
 interface Migration {
   version: number
@@ -43,6 +44,7 @@ export const migrations: Migration[] = [
   featureLinks,
   sessionsRepoNullable,
   featureOrigin,
+  metricsSubagentTurns,
 ]
 
 export function runMigrations(db: Database.Database): void {

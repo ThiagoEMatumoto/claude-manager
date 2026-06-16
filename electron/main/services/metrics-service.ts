@@ -1,11 +1,12 @@
 import { BrowserWindow } from 'electron'
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { getDb } from './db'
 import { PROJECTS_ROOT } from './session-activity'
 import { resolvePrice } from './metrics-pricing'
 import { computeTotals, previousWindowRange } from './metrics-totals'
+import { countSubagentTurns } from './subagent-turns'
 import type {
   MetricsDayPoint,
   MetricsProjectRow,
@@ -38,6 +39,7 @@ interface SessionAgg {
   firstTs: number | null
   lastTs: number | null
   turns: number
+  subagentTurns: number
   agentCalls: number
   skillCalls: number
   inputTokens: number
@@ -96,6 +98,7 @@ interface CacheRow {
   first_ts: number | null
   last_ts: number | null
   turns: number
+  subagent_turns: number
   agent_calls: number
   skill_calls: number
   session_type: string
@@ -167,6 +170,7 @@ async function parseTranscript(path: string): Promise<SessionAgg> {
     firstTs: null,
     lastTs: null,
     turns: 0,
+    subagentTurns: 0,
     agentCalls: 0,
     skillCalls: 0,
     inputTokens: 0,
@@ -285,6 +289,12 @@ async function parseTranscript(path: string): Promise<SessionAgg> {
     agg.inlineExploreCalls += agg.tools[tool] ?? 0
   }
 
+  // Turns de subagente: transcripts aninhados <sessionId>/subagents/*.jsonl,
+  // onde <sessionId> é o basename do transcript principal. Reusa o mesmo guard
+  // incremental do scan (só reparsa quando mtime/size do principal mudou).
+  const sessionId = basename(path, '.jsonl')
+  agg.subagentTurns = countSubagentTurns(dirname(path), sessionId)
+
   return agg
 }
 
@@ -307,8 +317,9 @@ export async function scan(): Promise<void> {
         turns, agent_calls, skill_calls, session_type,
         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
         models_json, tools_json, per_day_json, scanned_at,
-        agent_rounds, parallel_rounds, inline_explore_calls, subagent_type_counts_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        agent_rounds, parallel_rounds, inline_explore_calls, subagent_type_counts_json,
+        subagent_turns)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   let processed = 0
@@ -355,6 +366,7 @@ export async function scan(): Promise<void> {
           agg.parallelRounds,
           agg.inlineExploreCalls,
           JSON.stringify(agg.subagentTypeCounts),
+          agg.subagentTurns,
         )
       } catch {
         // arquivo ilegível — pula sem derrubar o scan inteiro.

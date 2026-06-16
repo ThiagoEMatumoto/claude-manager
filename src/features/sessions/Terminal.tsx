@@ -341,9 +341,10 @@ export function Terminal({
         return false
       }
 
-      // Colar: Ctrl+Shift+V (todas plataformas) ou Cmd+V no mac.
-      if ((e.ctrlKey && e.shiftKey && e.key === 'V') || (isMac && e.metaKey && e.key === 'v')) {
-        void paste()
+      // Colar (Ctrl+V, Ctrl+Shift+V, Cmd+V): o evento DOM `paste` (onPaste, abaixo) é o
+      // ÚNICO inseridor. Aqui só retornamos false pra suprimir o paste/byte-de-controle que
+      // o xterm dispara no keydown — chamar paste() aqui colaria 2x junto com o onPaste.
+      if ((e.ctrlKey && (e.key === 'v' || e.key === 'V')) || (isMac && e.metaKey && e.key === 'v')) {
         return false
       }
 
@@ -409,15 +410,25 @@ export function Terminal({
     }
     host.addEventListener('contextmenu', onContextMenu)
 
-    // Intercepta o paste nativo (Ctrl+V) em captura: conteúdo grande/multilinha
-    // abre a confirmação em vez de colar direto; o resto cola nativamente (já bracketed).
+    // Único ponto de inserção para paste via DOM (Ctrl+V, clique direito, middle-click).
+    // Sempre interceptamos em captura e inserimos nós mesmos — assim o paste nativo do
+    // xterm não roda em paralelo (era a 2ª inserção do double-paste). Conteúdo grande/
+    // multilinha abre a confirmação; o resto cola via term.paste() (respeita bracketed).
+    let lastPasteText = ''
+    let lastPasteAt = 0
     const onPaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData('text') ?? ''
-      if (text && needsPasteConfirm(text)) {
-        e.preventDefault()
-        e.stopPropagation()
-        setPastePreview(text)
-      }
+      if (!text) return
+      e.preventDefault()
+      e.stopPropagation()
+      // Alguns ambientes (Electron/Chromium) emitem 2 eventos `paste` para um único gesto.
+      // Descartamos o duplicado idêntico dentro de uma janela curta pra não colar 2x.
+      const now = Date.now()
+      if (text === lastPasteText && now - lastPasteAt < 50) return
+      lastPasteText = text
+      lastPasteAt = now
+      if (needsPasteConfirm(text)) setPastePreview(text)
+      else xtermRef.current?.paste(text)
     }
     host.addEventListener('paste', onPaste, true)
 

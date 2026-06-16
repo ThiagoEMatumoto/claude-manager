@@ -125,6 +125,7 @@ export function AppShell() {
   const filesOpen = useFilesStore((s) => s.open)
   const toggleFiles = useFilesStore((s) => s.toggle)
   const setFileRoots = useFilesStore((s) => s.setRoots)
+  const fileRoots = useFilesStore((s) => s.roots)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -471,6 +472,18 @@ export function AppShell() {
       cancelled = true
     }
   }, [activeProjectId, setFileRoots])
+
+  // Default contextual do seletor: segue o repo do terminal em foco quando esse
+  // repo está entre os roots. Dispara só na troca de foco ou quando os roots
+  // repopulam (troca de projeto) — preserva a escolha manual do usuário no resto.
+  useEffect(() => {
+    const pane = useAppStore.getState().panes.find((p) => p.paneId === focusPaneId)
+    const repoPath = pane?.repo?.path
+    if (!repoPath) return
+    const fs = useFilesStore.getState()
+    if (fs.selectedRoot === repoPath) return
+    if (fs.roots.some((r) => r.path === repoPath)) fs.selectRoot(repoPath)
+  }, [focusPaneId, fileRoots])
 
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes

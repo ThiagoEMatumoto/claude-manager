@@ -24,6 +24,40 @@ export interface Repo {
   source: string | null
   position: number
   createdAt: number
+  // Posição livre no canvas do grafo de arquitetura (null = auto-layout).
+  canvasX: number | null
+  canvasY: number | null
+}
+
+// ---- Grafo de dependências entre repos (multi-repo orchestration) ----
+
+export type RepoDependencyKind =
+  | 'calls-api'
+  | 'shares-types'
+  | 'depends-on'
+  | 'deploys-to'
+  | 'custom'
+
+export interface RepoDependency {
+  id: string
+  fromRepoId: string
+  toRepoId: string
+  kind: RepoDependencyKind
+  label: string | null
+  createdAt: number
+}
+
+export interface CreateRepoDependencyInput {
+  fromRepoId: string
+  toRepoId: string
+  kind: RepoDependencyKind
+  label?: string | null
+}
+
+export interface UpdateRepoDependencyInput {
+  id: string
+  kind?: RepoDependencyKind
+  label?: string | null
 }
 
 // Pasta que existe fisicamente dentro do vault de um projeto mas ainda não foi
@@ -1085,6 +1119,19 @@ export interface Api {
     backfill(): Promise<FeatureBackfillResult>
     onUpdated(handler: (feature: Feature) => void): () => void
     onSynthError(handler: (event: FeatureSynthError) => void): () => void
+  }
+  repoDeps: {
+    list(projectId: string): Promise<RepoDependency[]>
+    create(input: CreateRepoDependencyInput): Promise<RepoDependency>
+    update(input: UpdateRepoDependencyInput): Promise<RepoDependency>
+    delete(input: { id: string; projectId: string }): Promise<void>
+    setRepoPosition(input: {
+      repoId: string
+      x: number
+      y: number
+      projectId: string
+    }): Promise<void>
+    onUpdated(handler: (event: { projectId: string | null }) => void): () => void
   }
   objectives: {
     list(filter?: ObjectiveListFilter): Promise<ObjectiveWithProgress[]>

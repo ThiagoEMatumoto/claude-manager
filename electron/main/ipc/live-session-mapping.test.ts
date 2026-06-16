@@ -57,6 +57,8 @@ describe('mapLiveSessionRepo', () => {
         source: 'cloned',
         position: 2,
         createdAt: 1234,
+        canvasX: null,
+        canvasY: null,
       },
       projectName: 'Projeto X',
       projectIcon: '🚀',

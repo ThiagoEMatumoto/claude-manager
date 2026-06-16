@@ -15,6 +15,7 @@ import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
+import { registerRepoDependenciesIpc } from './ipc/repo-dependencies'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
@@ -108,6 +109,7 @@ app.whenReady().then(async () => {
   // janela para que o renderer leia o valor correto via workspace:get-boot-state.
   markWorkspaceRunning()
   registerProjectIpc()
+  registerRepoDependenciesIpc()
   registerSessionIpc()
   registerShellIpc()
   registerDialogIpc()

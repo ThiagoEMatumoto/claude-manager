@@ -44,6 +44,9 @@ export function mapLiveSessionRepo(row: LiveSessionJoinRow): LiveSessionRepoInfo
       source: row.repo_source,
       position: row.repo_position ?? 0,
       createdAt: row.repo_created_at ?? 0,
+      // Posição de canvas não é parte do join de live-session; default null.
+      canvasX: null,
+      canvasY: null,
     },
     projectName: row.project_name,
     projectIcon: row.project_icon,

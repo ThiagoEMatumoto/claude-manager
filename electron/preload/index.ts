@@ -24,6 +24,8 @@ import type {
   SetFeatureReposInput,
   SetFeatureObjectiveLinksInput,
   FeatureSynthError,
+  CreateRepoDependencyInput,
+  UpdateRepoDependencyInput,
   ObjectiveListFilter,
   CreateObjectiveInput,
   UpdateObjectiveInput,
@@ -180,6 +182,15 @@ const api: Api = {
     backfill: () => invoke('features:backfill'),
     onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
     onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),
+  },
+  repoDeps: {
+    list: (projectId: string) => invoke('repo-deps:list', projectId),
+    create: (input: CreateRepoDependencyInput) => invoke('repo-deps:create', input),
+    update: (input: UpdateRepoDependencyInput) => invoke('repo-deps:update', input),
+    delete: (input: { id: string; projectId: string }) => invoke('repo-deps:delete', input),
+    setRepoPosition: (input: { repoId: string; x: number; y: number; projectId: string }) =>
+      invoke('repos:set-position', input),
+    onUpdated: (handler) => subscribe<{ projectId: string | null }>('repo-deps:updated', handler),
   },
   objectives: {
     list: (filter?: ObjectiveListFilter) => invoke('objectives:list', filter),

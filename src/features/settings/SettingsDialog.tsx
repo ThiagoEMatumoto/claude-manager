@@ -94,15 +94,24 @@ function GeneralTab({ open }: { open: boolean }) {
   const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
+  const [autoApproveHandoffs, setAutoApproveHandoffs] = useState(false)
 
   useEffect(() => {
     if (!open) return
     void vaultApi.getRoot().then(setRoot)
     void prefsApi.get<string>('scratch_dir').then((dir) => setScratchDir(dir ?? ''))
+    void prefsApi
+      .get<boolean>('handoffs.autoApprove')
+      .then((v) => setAutoApproveHandoffs(v ?? false))
     void mcpApi.status().then(setMcpStatus)
     setMcpCopied(false)
     void useTerminalPrefsStore.getState().load()
   }, [open])
+
+  function updateAutoApprove(v: boolean) {
+    setAutoApproveHandoffs(v)
+    void prefsApi.set('handoffs.autoApprove', v)
+  }
 
   function copyMcpCommand() {
     if (!mcpStatus?.addCommand) return
@@ -242,6 +251,30 @@ function GeneralTab({ open }: { open: boolean }) {
             type="checkbox"
             checked={visualLineNav}
             onChange={(e) => void setVisualLineNav(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Handoffs
+        </div>
+        <label className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">
+              Auto-aprovar handoffs (avançado)
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Quando ligado, sessões-filha delegadas por outra sessão são abertas
+              automaticamente, sem gate humano. Deixe desligado para revisar e editar o
+              prompt antes de abrir.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoApproveHandoffs}
+            onChange={(e) => updateAutoApprove(e.target.checked)}
             className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
           />
         </label>

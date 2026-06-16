@@ -35,6 +35,8 @@ import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { FilesPanel } from '@/features/files/FilesPanel'
+import { HandoffApprovalDialog } from '@/features/handoffs/HandoffApprovalDialog'
+import { useHandoffs } from '@/features/handoffs/useHandoffs'
 
 interface PaneParams {
   pane: ActivePane
@@ -132,6 +134,10 @@ export function AppShell() {
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const overrides = useKeybindingsStore((s) => s.overrides)
   const loadKeybindings = useKeybindingsStore((s) => s.load)
+
+  // Handoffs cross-repo: assina pendentes + aplica auto-approve (gate humano via
+  // <HandoffApprovalDialog/> quando o auto-approve está desligado).
+  useHandoffs()
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -692,6 +698,7 @@ export function AppShell() {
       </main>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <HandoffApprovalDialog />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

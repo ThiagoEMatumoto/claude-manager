@@ -11,6 +11,7 @@ export const appApi = api.app
 export const dialogApi = api.dialog
 export const prefsApi = api.prefs
 export const vaultApi = api.vault
+export const fsApi = api.fs
 export const repoApi = api.repo
 export const workspaceApi = api.workspace
 export const ccConfigsApi = api.ccConfigs

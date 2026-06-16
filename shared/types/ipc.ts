@@ -33,6 +33,17 @@ export interface UntrackedFolder {
   path: string
 }
 
+export interface FsEntry {
+  name: string
+  path: string
+  isDir: boolean
+}
+
+export interface FsFile {
+  path: string
+  content: string
+}
+
 export interface Session {
   id: string
   // null = sessão avulsa (sem repo), rodando no scratch dir.
@@ -1009,6 +1020,11 @@ export interface Api {
     ensureDir(path: string): Promise<{ created: boolean; wasEmpty: boolean }>
     isInside(vaultPath: string, target: string): Promise<boolean>
     listUntracked(projectId: string): Promise<UntrackedFolder[]>
+  }
+  fs: {
+    listDir(path: string): Promise<FsEntry[]>
+    readFile(path: string): Promise<FsFile>
+    writeFile(path: string, content: string): Promise<void>
   }
   repo: {
     moveIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>

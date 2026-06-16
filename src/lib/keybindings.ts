@@ -59,6 +59,13 @@ export const COMMANDS: Command[] = [
     defaultCombo: { mod: true, shift: true, key: 'a' },
     editable: true,
   },
+  {
+    id: 'files.togglePanel',
+    label: 'Alternar painel de arquivos',
+    context: 'Workspace',
+    defaultCombo: { mod: true, key: 'b' },
+    editable: true,
+  },
 
   // Workspace (editáveis)
   {

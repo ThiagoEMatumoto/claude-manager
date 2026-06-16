@@ -10,7 +10,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from 'dockview'
-import { PanelLeftOpen } from 'lucide-react'
+import { FolderTree, PanelLeftOpen } from 'lucide-react'
 import { IconRail } from './IconRail'
 import { Icon } from '@/components/ui/Icon'
 import { ProjectsSidebar } from '@/features/projects/ProjectsSidebar'
@@ -28,10 +28,12 @@ import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
-import { workspaceApi } from '@/lib/ipc'
+import { projectsApi, workspaceApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { useFilesStore } from '@/lib/files-store'
+import { FilesPanel } from '@/features/files/FilesPanel'
 
 interface PaneParams {
   pane: ActivePane
@@ -119,6 +121,10 @@ export function AppShell() {
   const clearGridRequest = useAppStore((s) => s.clearGridRequest)
   const startLiveWatch = useAppStore((s) => s.startLiveWatch)
   const stopLiveWatch = useAppStore((s) => s.stopLiveWatch)
+  const activeProjectId = useAppStore((s) => s.activeProjectId)
+  const filesOpen = useFilesStore((s) => s.open)
+  const toggleFiles = useFilesStore((s) => s.toggle)
+  const setFileRoots = useFilesStore((s) => s.setRoots)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -398,11 +404,17 @@ export function AppShell() {
       if (matchCombo(e, resolveCombo('switcher.open', overrides))) {
         e.preventDefault()
         setSwitcherOpen(true)
+        return
+      }
+      // Ctrl+B: alterna o painel lateral de arquivos.
+      if (matchCombo(e, resolveCombo('files.togglePanel', overrides))) {
+        e.preventDefault()
+        toggleFiles()
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [overrides])
+  }, [overrides, toggleFiles])
 
   // Abre Configurações sob demanda (ex: error state do Terminal, renderizado pelo
   // dockview fora desta árvore — ver requestOpenSettings).
@@ -418,6 +430,47 @@ export function AppShell() {
     void startLiveWatch()
     return () => stopLiveWatch()
   }, [startLiveWatch, stopLiveWatch])
+
+  // Popula as raízes do painel de arquivos a partir do projeto ativo: um repo por
+  // vez (o usuário escolhe no seletor). O vaultPath entra só como fallback quando o
+  // projeto não tem repos registrados. Re-busca quando o projeto ativo muda.
+  useEffect(() => {
+    if (!activeProjectId) {
+      setFileRoots([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const [repos, projects] = await Promise.all([
+          projectsApi.listRepos(activeProjectId),
+          projectsApi.list(),
+        ])
+        if (cancelled) return
+        const roots = repos.map((r) => ({
+          name: r.label || r.path.split('/').pop() || r.path,
+          path: r.path,
+        }))
+        // Sem repos: cai pro vaultPath (a pasta do projeto) pra não ficar vazio.
+        if (roots.length === 0) {
+          const project = projects.find((p) => p.id === activeProjectId)
+          if (project?.vaultPath) {
+            roots.push({
+              name: project.name || project.vaultPath.split('/').pop() || project.vaultPath,
+              path: project.vaultPath,
+            })
+          }
+        }
+        setFileRoots(roots)
+      } catch (err) {
+        console.error('[AppShell] falha ao popular roots de arquivos', err)
+        if (!cancelled) setFileRoots([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeProjectId, setFileRoots])
 
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes
@@ -580,17 +633,34 @@ export function AppShell() {
             </button>
           </div>
         )}
-        <SessionStrip onOpenSwitcher={() => setSwitcherOpen(true)} />
-        <div className="relative min-h-0 flex-1">
-          {panes.length === 0 && <EmptyMain />}
-          <DockviewReact
-            className="absolute inset-0"
-            theme={themeAbyss}
-            components={components}
-            tabComponents={tabComponents}
-            defaultRenderer="always"
-            onReady={onReady}
-          />
+        <div className="flex shrink-0 items-center border-b border-[var(--color-border)]">
+          <button
+            type="button"
+            onClick={toggleFiles}
+            title="Alternar painel de arquivos (Ctrl+B)"
+            className={`m-1 rounded-md p-1.5 transition hover:bg-[var(--color-surface-2)] ${
+              filesOpen ? 'text-[var(--color-text)]' : 'text-[var(--color-text-dim)]'
+            }`}
+          >
+            <Icon as={FolderTree} size={16} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <SessionStrip onOpenSwitcher={() => setSwitcherOpen(true)} />
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-1">
+          {filesOpen && <FilesPanel />}
+          <div className="relative min-h-0 flex-1">
+            {panes.length === 0 && <EmptyMain />}
+            <DockviewReact
+              className="absolute inset-0"
+              theme={themeAbyss}
+              components={components}
+              tabComponents={tabComponents}
+              defaultRenderer="always"
+              onReady={onReady}
+            />
+          </div>
         </div>
       </main>
 

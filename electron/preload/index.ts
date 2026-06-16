@@ -113,6 +113,11 @@ const api: Api = {
       invoke('vault:is-inside', { vaultPath, target }),
     listUntracked: (projectId: string) => invoke('vault:list-untracked', { projectId }),
   },
+  fs: {
+    listDir: (path: string) => invoke('fs:list-dir', { path }),
+    readFile: (path: string) => invoke('fs:read-file', { path }),
+    writeFile: (path: string, content: string) => invoke('fs:write-file', { path, content }),
+  },
   repo: {
     moveIntoVault: (source: string, vaultPath: string, label: string) =>
       invoke('repo:move-into-vault', { source, vaultPath, label }),

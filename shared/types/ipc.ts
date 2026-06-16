@@ -78,6 +78,9 @@ export interface Handoff {
   // NULLABLE: a MCP tool pode não saber o id da própria sessão.
   motherSessionId: string | null
   targetRepoId: string
+  // Label do repo-alvo, resolvido via LEFT JOIN repos em list/get (null se o repo
+  // foi removido). Evita um fetch extra de spawnContext no inbox/dialog.
+  targetRepoLabel: string | null
   // NULLABLE: a sessão-filha só é criada na aprovação (wave posterior).
   childSessionId: string | null
   featureId: string | null
@@ -1193,6 +1196,7 @@ export interface Api {
     approve(input: { id: string; composedPrompt?: string }): Promise<Handoff>
     reject(id: string): Promise<Handoff>
     markRunning(input: { id: string; childSessionId: string }): Promise<Handoff>
+    fail(input: { id: string; error: string }): Promise<Handoff>
     spawnContext(id: string): Promise<HandoffSpawnContext>
     onUpdated(handler: (payload: unknown) => void): () => void
   }

@@ -63,6 +63,11 @@ const markRunningSchema = z.object({
   childSessionId: z.string().min(1),
 })
 
+const failSchema = z.object({
+  id: z.string().min(1),
+  error: z.string().min(1),
+})
+
 export function registerHandoffsIpc(): void {
   ipcMain.handle('handoffs:list', (_e, raw: unknown): Handoff[] => {
     const opts = listSchema.parse(raw)
@@ -89,6 +94,14 @@ export function registerHandoffsIpc(): void {
   ipcMain.handle('handoffs:mark-running', (_e, raw: unknown): Handoff => {
     const { id, childSessionId } = markRunningSchema.parse(raw)
     const handoff = store.markRunning(id, childSessionId)
+    broadcast('handoff:updated', handoff)
+    return handoff
+  })
+
+  // Falha de spawn/aprovação: marca o handoff como failed com o erro visível no inbox.
+  ipcMain.handle('handoffs:fail', (_e, raw: unknown): Handoff => {
+    const { id, error } = failSchema.parse(raw)
+    const handoff = store.fail(id, error)
     broadcast('handoff:updated', handoff)
     return handoff
   })

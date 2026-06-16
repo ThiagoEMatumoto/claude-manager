@@ -36,6 +36,7 @@ import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { FilesPanel } from '@/features/files/FilesPanel'
 import { HandoffApprovalDialog } from '@/features/handoffs/HandoffApprovalDialog'
+import { HandoffsPanel } from '@/features/handoffs/HandoffsPanel'
 import { useHandoffs } from '@/features/handoffs/useHandoffs'
 
 interface PaneParams {
@@ -620,6 +621,8 @@ export function AppShell() {
       {area === 'objectives' && <ObjectivesArea />}
 
       {area === 'architecture' && <ArchitectureArea />}
+
+      {area === 'handoffs' && <HandoffsPanel />}
 
       {area === 'tasks' && <TasksArea />}
 

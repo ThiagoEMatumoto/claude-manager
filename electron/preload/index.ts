@@ -201,6 +201,7 @@ const api: Api = {
     reject: (id: string) => invoke('handoffs:reject', id),
     markRunning: (input: { id: string; childSessionId: string }) =>
       invoke('handoffs:mark-running', input),
+    fail: (input: { id: string; error: string }) => invoke('handoffs:fail', input),
     spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
     onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },

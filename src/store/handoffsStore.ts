@@ -71,9 +71,15 @@ export const useHandoffsStore = create<HandoffsState>((set, get) => ({
       await handoffsApi.markRunning({ id, childSessionId })
       await get().load()
     } catch (err) {
-      // Spawn/approve falhou: handoff pode ter ficado approved sem filha. Mostra
-      // o erro e recarrega pra refletir o estado real.
-      set({ error: err instanceof Error ? err.message : String(err) })
+      // Spawn/approve falhou: marca o handoff como failed (erro visível no inbox)
+      // em vez de deixá-lo preso em approved sem filha. Mostra o erro e recarrega.
+      const msg = err instanceof Error ? err.message : String(err)
+      try {
+        await handoffsApi.fail({ id, error: msg })
+      } catch {
+        // fail() também falhou (IPC indisponível): só exibe o erro no store.
+      }
+      set({ error: msg })
       await get().load()
       throw err
     }

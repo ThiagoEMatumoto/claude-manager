@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
-import { handoffsApi, prefsApi } from '@/lib/ipc'
+import { prefsApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { pendingHandoffs, useHandoffsStore } from '@/store/handoffsStore'
 import { HANDOFFS_AUTO_APPROVE_KEY } from './useHandoffs'
@@ -25,8 +25,10 @@ export function HandoffApprovalDialog() {
 
   const [autoApprove, setAutoApprove] = useState(false)
   const [prompt, setPrompt] = useState('')
-  const [repoLabel, setRepoLabel] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Label do repo-alvo já vem resolvido do store (LEFT JOIN repos); fallback no id.
+  const repoLabel = handoff?.targetRepoLabel ?? handoff?.targetRepoId ?? null
 
   // Lê o pref e reage a mudanças (Settings emite via prefs:updated? usamos o valor
   // no mount + re-leitura sempre que o handoff atual muda, suficiente pro fluxo).
@@ -34,27 +36,9 @@ export function HandoffApprovalDialog() {
     void prefsApi.get<boolean>(HANDOFFS_AUTO_APPROVE_KEY).then((v) => setAutoApprove(v ?? false))
   }, [handoff?.id])
 
-  // Pré-preenche o textarea e resolve o label do repo-alvo quando o handoff muda.
+  // Pré-preenche o textarea quando o handoff muda.
   useEffect(() => {
-    if (!handoff) {
-      setPrompt('')
-      setRepoLabel(null)
-      return
-    }
-    setPrompt(handoff.composedPrompt)
-    setRepoLabel(null)
-    let cancelled = false
-    void handoffsApi
-      .spawnContext(handoff.id)
-      .then((ctx) => {
-        if (!cancelled) setRepoLabel(ctx.repo.label)
-      })
-      .catch(() => {
-        if (!cancelled) setRepoLabel(handoff.targetRepoId)
-      })
-    return () => {
-      cancelled = true
-    }
+    setPrompt(handoff?.composedPrompt ?? '')
   }, [handoff])
 
   const open = !!handoff && !autoApprove

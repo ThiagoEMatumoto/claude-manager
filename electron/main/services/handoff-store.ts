@@ -16,13 +16,21 @@ interface HandoffRow {
   error: string | null
   created_at: number
   updated_at: number
+  // Resolvido via LEFT JOIN repos (null se o repo-alvo foi removido).
+  target_repo_label: string | null
 }
+
+// SELECT base com o label do repo-alvo resolvido. LEFT JOIN: handoff sobrevive à
+// remoção do repo (label vira null), mas continua listável.
+const SELECT_HANDOFF =
+  'SELECT h.*, r.label AS target_repo_label FROM handoffs h LEFT JOIN repos r ON r.id = h.target_repo_id'
 
 function toEntity(row: HandoffRow): Handoff {
   return {
     id: row.id,
     motherSessionId: row.mother_session_id,
     targetRepoId: row.target_repo_id,
+    targetRepoLabel: row.target_repo_label,
     childSessionId: row.child_session_id,
     featureId: row.feature_id,
     task: row.task,
@@ -37,7 +45,7 @@ function toEntity(row: HandoffRow): Handoff {
 }
 
 function getRow(id: string): HandoffRow | undefined {
-  return getDb().prepare('SELECT * FROM handoffs WHERE id = ?').get(id) as HandoffRow | undefined
+  return getDb().prepare(`${SELECT_HANDOFF} WHERE h.id = ?`).get(id) as HandoffRow | undefined
 }
 
 // Carrega a entidade fresca pós-mutação; lança se sumiu (id inválido).
@@ -49,21 +57,7 @@ function fresh(id: string): Handoff {
 
 export function create(input: CreateHandoffInput): Handoff {
   const now = Date.now()
-  const row: HandoffRow = {
-    id: input.id ?? randomUUID(),
-    mother_session_id: input.motherSessionId ?? null,
-    target_repo_id: input.targetRepoId,
-    child_session_id: null,
-    feature_id: input.featureId ?? null,
-    task: input.task,
-    context_json: input.contextJson ?? null,
-    composed_prompt: input.composedPrompt,
-    status: 'pending',
-    summary: null,
-    error: null,
-    created_at: now,
-    updated_at: now,
-  }
+  const id = input.id ?? randomUUID()
   getDb()
     .prepare(
       `INSERT INTO handoffs
@@ -72,8 +66,23 @@ export function create(input: CreateHandoffInput): Handoff {
        VALUES (@id, @mother_session_id, @target_repo_id, @child_session_id, @feature_id, @task,
                @context_json, @composed_prompt, @status, @summary, @error, @created_at, @updated_at)`,
     )
-    .run(row)
-  return toEntity(row)
+    .run({
+      id,
+      mother_session_id: input.motherSessionId ?? null,
+      target_repo_id: input.targetRepoId,
+      child_session_id: null,
+      feature_id: input.featureId ?? null,
+      task: input.task,
+      context_json: input.contextJson ?? null,
+      composed_prompt: input.composedPrompt,
+      status: 'pending',
+      summary: null,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    })
+  // Re-lê via JOIN pra preencher target_repo_label.
+  return fresh(id)
 }
 
 export function get(id: string): Handoff | null {
@@ -89,11 +98,11 @@ export function list(opts?: { status?: HandoffStatus | HandoffStatus[] }): Hando
     const placeholders = statuses.map(() => '?').join(', ')
     rows = db
       .prepare(
-        `SELECT * FROM handoffs WHERE status IN (${placeholders}) ORDER BY created_at DESC`,
+        `${SELECT_HANDOFF} WHERE h.status IN (${placeholders}) ORDER BY h.created_at DESC`,
       )
       .all(...statuses) as HandoffRow[]
   } else {
-    rows = db.prepare('SELECT * FROM handoffs ORDER BY created_at DESC').all() as HandoffRow[]
+    rows = db.prepare(`${SELECT_HANDOFF} ORDER BY h.created_at DESC`).all() as HandoffRow[]
   }
   return rows.map(toEntity)
 }

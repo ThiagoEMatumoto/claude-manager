@@ -545,6 +545,10 @@ const handoffReportSchema = z.object({
   summary: z.string().min(1),
 })
 
+// Teto de handoffs ativos (pending/approved/running) simultâneos por instância.
+// Evita inundar o gate humano e estourar sessões-filhas concorrentes.
+const MAX_ACTIVE_HANDOFFS = 5
+
 function handoffTools(notify: McpNotify): ToolDef[] {
   return [
     {
@@ -581,6 +585,15 @@ function handoffTools(notify: McpNotify): ToolDef[] {
       inputSchema: sessionHandoffSchema,
       handler: (args) => {
         const input = sessionHandoffSchema.parse(args)
+
+        // Cap de concorrência: não acumula handoffs ativos além do teto.
+        const active = handoffStore.list({ status: ['pending', 'approved', 'running'] }).length
+        if (active >= MAX_ACTIVE_HANDOFFS) {
+          return ok({
+            error: `Limite de ${MAX_ACTIVE_HANDOFFS} handoffs ativos atingido; resolva os pendentes (aprovar/rejeitar) ou aguarde os em andamento concluírem antes de criar outro.`,
+          })
+        }
+
         const target = resolveRepo(input.targetRepo)
         const from = input.fromRepo ? resolveRepo(input.fromRepo) : null
 

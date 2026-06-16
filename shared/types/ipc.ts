@@ -786,6 +786,7 @@ export type SessionType = 'quick_chat' | 'iteration' | 'deep_solo' | 'agent_orch
 export interface MetricsTotals {
   sessions: number
   turns: number
+  subagentTurns: number
   agentCalls: number
   skillCalls: number
   inputTokens: number
@@ -799,6 +800,8 @@ export interface MetricsTotals {
   parallelizationRatio: number
   // agentCalls / (agentCalls + inlineExploreCalls) (0 se denom==0)
   inlineDelegationRatio: number
+  // subagentTurns / turns (0 se turns==0) — manager-mode score canônico
+  managerModeScore: number
 }
 
 export interface MetricsDayPoint {

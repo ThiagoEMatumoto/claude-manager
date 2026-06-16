@@ -15,6 +15,22 @@ export function kpiStatus(value: number, target: number): KpiStatus {
   return value >= target ? 'above' : 'below'
 }
 
+export type BandTone = 'good' | 'watch' | 'bad'
+
+export interface Band {
+  label: BandTone
+  tone: BandTone
+}
+
+// Health bands canônicas do manager-mode score (espelha kz_dashboard
+// health.py band_manager): >=0.30 good | >=0.15 watch | <0.15 bad.
+// Bordas usam >= para o threshold contar na categoria melhor.
+export function bandFor(value: number): Band {
+  if (value >= 0.3) return { label: 'good', tone: 'good' }
+  if (value >= 0.15) return { label: 'watch', tone: 'watch' }
+  return { label: 'bad', tone: 'bad' }
+}
+
 // null quando não há janela anterior pra comparar (ex: janela 'all').
 export function computeDelta(current: number, previous: number | undefined | null): KpiDelta | null {
   if (previous === undefined || previous === null) return null

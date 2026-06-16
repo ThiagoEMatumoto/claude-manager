@@ -9,9 +9,16 @@ import {
 } from 'recharts'
 import type { MetricsTotals } from '../../../shared/types/ipc'
 import { ORCH_KPI } from '../../../shared/metrics-targets'
-import { computeDelta, formatDelta, formatPct, kpiStatus } from './orchestration-kpi'
+import { bandFor, computeDelta, formatDelta, formatPct, kpiStatus } from './orchestration-kpi'
+import type { BandTone } from './orchestration-kpi'
 
 const AXIS_COLOR = 'var(--color-text-dim)'
+
+const BAND_COLOR: Record<BandTone, string> = {
+  good: 'var(--color-success)',
+  watch: 'var(--color-warning)',
+  bad: 'var(--color-danger)',
+}
 
 function KpiCard({
   label,
@@ -19,15 +26,23 @@ function KpiCard({
   target,
   baseline,
   previous,
+  banded,
 }: {
   label: string
   value: number
   target: number
   baseline: number
   previous?: number
+  // Quando true, a cor do valor vem das health bands (good/watch/bad) em vez
+  // do binário above/below de kpiStatus.
+  banded?: boolean
 }) {
   const status = kpiStatus(value, target)
-  const valueColor = status === 'above' ? 'var(--color-success)' : 'var(--color-danger)'
+  const valueColor = banded
+    ? BAND_COLOR[bandFor(value).tone]
+    : status === 'above'
+      ? 'var(--color-success)'
+      : 'var(--color-danger)'
   const delta = computeDelta(value, previous)
 
   const deltaColor =
@@ -116,7 +131,7 @@ export function AgentOrchestrationMetrics({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <KpiCard
           label={ORCH_KPI.parallelization.label}
           value={totals.parallelizationRatio}
@@ -130,6 +145,14 @@ export function AgentOrchestrationMetrics({
           target={ORCH_KPI.delegation.target}
           baseline={ORCH_KPI.delegation.baseline}
           previous={previousTotals?.inlineDelegationRatio}
+        />
+        <KpiCard
+          label={ORCH_KPI.managerMode.label}
+          value={totals.managerModeScore}
+          target={ORCH_KPI.managerMode.target}
+          baseline={ORCH_KPI.managerMode.baseline}
+          previous={previousTotals?.managerModeScore}
+          banded
         />
       </div>
 

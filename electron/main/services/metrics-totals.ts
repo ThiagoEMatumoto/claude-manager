@@ -4,6 +4,7 @@ import type { MetricsTotals, MetricsWindow } from '../../../shared/types/ipc'
 // Mantido aqui (sem deps de electron/db) pra ser testável isoladamente.
 export interface TotalsRow {
   turns: number
+  subagent_turns: number
   agent_calls: number
   skill_calls: number
   input_tokens: number
@@ -22,6 +23,7 @@ export function computeTotals(rows: TotalsRow[]): MetricsTotals {
   const totals: MetricsTotals = {
     sessions: 0,
     turns: 0,
+    subagentTurns: 0,
     agentCalls: 0,
     skillCalls: 0,
     inputTokens: 0,
@@ -32,6 +34,7 @@ export function computeTotals(rows: TotalsRow[]): MetricsTotals {
     cacheHitRate: 0,
     parallelizationRatio: 0,
     inlineDelegationRatio: 0,
+    managerModeScore: 0,
   }
   let totalAgentRounds = 0
   let totalParallelRounds = 0
@@ -40,6 +43,7 @@ export function computeTotals(rows: TotalsRow[]): MetricsTotals {
   for (const row of rows) {
     totals.sessions += 1
     totals.turns += row.turns
+    totals.subagentTurns += row.subagent_turns
     totals.agentCalls += row.agent_calls
     totals.skillCalls += row.skill_calls
     totals.inputTokens += row.input_tokens
@@ -57,6 +61,7 @@ export function computeTotals(rows: TotalsRow[]): MetricsTotals {
   totals.parallelizationRatio = totalAgentRounds > 0 ? totalParallelRounds / totalAgentRounds : 0
   const delegationBase = totals.agentCalls + totalInlineExploreCalls
   totals.inlineDelegationRatio = delegationBase > 0 ? totals.agentCalls / delegationBase : 0
+  totals.managerModeScore = totals.turns > 0 ? totals.subagentTurns / totals.turns : 0
 
   return totals
 }

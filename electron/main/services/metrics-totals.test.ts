@@ -4,6 +4,7 @@ import { computeTotals, previousWindowRange, type TotalsRow } from './metrics-to
 function mkRow(partial: Partial<TotalsRow> = {}): TotalsRow {
   return {
     turns: 0,
+    subagent_turns: 0,
     agent_calls: 0,
     skill_calls: 0,
     input_tokens: 0,
@@ -66,6 +67,24 @@ describe('computeTotals', () => {
   it('calcula cacheHitRate = cacheRead / (cacheRead + input)', () => {
     const t = computeTotals([mkRow({ cache_read_tokens: 75, input_tokens: 25 })])
     expect(t.cacheHitRate).toBeCloseTo(0.75, 5)
+  })
+
+  it('soma subagentTurns por sessão', () => {
+    const t = computeTotals([mkRow({ subagent_turns: 4 }), mkRow({ subagent_turns: 6 })])
+    expect(t.subagentTurns).toBe(10)
+  })
+
+  it('calcula managerModeScore = totalSubagentTurns / turns', () => {
+    const t = computeTotals([
+      mkRow({ turns: 30, subagent_turns: 6 }),
+      mkRow({ turns: 10, subagent_turns: 4 }),
+    ])
+    expect(t.managerModeScore).toBeCloseTo(10 / 40, 5)
+  })
+
+  it('managerModeScore = 0 quando turns é 0', () => {
+    const t = computeTotals([mkRow({ turns: 0, subagent_turns: 5 })])
+    expect(t.managerModeScore).toBe(0)
   })
 })
 

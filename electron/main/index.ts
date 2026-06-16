@@ -9,6 +9,7 @@ import { registerSessionIpc } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc } from './ipc/git'
+import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
@@ -111,6 +112,7 @@ app.whenReady().then(async () => {
   registerShellIpc()
   registerDialogIpc()
   registerGitIpc()
+  registerFsIpc()
   registerPrefsIpc()
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()

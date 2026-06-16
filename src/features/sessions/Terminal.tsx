@@ -25,6 +25,7 @@ import {
   type EffortLevel,
 } from './ModelPill'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
 import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
 import type { Session, SessionActivity } from '../../../shared/types/ipc'
@@ -68,6 +69,28 @@ function activityStatusView(status: SessionActivity['status'] | undefined): Stat
 // Colar conteúdo multilinha manda vários `\r` ⇒ o claude auto-submete cada linha
 // (footgun). Conteúdo grande/multilinha passa por uma confirmação antes de colar.
 const needsPasteConfirm = (t: string) => t.includes('\n') || t.length > 200
+
+// Casa paths impressos no terminal: absolutos (/...), home (~/...) e relativos
+// (./..., ../..., ou sem prefixo). Exige conter `/` (o `\/` no meio garante isso).
+const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
+// Pontuação de fim de frase grudada no path não faz parte dele.
+const TRAILING = /[.,:;)\]}>'"]+$/
+
+// Resolução simples de path no renderer (sem `path` do node): junta um path
+// relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
+function resolvePath(raw: string, cwd: string | null): string | null {
+  if (raw.startsWith('/') || raw.startsWith('~')) return raw
+  if (!cwd) return null
+  const base = cwd.replace(/\/+$/, '')
+  const parts = `${base}/${raw}`.split('/')
+  const out: string[] = []
+  for (const seg of parts) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') out.pop()
+    else out.push(seg)
+  }
+  return '/' + out.join('/')
+}
 
 function formatRelative(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -121,6 +144,12 @@ export function Terminal({
   // `activity` stale ao decidir interceptar as setas.
   const activityRef = useRef<SessionActivity | null>(activity)
   activityRef.current = activity
+
+  // cwd da sessão pra resolver paths relativos clicados no terminal. É o path do
+  // repo do pane; vazio em sessões avulsas (aí só linkamos absolutos/`~`). Ref pra
+  // o link provider ler o valor atual sem recriar o xterm.
+  const cwdRef = useRef(repoPath)
+  cwdRef.current = repoPath
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -287,6 +316,42 @@ export function Terminal({
     term.loadAddon(search)
     searchRef.current = search
     term.loadAddon(new ClipboardAddon())
+
+    // Linkifica PATHS de arquivo impressos no terminal → abre no painel de arquivos
+    // (o WebLinksAddon acima cuida de URLs http, que continuam abrindo externamente).
+    // Barato por design: só regex no texto da linha; nenhum I/O em provideLinks (o
+    // I/O — ler o arquivo — só acontece no activate via openPath).
+    const linkProvider = term.registerLinkProvider({
+      provideLinks(lineNumber, cb) {
+        const line = term.buffer.active.getLine(lineNumber - 1)
+        const text = line?.translateToString(true)
+        if (!text) return cb(undefined)
+        const links: import('@xterm/xterm').ILink[] = []
+        PATH_RE.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = PATH_RE.exec(text)) !== null) {
+          let matched = m[0]
+          const trimmed = matched.replace(TRAILING, '')
+          if (trimmed.length < 2) continue // só "/" ou similar — ignora
+          matched = trimmed
+          const startX = m.index + 1 // coords do xterm são 1-based
+          const endX = m.index + matched.length + 1
+          const cwd = cwdRef.current || null
+          const resolved = resolvePath(matched, cwd)
+          if (!resolved) continue // relativo sem cwd disponível — não linka
+          links.push({
+            range: { start: { x: startX, y: lineNumber }, end: { x: endX, y: lineNumber } },
+            text: matched,
+            decorations: { underline: true, pointerCursor: true },
+            activate() {
+              void useFilesStore.getState().openPath(resolved)
+            },
+          })
+        }
+        cb(links.length ? links : undefined)
+      },
+    })
+
     term.open(host)
     fit.fit()
 
@@ -452,6 +517,7 @@ export function Terminal({
       host.removeEventListener('paste', onPaste, true)
       observer.disconnect()
       offTheme()
+      linkProvider.dispose()
       setDataHandler(null)
       term.dispose()
       xtermRef.current = null

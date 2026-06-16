@@ -51,6 +51,25 @@ describe('composeHandoffPrompt', () => {
     expect(prompt).toContain('SOMENTE neste repo (backend, /repos/backend)')
   })
 
+  it('cobre os 4 kinds novos da Wave A com frases PT-BR', () => {
+    const cases: Array<[HandoffEdge['kind'], string]> = [
+      ['work-hub', 'coordena o trabalho sobre'],
+      ['infra', 'provisiona a infra de'],
+      ['monorepo', 'contém'],
+      ['documents', 'documenta'],
+    ]
+    for (const [kind, phrase] of cases) {
+      const p = composeHandoffPrompt({
+        targetRepoLabel: 'svc',
+        targetRepoPath: '/repos/svc',
+        task: 't',
+        edges: [{ kind, label: null, direction: 'from-mother' }],
+        handoffId: 'h-x',
+      })
+      expect(p).toContain(phrase)
+    }
+  })
+
   it('kind desconhecido cai no genérico "se relaciona com"', () => {
     const p = composeHandoffPrompt({
       targetRepoLabel: 'svc',

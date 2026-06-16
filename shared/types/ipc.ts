@@ -27,6 +27,8 @@ export interface Repo {
   // Posição livre no canvas do grafo de arquitetura (null = auto-layout).
   canvasX: number | null
   canvasY: number | null
+  // Repo "hub": coordena/conecta os demais repos (vista de arquitetura).
+  isHub: boolean
 }
 
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----
@@ -36,6 +38,10 @@ export type RepoDependencyKind =
   | 'shares-types'
   | 'depends-on'
   | 'deploys-to'
+  | 'work-hub'
+  | 'infra'
+  | 'monorepo'
+  | 'documents'
   | 'custom'
 
 export interface RepoDependency {
@@ -58,6 +64,20 @@ export interface UpdateRepoDependencyInput {
   id: string
   kind?: RepoDependencyKind
   label?: string | null
+}
+
+// Marca/desmarca um repo como hub na vista de arquitetura.
+export interface SetRepoHubInput {
+  repoId: string
+  isHub: boolean
+}
+
+// Conecta um repo-hub a todos os outros repos do escopo (projeto, ou global se
+// projectId ausente) com o kind dado. Idempotente.
+export interface ConnectHubToAllInput {
+  hubRepoId: string
+  kind: RepoDependencyKind
+  projectId?: string
 }
 
 // ---- Handoffs cross-repo (multi-repo orchestration) ----
@@ -1076,6 +1096,8 @@ export interface Api {
     updateRepo(input: UpdateRepoInput): Promise<Repo>
     deleteRepo(id: string): Promise<void>
     reorderRepos(input: ReorderReposInput): Promise<void>
+    // Todos os repos de todos os projetos (vista de arquitetura global).
+    listAllRepos(): Promise<Repo[]>
   }
   sessions: {
     spawn(input: SpawnSessionInput): Promise<Session>
@@ -1184,6 +1206,8 @@ export interface Api {
   }
   repoDeps: {
     list(projectId: string): Promise<RepoDependency[]>
+    // Todas as arestas de todos os projetos (vista de arquitetura global).
+    listAll(): Promise<RepoDependency[]>
     create(input: CreateRepoDependencyInput): Promise<RepoDependency>
     update(input: UpdateRepoDependencyInput): Promise<RepoDependency>
     delete(input: { id: string; projectId: string }): Promise<void>
@@ -1193,6 +1217,8 @@ export interface Api {
       y: number
       projectId: string
     }): Promise<void>
+    setRepoHub(input: SetRepoHubInput): Promise<void>
+    connectHubToAll(input: ConnectHubToAllInput): Promise<RepoDependency[]>
     onUpdated(handler: (event: { projectId: string | null }) => void): () => void
   }
   handoffs: {

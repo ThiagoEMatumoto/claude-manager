@@ -119,26 +119,59 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
-// Escreve um arquivo temporário com o contexto da feature pra injeção via
-// --append-system-prompt-file. Retorna o path, ou null se a feature não existe.
-// Conteúdo (header + bloco tracking + seções-chave) vem do builder puro em
-// feature-context.ts.
-function writeFeatureContextFile(featureId: string): string | null {
-  const feature = getFeature(featureId)
-  if (!feature) return null
-  const content = buildFeatureContextContent(feature)
-
+// Escreve um arquivo temporário em <userData>/tmp/<prefix>-<ts>.md (mkdir
+// recursivo). Retorna o path. Base compartilhada pra system-prompts injetados
+// via --append-system-prompt-file (feature context e/ou handoff).
+function writeTempPromptFile(prefix: string, content: string): string {
   const tmpDir = join(app.getPath('userData'), 'tmp')
   mkdirSync(tmpDir, { recursive: true })
-  const tmpPath = join(tmpDir, `feat-${feature.id}-${Date.now()}.md`)
+  const tmpPath = join(tmpDir, `${prefix}-${Date.now()}.md`)
   writeFileSync(tmpPath, content, 'utf8')
   return tmpPath
 }
 
+// Conteúdo do contexto da feature (header + bloco tracking + seções-chave) vem
+// do builder puro em feature-context.ts. Retorna null se a feature não existe.
+function buildFeatureContextOrNull(featureId: string): string | null {
+  const feature = getFeature(featureId)
+  if (!feature) return null
+  return buildFeatureContextContent(feature)
+}
+
+// Monta a string do innerCmd do spawn novo. PURA: sem I/O — recebe os pedaços já
+// resolvidos (claudeCmd, sessionId já validado, name, mcpConfigArg pronto, modelo
+// já validado contra whitelist ou null, e o path opcional do system-prompt-file
+// já escrito). Mantém a ordem das flags do handler original.
+export function buildSpawnInnerCmd(parts: {
+  claudeCmd: string
+  sessionId: string
+  name: string
+  mcpConfigArg: string
+  model: string | null
+  systemPromptFilePath: string | null
+}): string {
+  let innerCmd = `${parts.claudeCmd} --session-id ${parts.sessionId} -n ${shquote(parts.name)}${parts.mcpConfigArg}`
+  if (parts.model) {
+    innerCmd += ` --model ${shquote(parts.model)}`
+  }
+  if (parts.systemPromptFilePath) {
+    innerCmd += ` --append-system-prompt-file ${shquote(parts.systemPromptFilePath)}`
+  }
+  return innerCmd
+}
+
+// Envelopa o comando em bracketed-paste antes de mandar pro PTY. O TUI do claude
+// trata o conteúdo entre \x1b[200~ e \x1b[201~ como colagem literal (os \n NÃO
+// viram Enter), e só o \r final submete. Defesa pra prompts multi-linha.
+export function formatPtyInjection(cmd: string): string {
+  return `\x1b[200~${cmd}\x1b[201~\r`
+}
+
 // Injeta um comando inicial no REPL do claude assim que o TUI sobe. Como não há
 // sinal explícito de "pronto", esperamos o PRIMEIRO `data` do PTY daquela sessão
-// (o banner inicial) e, após um debounce curto, escrevemos `cmd + '\r'`. One-shot:
-// remove o listener antes de escrever, então nunca dispara duas vezes.
+// (o banner inicial) e, após um debounce curto, escrevemos via bracketed-paste.
+// `.trim()` só tira as bordas (NÃO os \n internos) — prompts multi-linha chegam
+// íntegros. One-shot: remove o listener antes de escrever, nunca dispara 2x.
 function injectInitialCommandOnFirstData(sessionId: string, command: string): void {
   const cmd = command.trim()
   if (!cmd) return
@@ -154,7 +187,7 @@ function injectInitialCommandOnFirstData(sessionId: string, command: string): vo
       ptyManager.off('data', onData)
       ptyManager.off('exit', onExit)
       try {
-        ptyManager.write(sessionId, cmd + '\r')
+        ptyManager.write(sessionId, formatPtyInjection(cmd))
       } catch {
         // PTY já encerrou antes do debounce — nada a fazer.
       }
@@ -300,27 +333,46 @@ export function registerSessionIpc(): void {
 
     if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
     const claudeCmd = resolveClaudeCommand()
-    let innerCmd = `${claudeCmd} --session-id ${sessionId} -n ${shquote(name)}${mcpConfigArg()}`
 
-    // Modelo inicial: só anexa se o valor passar na whitelist (defesa em
+    // Modelo inicial: só passa adiante se o valor passar na whitelist (defesa em
     // profundidade — o renderer também restringe, mas o main é a autoridade).
-    if (input.model && SPAWN_MODEL_WHITELIST.has(input.model)) {
-      innerCmd += ` --model ${shquote(input.model)}`
+    const model =
+      input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
+
+    // System-prompt anexado via --append-system-prompt-file vem de DUAS fontes:
+    //  - contexto da feature (se featureId; Fase 6), e
+    //  - systemPromptText (prompt do handoff — entregue por arquivo pra não
+    //    quebrar no REPL com seus \n).
+    // Se ambos, concatena num único arquivo (um só --append-system-prompt-file).
+    // NÃO bloqueia o spawn se algo falhar.
+    let systemPromptFilePath: string | null = null
+    try {
+      const segments: string[] = []
+      if (input.featureId) {
+        const featureContent = buildFeatureContextOrNull(input.featureId)
+        if (featureContent) segments.push(featureContent)
+      }
+      if (input.systemPromptText?.trim()) {
+        segments.push(input.systemPromptText)
+      }
+      if (segments.length > 0) {
+        systemPromptFilePath = writeTempPromptFile(
+          input.featureId ? `feat-${input.featureId}` : 'handoff',
+          segments.join('\n\n---\n\n'),
+        )
+      }
+    } catch (err) {
+      console.error('[sessions] system-prompt injection failed:', err)
     }
 
-    // Fase 6: se a sessão é vinculada a uma feature, escreve um arquivo temporário
-    // com o contexto (frontmatter-derivado + seções-chave do doc) e anexa via
-    // --append-system-prompt-file. NÃO bloqueia o spawn se algo falhar.
-    if (input.featureId) {
-      try {
-        const promptPath = writeFeatureContextFile(input.featureId)
-        if (promptPath) {
-          innerCmd += ` --append-system-prompt-file ${shquote(promptPath)}`
-        }
-      } catch (err) {
-        console.error('[sessions] feature context injection failed:', err)
-      }
-    }
+    const innerCmd = buildSpawnInnerCmd({
+      claudeCmd,
+      sessionId,
+      name,
+      mcpConfigArg: mcpConfigArg(),
+      model,
+      systemPromptFilePath,
+    })
 
     return startSession({
       ccSessionId: sessionId,

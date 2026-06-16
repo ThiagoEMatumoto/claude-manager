@@ -195,6 +195,11 @@ export interface SpawnSessionInput {
   // contra whitelist no main e anexado ao spawn como `--model <alias>`.
   // Ausente = default do claude.
   model?: string
+  // Texto de system-prompt a ANEXAR via --append-system-prompt-file (arquivo
+  // temp). Usado pelo fluxo de handoff pra entregar o prompt multi-linha íntegro
+  // (em vez de injetá-lo no REPL, onde os \n viram Enter). Se também houver
+  // featureId, os dois conteúdos são concatenados num único arquivo.
+  systemPromptText?: string
   cols?: number
   rows?: number
 }

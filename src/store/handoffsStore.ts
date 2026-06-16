@@ -55,6 +55,10 @@ export const useHandoffsStore = create<HandoffsState>((set, get) => ({
     try {
       await handoffsApi.approve({ id, composedPrompt: editedPrompt })
       const ctx = await handoffsApi.spawnContext(id)
+      // O prompt completo (editado) vai por arquivo de system-prompt (íntegro,
+      // multi-linha); no REPL injetamos só uma linha de kickoff que aponta pro
+      // contexto e instrui a reportar via MCP ao terminar.
+      const kickoff = `Comece a tarefa do handoff descrita no seu contexto de sistema. Ao terminar, chame a MCP tool handoff_report com handoffId="${id}".`
       const childSessionId = await useAppStore
         .getState()
         .openSession(
@@ -65,8 +69,9 @@ export const useHandoffsStore = create<HandoffsState>((set, get) => ({
           undefined,
           handoff?.featureId ?? undefined,
           `handoff: ${ctx.repo.label}`,
-          editedPrompt,
+          kickoff,
           undefined,
+          editedPrompt,
         )
       await handoffsApi.markRunning({ id, childSessionId })
       await get().load()

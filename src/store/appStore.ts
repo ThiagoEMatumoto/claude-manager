@@ -10,6 +10,8 @@ export type Area =
   | 'overview'
   | 'objectives'
   | 'tasks'
+  | 'architecture'
+  | 'handoffs'
 
 // Persistência leve do estado colapsado da sidebar (mesmo padrão do
 // keybindings-store: localStorage no renderer, sem IPC/DB).
@@ -185,7 +187,9 @@ interface AppState {
     initialCommand?: string,
     // Modelo inicial ('opus' | 'sonnet' | 'haiku'); validado no main.
     model?: string,
-  ) => Promise<void>
+    // Retorna o id da sessão criada. Callers existentes ignoram o retorno; o fluxo
+    // de handoff usa pra marcar mark-running com o childSessionId.
+  ) => Promise<string>
   // Sessão avulsa: spawn sem repo (cwd = scratch dir do backend).
   openQuickSession: () => Promise<void>
   resumeSession: (
@@ -321,6 +325,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }))
     schedulePersist(get().panes)
     void get().refreshLiveSessions()
+    return session.id
   },
 
   openQuickSession: async () => {

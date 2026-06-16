@@ -18,6 +18,7 @@ import { CcConfigsArea } from '@/features/cc-configs/CcConfigsArea'
 import { MetricsArea } from '@/features/metrics/MetricsArea'
 import { FeaturesArea } from '@/features/features/FeaturesArea'
 import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
+import { ArchitectureArea } from '@/features/architecture/ArchitectureArea'
 import { OverviewArea } from '@/features/overview/OverviewArea'
 import { TasksArea } from '@/features/tasks/TasksArea'
 import { Terminal } from '@/features/sessions/Terminal'
@@ -34,6 +35,9 @@ import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { FilesPanel } from '@/features/files/FilesPanel'
+import { HandoffApprovalDialog } from '@/features/handoffs/HandoffApprovalDialog'
+import { HandoffsPanel } from '@/features/handoffs/HandoffsPanel'
+import { useHandoffs } from '@/features/handoffs/useHandoffs'
 
 interface PaneParams {
   pane: ActivePane
@@ -131,6 +135,10 @@ export function AppShell() {
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const overrides = useKeybindingsStore((s) => s.overrides)
   const loadKeybindings = useKeybindingsStore((s) => s.load)
+
+  // Handoffs cross-repo: assina pendentes + aplica auto-approve (gate humano via
+  // <HandoffApprovalDialog/> quando o auto-approve está desligado).
+  useHandoffs()
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
@@ -612,6 +620,10 @@ export function AppShell() {
 
       {area === 'objectives' && <ObjectivesArea />}
 
+      {area === 'architecture' && <ArchitectureArea />}
+
+      {area === 'handoffs' && <HandoffsPanel />}
+
       {area === 'tasks' && <TasksArea />}
 
       {area === 'cc-configs' && <CcConfigsArea />}
@@ -689,6 +701,7 @@ export function AppShell() {
       </main>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <HandoffApprovalDialog />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

@@ -8,4 +8,6 @@ export const SERVER_INSTRUCTIONS = `claude-manager tracks the user's objectives,
 
 **Feature status:** If your system prompt declares a feature id, use it. Otherwise you may resolve it with feature_list, matching by repo path/branch or title; if no confident match, skip feature linking. Call feature_update when state genuinely changes: in-progress on resuming, blocked when stuck on an external dependency, done when the feature's objective is fully met.
 
+**Handoff cross-repo:** When the work requires another connected repo (e.g. you need a change in an API the current repo consumes), do not switch repos yourself. First call repo_connections_get to see how the current repo relates to others. Then call session_handoff to delegate (set fromRepo = the repo you are working in, targetRepo = the repo that owns the work, plus a clear task). It returns a handoffId for a pending handoff that a human approves in the app and that spawns a child session. Poll handoff_result(handoffId) until status=done, then read its summary and synthesize it into your own work (or handle rejected/failed).
+
 Keep updates minimal and factual; never invent progress.`

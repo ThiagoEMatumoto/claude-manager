@@ -32,7 +32,7 @@ export function featuresDir(bundleDir: string): string {
 // 012_tasks, 013_feature_links):
 //   projects            (raiz)
 //   repos               → projects
-//   repo_dependencies   → repos, repos
+//   repo_dependencies   → repos, repos  (PK id; UNIQUE from,to,kind — migration 017)
 //   features            → projects
 //   feature_repos       → features, repos
 //   objectives          → objectives (self, parent_objective_id)  [pai antes do filho via ordenação por created_at; ver nota]
@@ -69,7 +69,7 @@ export type SyncedTable = (typeof SYNCED_TABLES)[number]
 export const TABLE_PRIMARY_KEYS: Record<SyncedTable, readonly string[]> = {
   projects: ['id'],
   repos: ['id'],
-  repo_dependencies: ['from_repo_id', 'to_repo_id'],
+  repo_dependencies: ['id'],
   features: ['id'],
   feature_repos: ['feature_id', 'repo_id'],
   objectives: ['id'],

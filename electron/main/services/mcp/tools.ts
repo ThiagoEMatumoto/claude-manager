@@ -8,7 +8,16 @@ import * as objectiveStore from '../objective-store'
 import * as overviewStore from '../overview-store'
 import * as taskStore from '../task-store'
 import * as featureStore from '../feature-store'
-import type { FeatureObjectiveLink, TaskLink } from '../../../../shared/types/ipc'
+import * as repoDepStore from '../repo-dependency-store'
+import * as handoffStore from '../handoff-store'
+import { composeHandoffPrompt, type HandoffEdge } from '../handoff/compose-prompt'
+import { getDb } from '../db'
+import { randomUUID } from 'node:crypto'
+import type {
+  FeatureObjectiveLink,
+  RepoDependency,
+  TaskLink,
+} from '../../../../shared/types/ipc'
 
 // Injeção do broadcast (testável sem electron/janelas): o server monta a
 // implementação real a partir de services/notify.ts.
@@ -459,12 +468,236 @@ function overviewTools(): ToolDef[] {
   ]
 }
 
+// ---- handoffs cross-repo ----
+
+interface ResolvedRepo {
+  id: string
+  label: string
+  path: string
+  role: string | null
+  projectId: string
+  projectName: string
+}
+
+interface RepoLookupRow {
+  id: string
+  label: string
+  path: string
+  role: string | null
+  project_id: string
+  project_name: string
+}
+
+// Resolve um repo por label OU path (a mãe não conhece os ids internos). Lança
+// erros legíveis (consumidos por outra sessão Claude): 0 → não encontrado;
+// >1 → lista os candidatos pra a mãe desambiguar.
+function resolveRepo(ref: string): ResolvedRepo {
+  const rows = getDb()
+    .prepare(
+      `SELECT r.id, r.label, r.path, r.role, r.project_id, p.name AS project_name
+         FROM repos r JOIN projects p ON p.id = r.project_id
+        WHERE r.label = ? OR r.path = ?`,
+    )
+    .all(ref, ref) as RepoLookupRow[]
+  if (rows.length === 0) throw new Error(`repo não encontrado: ${ref}`)
+  if (rows.length > 1) {
+    const candidates = rows
+      .map((r) => `- label="${r.label}" path="${r.path}" project="${r.project_name}"`)
+      .join('\n')
+    throw new Error(
+      `repo ambíguo: ${ref} corresponde a ${rows.length} repos. Desambigue pelo path exato:\n${candidates}`,
+    )
+  }
+  const r = rows[0]
+  return {
+    id: r.id,
+    label: r.label,
+    path: r.path,
+    role: r.role,
+    projectId: r.project_id,
+    projectName: r.project_name,
+  }
+}
+
+// Resolve label+role de um repo por id (pra descrever a ponta oposta de uma aresta).
+function repoBrief(id: string): { id: string; label: string; role: string | null } {
+  const row = getDb()
+    .prepare('SELECT id, label, role FROM repos WHERE id = ?')
+    .get(id) as { id: string; label: string; role: string | null } | undefined
+  if (!row) return { id, label: id, role: null }
+  return row
+}
+
+const repoConnectionsGetSchema = z.object({ repo: z.string().min(1) })
+
+const sessionHandoffSchema = z.object({
+  targetRepo: z.string().min(1),
+  task: z.string().min(1),
+  fromRepo: z.string().min(1).optional(),
+  featureId: z.string().min(1).optional(),
+  context: z.string().optional(),
+})
+
+const handoffResultSchema = z.object({ handoffId: z.string().min(1) })
+
+const handoffReportSchema = z.object({
+  handoffId: z.string().min(1),
+  summary: z.string().min(1),
+})
+
+// Teto de handoffs ativos (pending/approved/running) simultâneos por instância.
+// Evita inundar o gate humano e estourar sessões-filhas concorrentes.
+const MAX_ACTIVE_HANDOFFS = 5
+
+function handoffTools(notify: McpNotify): ToolDef[] {
+  return [
+    {
+      name: 'repo_connections_get',
+      title: 'Get repo connections',
+      description:
+        'Inspect a repo (by label or path) and its dependency-graph connections to other repos. Use before session_handoff to understand how the current repo relates to others.',
+      inputSchema: repoConnectionsGetSchema,
+      handler: (args) => {
+        const { repo } = repoConnectionsGetSchema.parse(args)
+        const r = resolveRepo(repo)
+        const connections = repoDepStore.listByRepo(r.id).map((edge) => {
+          const outgoing = edge.fromRepoId === r.id
+          const otherId = outgoing ? edge.toRepoId : edge.fromRepoId
+          return {
+            id: edge.id,
+            kind: edge.kind,
+            label: edge.label,
+            direction: (outgoing ? 'outgoing' : 'incoming') as 'outgoing' | 'incoming',
+            otherRepo: repoBrief(otherId),
+          }
+        })
+        return ok({
+          repo: { id: r.id, label: r.label, path: r.path, role: r.role, project: r.projectName },
+          connections,
+        })
+      },
+    },
+    {
+      name: 'session_handoff',
+      title: 'Hand off work to another repo',
+      description:
+        'Delegate end-to-end work to a connected repo by creating a handoff. Pass fromRepo = the repo you are working in (orients the context). Creates a pending handoff that requires human approval in the app, then spawns a child session. Returns a handoffId; poll handoff_result(handoffId) until status=done, then synthesize the summary.',
+      inputSchema: sessionHandoffSchema,
+      handler: (args) => {
+        const input = sessionHandoffSchema.parse(args)
+
+        // Cap de concorrência: não acumula handoffs ativos além do teto.
+        const active = handoffStore.list({ status: ['pending', 'approved', 'running'] }).length
+        if (active >= MAX_ACTIVE_HANDOFFS) {
+          return ok({
+            error: `Limite de ${MAX_ACTIVE_HANDOFFS} handoffs ativos atingido; resolva os pendentes (aprovar/rejeitar) ou aguarde os em andamento concluírem antes de criar outro.`,
+          })
+        }
+
+        const target = resolveRepo(input.targetRepo)
+        const from = input.fromRepo ? resolveRepo(input.fromRepo) : null
+
+        // Arestas do target → shape do compose, orientadas pela MÃE (fromRepo).
+        // Prioriza as que tocam o fromRepo; se não há fromRepo, ainda inclui as
+        // do target com uma direção plausível.
+        const allEdges = repoDepStore.listByRepo(target.id)
+        const toCompose = (edge: RepoDependency): HandoffEdge => {
+          const targetIsFrom = edge.fromRepoId === target.id
+          return {
+            kind: edge.kind,
+            label: edge.label,
+            // from-mother: mãe → target (aresta entra no target).
+            // to-mother:   target → mãe (aresta sai do target).
+            direction: targetIsFrom ? 'to-mother' : 'from-mother',
+          }
+        }
+        const edges: HandoffEdge[] = from
+          ? allEdges
+              .filter(
+                (e) => e.fromRepoId === from.id || e.toRepoId === from.id,
+              )
+              .map(toCompose)
+          : allEdges.map(toCompose)
+
+        const featureTitle = input.featureId
+          ? (
+              getDb()
+                .prepare('SELECT title FROM features WHERE id = ?')
+                .get(input.featureId) as { title: string } | undefined
+            )?.title ?? null
+          : null
+
+        const handoffId = randomUUID()
+        const composed = composeHandoffPrompt({
+          targetRepoLabel: target.label,
+          targetRepoPath: target.path,
+          motherRepoLabel: from?.label,
+          task: input.task,
+          edges,
+          featureTitle,
+          handoffId,
+        })
+
+        const handoff = handoffStore.create({
+          id: handoffId,
+          motherSessionId: null,
+          targetRepoId: target.id,
+          featureId: input.featureId ?? null,
+          task: input.task,
+          contextJson: input.context ?? null,
+          composedPrompt: composed,
+        })
+        notify.broadcast('handoff:updated', handoff)
+        return ok({
+          handoffId,
+          status: 'pending',
+          message:
+            'Handoff criado e aguardando aprovação humana no app. Faça polling com handoff_result(handoffId) — quando status=done, leia o summary.',
+        })
+      },
+    },
+    {
+      name: 'handoff_result',
+      title: 'Poll handoff result',
+      description:
+        'Poll a handoff by id. Returns { status, summary, error }. Keep polling until status=done (then read summary) or rejected/failed.',
+      inputSchema: handoffResultSchema,
+      handler: (args) => {
+        const { handoffId } = handoffResultSchema.parse(args)
+        const handoff = handoffStore.get(handoffId)
+        if (!handoff) throw new Error(`handoff não encontrado: ${handoffId}`)
+        return ok({
+          status: handoff.status,
+          summary: handoff.summary,
+          error: handoff.error,
+        })
+      },
+    },
+    {
+      name: 'handoff_report',
+      title: 'Report handoff result',
+      description:
+        'Called by the CHILD session when it finishes the handed-off work. Records the summary and marks the handoff done.',
+      inputSchema: handoffReportSchema,
+      handler: (args) => {
+        const { handoffId, summary } = handoffReportSchema.parse(args)
+        const existing = handoffStore.get(handoffId)
+        if (!existing) throw new Error(`handoff não encontrado: ${handoffId}`)
+        const updated = handoffStore.report(handoffId, summary)
+        notify.broadcast('handoff:updated', updated)
+        return ok({ status: 'done' })
+      },
+    },
+  ]
+}
+
 export function buildTools(notify: McpNotify): ToolDef[] {
   return [
     ...overviewTools(),
     ...objectiveTools(notify),
     ...taskTools(notify),
     ...featureTools(notify),
+    ...handoffTools(notify),
   ]
 }
 

@@ -24,6 +24,9 @@ import type {
   SetFeatureReposInput,
   SetFeatureObjectiveLinksInput,
   FeatureSynthError,
+  CreateRepoDependencyInput,
+  UpdateRepoDependencyInput,
+  HandoffStatus,
   ObjectiveListFilter,
   CreateObjectiveInput,
   UpdateObjectiveInput,
@@ -180,6 +183,27 @@ const api: Api = {
     backfill: () => invoke('features:backfill'),
     onUpdated: (handler) => subscribe<Feature>('feature:updated', handler),
     onSynthError: (handler) => subscribe<FeatureSynthError>('feature:synth-error', handler),
+  },
+  repoDeps: {
+    list: (projectId: string) => invoke('repo-deps:list', projectId),
+    create: (input: CreateRepoDependencyInput) => invoke('repo-deps:create', input),
+    update: (input: UpdateRepoDependencyInput) => invoke('repo-deps:update', input),
+    delete: (input: { id: string; projectId: string }) => invoke('repo-deps:delete', input),
+    setRepoPosition: (input: { repoId: string; x: number; y: number; projectId: string }) =>
+      invoke('repos:set-position', input),
+    onUpdated: (handler) => subscribe<{ projectId: string | null }>('repo-deps:updated', handler),
+  },
+  handoffs: {
+    list: (opts?: { status?: HandoffStatus | HandoffStatus[] }) => invoke('handoffs:list', opts),
+    get: (id: string) => invoke('handoffs:get', id),
+    approve: (input: { id: string; composedPrompt?: string }) =>
+      invoke('handoffs:approve', input),
+    reject: (id: string) => invoke('handoffs:reject', id),
+    markRunning: (input: { id: string; childSessionId: string }) =>
+      invoke('handoffs:mark-running', input),
+    fail: (input: { id: string; error: string }) => invoke('handoffs:fail', input),
+    spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
+    onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },
   objectives: {
     list: (filter?: ObjectiveListFilter) => invoke('objectives:list', filter),

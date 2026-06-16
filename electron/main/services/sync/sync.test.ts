@@ -75,8 +75,8 @@ function seed(db: Database.Database): void {
   ).run('repo-2', 'proj-1', 'ui', '/home/x/ui', 1, t, 'external')
 
   db.prepare(
-    `INSERT INTO repo_dependencies (from_repo_id, to_repo_id, kind) VALUES (?,?,?)`,
-  ).run('repo-2', 'repo-1', 'depends')
+    `INSERT INTO repo_dependencies (id, from_repo_id, to_repo_id, kind, label, created_at) VALUES (?,?,?,?,?,?)`,
+  ).run('dep-1', 'repo-2', 'repo-1', 'depends-on', null, t)
 
   db.prepare(
     `INSERT INTO features (id, project_id, slug, title, status, objective, doc_path, synth_mode, model, created_at, updated_at, completed_at, archived_at, origin)

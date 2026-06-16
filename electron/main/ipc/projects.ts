@@ -54,6 +54,8 @@ interface RepoRow {
   source: string | null
   position: number
   created_at: number
+  canvas_x: number | null
+  canvas_y: number | null
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -77,6 +79,8 @@ const toRepo = (row: RepoRow): Repo => ({
   source: row.source,
   position: row.position,
   createdAt: row.created_at,
+  canvasX: row.canvas_x ?? null,
+  canvasY: row.canvas_y ?? null,
 })
 
 export function registerProjectIpc(): void {
@@ -202,6 +206,8 @@ export function registerProjectIpc(): void {
       source: input.source ?? null,
       position: maxPos.max + 1,
       created_at: Date.now(),
+      canvas_x: null,
+      canvas_y: null,
     }
     db.prepare(
       'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

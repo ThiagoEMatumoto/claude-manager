@@ -16,6 +16,7 @@ import * as sessionsRepoNullable from './014_sessions_repo_nullable'
 import * as featureOrigin from './015_feature_origin'
 import * as metricsSubagentTurns from './016_metrics_subagent_turns'
 import * as repoDepsCanvas from './017_repo_deps_canvas'
+import * as handoffs from './018_handoffs'
 
 interface Migration {
   version: number
@@ -47,6 +48,7 @@ export const migrations: Migration[] = [
   featureOrigin,
   metricsSubagentTurns,
   repoDepsCanvas,
+  handoffs,
 ]
 
 export function runMigrations(db: Database.Database): void {

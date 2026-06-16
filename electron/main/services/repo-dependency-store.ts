@@ -42,6 +42,19 @@ export function listByProject(projectId: string): RepoDependency[] {
   return rows.map(toEntity)
 }
 
+// Todas as arestas que tocam este repo (como origem OU destino). Usado pelo
+// contexto de handoff e pelo repo_connections_get da MCP.
+export function listByRepo(repoId: string): RepoDependency[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM repo_dependencies
+        WHERE from_repo_id = ? OR to_repo_id = ?
+        ORDER BY created_at ASC`,
+    )
+    .all(repoId, repoId) as RepoDependencyRow[]
+  return rows.map(toEntity)
+}
+
 // Cria a aresta. Idempotente: se já existir (from, to, kind), devolve a existente
 // em vez de violar o UNIQUE — o frontend pode re-disparar sem tratamento de erro.
 export function create(input: CreateRepoDependencyInput): RepoDependency {

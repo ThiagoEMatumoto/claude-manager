@@ -60,6 +60,60 @@ export interface UpdateRepoDependencyInput {
   label?: string | null
 }
 
+// ---- Handoffs cross-repo (multi-repo orchestration) ----
+//
+// Uma sessão-mãe (Claude) pede pra abrir uma sessão-filha noutro repo com um
+// prompt estruturado; passa por gate humano; a filha reporta um resumo de volta.
+// status app-level: pending → approved → running → done | rejected | failed.
+export type HandoffStatus =
+  | 'pending'
+  | 'approved'
+  | 'running'
+  | 'done'
+  | 'rejected'
+  | 'failed'
+
+export interface Handoff {
+  id: string
+  // NULLABLE: a MCP tool pode não saber o id da própria sessão.
+  motherSessionId: string | null
+  targetRepoId: string
+  // NULLABLE: a sessão-filha só é criada na aprovação (wave posterior).
+  childSessionId: string | null
+  featureId: string | null
+  task: string
+  // Extras passados pela mãe (JSON serializado).
+  contextJson: string | null
+  composedPrompt: string
+  status: HandoffStatus
+  summary: string | null
+  error: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+// Resolve o repo-alvo de um handoff + metadados do projeto, pra UI poder spawnar
+// a sessão-filha via openSession.
+export interface HandoffSpawnContext {
+  repo: Repo
+  projectName: string
+  projectIcon: string | null
+  projectColor: string | null
+}
+
+export interface CreateHandoffInput {
+  // Id pré-gerado (opcional): a MCP gera o id ANTES de compor o prompt, pois o
+  // prompt embute o handoffId pra a filha reportar de volta. Se omitido, o store
+  // gera um.
+  id?: string
+  motherSessionId?: string | null
+  targetRepoId: string
+  featureId?: string | null
+  task: string
+  contextJson?: string | null
+  composedPrompt: string
+}
+
 // Pasta que existe fisicamente dentro do vault de um projeto mas ainda não foi
 // registrada como repo. Surge quando o usuário clona/cria a pasta por fora do app.
 export interface UntrackedFolder {
@@ -1132,6 +1186,15 @@ export interface Api {
       projectId: string
     }): Promise<void>
     onUpdated(handler: (event: { projectId: string | null }) => void): () => void
+  }
+  handoffs: {
+    list(opts?: { status?: HandoffStatus | HandoffStatus[] }): Promise<Handoff[]>
+    get(id: string): Promise<Handoff | null>
+    approve(input: { id: string; composedPrompt?: string }): Promise<Handoff>
+    reject(id: string): Promise<Handoff>
+    markRunning(input: { id: string; childSessionId: string }): Promise<Handoff>
+    spawnContext(id: string): Promise<HandoffSpawnContext>
+    onUpdated(handler: (payload: unknown) => void): () => void
   }
   objectives: {
     list(filter?: ObjectiveListFilter): Promise<ObjectiveWithProgress[]>

@@ -26,6 +26,7 @@ import type {
   FeatureSynthError,
   CreateRepoDependencyInput,
   UpdateRepoDependencyInput,
+  HandoffStatus,
   ObjectiveListFilter,
   CreateObjectiveInput,
   UpdateObjectiveInput,
@@ -191,6 +192,17 @@ const api: Api = {
     setRepoPosition: (input: { repoId: string; x: number; y: number; projectId: string }) =>
       invoke('repos:set-position', input),
     onUpdated: (handler) => subscribe<{ projectId: string | null }>('repo-deps:updated', handler),
+  },
+  handoffs: {
+    list: (opts?: { status?: HandoffStatus | HandoffStatus[] }) => invoke('handoffs:list', opts),
+    get: (id: string) => invoke('handoffs:get', id),
+    approve: (input: { id: string; composedPrompt?: string }) =>
+      invoke('handoffs:approve', input),
+    reject: (id: string) => invoke('handoffs:reject', id),
+    markRunning: (input: { id: string; childSessionId: string }) =>
+      invoke('handoffs:mark-running', input),
+    spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
+    onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },
   objectives: {
     list: (filter?: ObjectiveListFilter) => invoke('objectives:list', filter),

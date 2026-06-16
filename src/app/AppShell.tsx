@@ -125,6 +125,7 @@ export function AppShell() {
   const filesOpen = useFilesStore((s) => s.open)
   const toggleFiles = useFilesStore((s) => s.toggle)
   const setFileRoots = useFilesStore((s) => s.setRoots)
+  const fileRoots = useFilesStore((s) => s.roots)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -154,9 +155,26 @@ export function AppShell() {
   // Debounce do persist de layout: onDidLayoutChange dispara a cada drag/resize.
   const layoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Alinha o seletor do painel de arquivos ao repo do pane ATIVO do dockview.
+  // Preserva a escolha manual enquanto o pane ativo não muda (só re-seleciona
+  // quando o repo do ativo difere do selecionado).
+  const syncFilesRepoToActivePane = useCallback(() => {
+    const id = apiRef.current?.activePanel?.id
+    if (!id) return
+    const pane = useAppStore.getState().panes.find((p) => p.paneId === id)
+    const repoPath = pane?.repo?.path
+    if (!repoPath) return
+    const fs = useFilesStore.getState()
+    if (fs.selectedRoot === repoPath) return
+    if (fs.roots.some((r) => r.path === repoPath)) fs.selectRoot(repoPath)
+  }, [])
+
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api
+      // Default contextual: ao trocar o pane ativo, o seletor de arquivos segue
+      // o repo daquele terminal (quando está entre os roots).
+      event.api.onDidActivePanelChange(() => syncFilesRepoToActivePane())
       event.api.onDidRemovePanel((panel) => {
         // Loop guard: se a remoção partiu do store (api.removePanel nosso), ignora.
         if (removingFromStore.current.delete(panel.id)) return
@@ -179,7 +197,7 @@ export function AppShell() {
       })
       setReady(true)
     },
-    [closePane],
+    [closePane, syncFilesRepoToActivePane],
   )
 
   // Restore do layout exato. Quando há pendingLayout, aplicamos api.fromJSON UMA
@@ -471,6 +489,12 @@ export function AppShell() {
       cancelled = true
     }
   }, [activeProjectId, setFileRoots])
+
+  // Quando os roots repopulam (troca de projeto), realinha o seletor ao pane ativo
+  // (o onDidActivePanelChange só dispara em troca de pane, não em troca de roots).
+  useEffect(() => {
+    syncFilesRepoToActivePane()
+  }, [fileRoots, syncFilesRepoToActivePane])
 
   // Atalhos de pane. Priorizamos os atalhos do app sobre o xterm: o terminal só
   // intercepta copy/paste (ver Terminal.attachCustomKeyEventHandler), então estes

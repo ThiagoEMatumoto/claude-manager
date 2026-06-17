@@ -272,6 +272,8 @@ export function ArchitectureArea() {
         open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         items={selectorItems}
+        portal
+        align="left"
       >
         <button
           type="button"

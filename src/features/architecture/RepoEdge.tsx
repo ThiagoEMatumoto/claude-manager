@@ -6,6 +6,9 @@ import {
   type EdgeProps,
 } from '@xyflow/react'
 import { Menu, type MenuItem } from '@/components/ui/Menu'
+import { Dialog } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
 import { useArchitectureStore } from '@/store/architectureStore'
 import type { RepoDependencyKind } from '../../../shared/types/ipc'
 
@@ -67,7 +70,10 @@ export function RepoEdge({
   data,
 }: EdgeProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false)
+  const [labelDraft, setLabelDraft] = useState('')
   const updateDep = useArchitectureStore((s) => s.updateDep)
+  const deleteDep = useArchitectureStore((s) => s.deleteDep)
 
   const edgeData = (data ?? { kind: 'custom', label: null }) as RepoEdgeData
   const kind = edgeData.kind
@@ -82,11 +88,31 @@ export function RepoEdge({
     targetPosition,
   })
 
-  const items: MenuItem[] = KINDS.map((k) => ({
-    label: KIND_LABEL[k],
-    active: k === kind,
-    onClick: () => void updateDep({ id, kind: k }),
-  }))
+  const items: MenuItem[] = [
+    ...KINDS.map((k) => ({
+      label: KIND_LABEL[k],
+      active: k === kind,
+      onClick: () => void updateDep({ id, kind: k }),
+    })),
+    {
+      label: 'Editar rótulo…',
+      onClick: () => {
+        setLabelDraft(edgeData.label ?? '')
+        setLabelDialogOpen(true)
+      },
+    },
+    {
+      label: 'Apagar conexão',
+      danger: true,
+      onClick: () => void deleteDep(id),
+    },
+  ]
+
+  function saveLabel() {
+    const trimmed = labelDraft.trim()
+    void updateDep({ id, label: trimmed || null })
+    setLabelDialogOpen(false)
+  }
 
   return (
     <>
@@ -111,6 +137,30 @@ export function RepoEdge({
           </Menu>
         </div>
       </EdgeLabelRenderer>
+      <Dialog
+        open={labelDialogOpen}
+        onClose={() => setLabelDialogOpen(false)}
+        title="Editar rótulo da conexão"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setLabelDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={saveLabel}>Salvar</Button>
+          </>
+        }
+      >
+        <Input
+          label="Rótulo (deixe vazio para remover)"
+          autoFocus
+          value={labelDraft}
+          onChange={(e) => setLabelDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') saveLabel()
+          }}
+          placeholder="ex: webhook de pagamento"
+        />
+      </Dialog>
     </>
   )
 }

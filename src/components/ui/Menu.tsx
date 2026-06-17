@@ -30,6 +30,13 @@ interface Props {
    * nós). Default false → comportamento absolute clássico, inalterado.
    */
   portal?: boolean
+  /**
+   * Alinhamento horizontal do painel portalizado em relação ao trigger.
+   * 'right' (default): borda direita do painel alinha à borda direita do trigger
+   * (comportamento histórico, espelha o `right-0` do modo absolute). 'left':
+   * borda esquerda do painel alinha à borda esquerda do trigger. Só vale com `portal`.
+   */
+  align?: 'left' | 'right'
 }
 
 function MenuButton({ item, onClose }: { item: MenuItem; onClose: () => void }) {
@@ -78,18 +85,19 @@ function MenuPanel({
   )
 }
 
-export function Menu({ open, onClose, items, sections, children, portal }: Props) {
+export function Menu({ open, onClose, items, sections, children, portal, align = 'right' }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
 
-  // Posiciona o painel portalizado abaixo/à direita do trigger (alinhado pela
-  // borda direita, espelhando o `right-0 top-full` do modo absolute).
+  // Posiciona o painel portalizado abaixo do trigger. align='right' (default)
+  // alinha pela borda direita (espelha `right-0 top-full`); align='left' alinha
+  // pela borda esquerda.
   useLayoutEffect(() => {
     if (!open || !portal || !ref.current) return
     const rect = ref.current.getBoundingClientRect()
-    setCoords({ left: rect.right, top: rect.bottom + 4 })
-  }, [open, portal])
+    setCoords({ left: align === 'left' ? rect.left : rect.right, top: rect.bottom + 4 })
+  }, [open, portal, align])
 
   useEffect(() => {
     if (!open) return
@@ -121,7 +129,9 @@ export function Menu({ open, onClose, items, sections, children, portal }: Props
               ref={panelRef}
               // z-[1000] (padrão Dialog) escapa qualquer stacking context dos
               // ancestrais (camada de edges do react-flow fica abaixo dos nós).
-              className="fixed z-[1000] min-w-40 -translate-x-full overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-xl"
+              className={`fixed z-[1000] min-w-40 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-xl ${
+                align === 'left' ? '' : '-translate-x-full'
+              }`}
               style={{ left: coords.left, top: coords.top }}
             >
               <MenuPanel items={items} sections={sections} onClose={onClose} />

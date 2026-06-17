@@ -8,6 +8,7 @@ import { ptyManager } from '../services/pty-manager'
 import { get as getFeature } from '../services/feature-store'
 import { featureMemory } from '../services/feature-memory'
 import { buildFeatureContextContent } from './feature-context'
+import { buildRepoArchitectureOrNull } from './repo-architecture-context'
 import {
   sessionActivityService,
   findTranscriptPath,
@@ -339,15 +340,21 @@ export function registerSessionIpc(): void {
     const model =
       input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
 
-    // System-prompt anexado via --append-system-prompt-file vem de DUAS fontes:
+    // System-prompt anexado via --append-system-prompt-file vem de TRÊS fontes:
+    //  - bloco de arquitetura do repo (se repoId; dá o "mapa" do repo no sistema),
     //  - contexto da feature (se featureId; Fase 6), e
     //  - systemPromptText (prompt do handoff — entregue por arquivo pra não
     //    quebrar no REPL com seus \n).
-    // Se ambos, concatena num único arquivo (um só --append-system-prompt-file).
+    // Se >1, concatena num único arquivo (um só --append-system-prompt-file).
+    // Ordem: arquitetura primeiro (mapa), depois feature, depois handoff.
     // NÃO bloqueia o spawn se algo falhar.
     let systemPromptFilePath: string | null = null
     try {
       const segments: string[] = []
+      if (repoId) {
+        const archContent = buildRepoArchitectureOrNull(repoId)
+        if (archContent) segments.push(archContent)
+      }
       if (input.featureId) {
         const featureContent = buildFeatureContextOrNull(input.featureId)
         if (featureContent) segments.push(featureContent)

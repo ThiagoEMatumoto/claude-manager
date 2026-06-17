@@ -3,13 +3,12 @@
 // ser trivialmente testável. Segue o template de prompt-templates.md do usuário
 // (Contexto / Tarefa / Restrições / Reporte).
 
-export interface HandoffEdge {
-  kind: string
-  label: string | null
-  // 'from-mother': a aresta sai do repo-mãe (mãe → este repo).
-  // 'to-mother':   a aresta entra no repo-mãe (este repo → mãe).
-  direction: 'from-mother' | 'to-mother'
-}
+import { describeEdge, type KindEdge } from '../architecture/kind-phrase'
+
+// HandoffEdge é a aresta orientada ao repo-mãe (ver KindEdge no módulo compartilhado).
+//   'from-mother': a aresta sai do repo-mãe (mãe → este repo).
+//   'to-mother':   a aresta entra no repo-mãe (este repo → mãe).
+export type HandoffEdge = KindEdge
 
 export interface ComposeHandoffArgs {
   targetRepoLabel: string
@@ -19,36 +18,6 @@ export interface ComposeHandoffArgs {
   edges: HandoffEdge[]
   featureTitle?: string | null
   handoffId: string
-}
-
-// Frase-base por kind (verbo de relação). 'custom' e kinds desconhecidos caem no
-// genérico "se relaciona com".
-const KIND_PHRASE: Record<string, string> = {
-  'calls-api': 'consome a API',
-  'shares-types': 'compartilha tipos',
-  'depends-on': 'depende de',
-  'deploys-to': 'faz deploy para',
-  'work-hub': 'coordena o trabalho sobre',
-  infra: 'provisiona a infra de',
-  monorepo: 'contém',
-  documents: 'documenta',
-  custom: 'se relaciona com',
-}
-
-function kindPhrase(kind: string): string {
-  return KIND_PHRASE[kind] ?? KIND_PHRASE.custom
-}
-
-// Descreve UMA aresta em linguagem natural, orientada pela direção. A direção diz
-// quem é o sujeito: from-mother => o repo-mãe é o sujeito; to-mother => este repo
-// é o sujeito.
-function describeEdge(edge: HandoffEdge, motherLabel: string, targetLabel: string): string {
-  const phrase = kindPhrase(edge.kind)
-  const sentence =
-    edge.direction === 'from-mother'
-      ? `o repo ${motherLabel} ${phrase} este repo (${targetLabel})`
-      : `este repo (${targetLabel}) ${phrase} o repo ${motherLabel}`
-  return edge.label ? `${sentence} — ${edge.label}` : sentence
 }
 
 export function composeHandoffPrompt(args: ComposeHandoffArgs): string {

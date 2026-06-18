@@ -530,19 +530,42 @@ function repoBrief(id: string): { id: string; label: string; role: string | null
 
 const repoConnectionsGetSchema = z.object({ repo: z.string().min(1) })
 
+const handoffMode = z.enum(['plan', 'auto-edits', 'interactive'])
+
 const sessionHandoffSchema = z.object({
   targetRepo: z.string().min(1),
   task: z.string().min(1),
   fromRepo: z.string().min(1).optional(),
   featureId: z.string().min(1).optional(),
   context: z.string().optional(),
+  // Modo de permissão da filha. 'plan' (read-only) p/ investigação; 'auto-edits'
+  // (edita, com denylist destrutivo) p/ implementação; 'interactive' = pergunta
+  // tudo (legado). Default: 'plan' (seguro). O humano confirma no gate.
+  mode: handoffMode.optional(),
+  // Cria mesmo havendo um handoff ativo pro mesmo repo-alvo (default: bloqueia
+  // duplicado e devolve o existente).
+  force: z.boolean().optional(),
 })
 
 const handoffResultSchema = z.object({ handoffId: z.string().min(1) })
 
+const handoffListSchema = z.object({
+  status: z
+    .union([
+      z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed']),
+      z.array(z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed'])),
+    ])
+    .optional(),
+})
+
 const handoffReportSchema = z.object({
   handoffId: z.string().min(1),
   summary: z.string().min(1),
+})
+
+const handoffProgressSchema = z.object({
+  handoffId: z.string().min(1),
+  step: z.string().min(1),
 })
 
 // Teto de handoffs ativos (pending/approved/running) simultâneos por instância.
@@ -581,7 +604,7 @@ function handoffTools(notify: McpNotify): ToolDef[] {
       name: 'session_handoff',
       title: 'Hand off work to another repo',
       description:
-        'Delegate end-to-end work to a connected repo by creating a handoff. Pass fromRepo = the repo you are working in (orients the context). Creates a pending handoff that requires human approval in the app, then spawns a child session. Returns a handoffId; poll handoff_result(handoffId) until status=done, then synthesize the summary.',
+        'Delegate end-to-end work to a connected repo by creating a handoff. Pass fromRepo = the repo you are working in (orients the context). Choose mode: "plan" (child is read-only — for investigation), "auto-edits" (child edits files autonomously, destructive commands blocked — for implementation), or "interactive" (asks for everything). Creates a pending handoff that requires human approval in the app, then spawns a child session in that mode. If an active handoff to the same target already exists it returns that one (pass force=true to override). Returns a handoffId; poll handoff_result(handoffId) until status=done, then synthesize the summary.',
       inputSchema: sessionHandoffSchema,
       handler: (args) => {
         const input = sessionHandoffSchema.parse(args)
@@ -596,6 +619,21 @@ function handoffTools(notify: McpNotify): ToolDef[] {
 
         const target = resolveRepo(input.targetRepo)
         const from = input.fromRepo ? resolveRepo(input.fromRepo) : null
+
+        // Dedup por alvo: evita dois agentes mutando o mesmo repo em paralelo
+        // (causa-raiz de quase-acidente). Devolve o handoff existente em vez de
+        // criar duplicado, salvo force=true.
+        if (!input.force) {
+          const existing = handoffStore.findActiveByTarget(target.id)
+          if (existing) {
+            return ok({
+              handoffId: existing.id,
+              status: existing.status,
+              duplicate: true,
+              message: `Já existe um handoff ativo (${existing.status}) para ${target.label}. Faça polling com handoff_result("${existing.id}") ou passe force=true para criar outro mesmo assim.`,
+            })
+          }
+        }
 
         // Arestas do target → shape do compose, orientadas pela MÃE (fromRepo).
         // Prioriza as que tocam o fromRepo; se não há fromRepo, ainda inclui as
@@ -636,6 +674,7 @@ function handoffTools(notify: McpNotify): ToolDef[] {
           edges,
           featureTitle,
           handoffId,
+          mode: input.mode ?? 'plan',
         })
 
         const handoff = handoffStore.create({
@@ -646,6 +685,7 @@ function handoffTools(notify: McpNotify): ToolDef[] {
           task: input.task,
           contextJson: input.context ?? null,
           composedPrompt: composed,
+          mode: input.mode ?? 'plan',
         })
         notify.broadcast('handoff:updated', handoff)
         return ok({
@@ -660,7 +700,7 @@ function handoffTools(notify: McpNotify): ToolDef[] {
       name: 'handoff_result',
       title: 'Poll handoff result',
       description:
-        'Poll a handoff by id. Returns { status, summary, error }. Keep polling until status=done (then read summary) or rejected/failed.',
+        'Poll a handoff by id. Returns { status, currentStep, stepUpdatedAt, summary, error }. While running, currentStep shows the child’s latest progress (set via handoff_progress). Keep polling until status=done (then read summary) or rejected/failed.',
       inputSchema: handoffResultSchema,
       handler: (args) => {
         const { handoffId } = handoffResultSchema.parse(args)
@@ -668,16 +708,52 @@ function handoffTools(notify: McpNotify): ToolDef[] {
         if (!handoff) throw new Error(`handoff não encontrado: ${handoffId}`)
         return ok({
           status: handoff.status,
+          currentStep: handoff.currentStep,
+          stepUpdatedAt: handoff.stepUpdatedAt,
           summary: handoff.summary,
           error: handoff.error,
         })
       },
     },
     {
+      name: 'handoff_list',
+      title: 'List handoffs',
+      description:
+        'List handoffs (optionally filtered by status), most recent first. Returns { handoffId, targetRepo, status, mode, currentStep, task }. Use to recover a lost handoffId or to see active work per repo before delegating again.',
+      inputSchema: handoffListSchema,
+      handler: (args) => {
+        const { status } = handoffListSchema.parse(args)
+        const items = handoffStore.list(status ? { status } : undefined).map((h) => ({
+          handoffId: h.id,
+          targetRepo: h.targetRepoLabel,
+          status: h.status,
+          mode: h.mode,
+          currentStep: h.currentStep,
+          task: h.task,
+        }))
+        return ok({ items })
+      },
+    },
+    {
+      name: 'handoff_progress',
+      title: 'Report handoff progress',
+      description:
+        'Called by the CHILD session to report a NON-TERMINAL progress step (does NOT mark done). Use this throughout the work so the mother’s polls are informative. Only handoff_report marks the work done.',
+      inputSchema: handoffProgressSchema,
+      handler: (args) => {
+        const { handoffId, step } = handoffProgressSchema.parse(args)
+        const existing = handoffStore.get(handoffId)
+        if (!existing) throw new Error(`handoff não encontrado: ${handoffId}`)
+        const updated = handoffStore.progress(handoffId, step)
+        notify.broadcast('handoff:updated', updated)
+        return ok({ status: updated.status, currentStep: updated.currentStep })
+      },
+    },
+    {
       name: 'handoff_report',
       title: 'Report handoff result',
       description:
-        'Called by the CHILD session when it finishes the handed-off work. Records the summary and marks the handoff done.',
+        'Called by the CHILD session ONLY when the handed-off work is fully complete AND verified (tests/typecheck pass). Records the summary and marks the handoff done. Do NOT call this before the work is actually finished — use handoff_progress for interim updates.',
       inputSchema: handoffReportSchema,
       handler: (args) => {
         const { handoffId, summary } = handoffReportSchema.parse(args)

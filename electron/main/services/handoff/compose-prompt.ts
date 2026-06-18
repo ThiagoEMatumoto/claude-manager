@@ -4,6 +4,7 @@
 // (Contexto / Tarefa / Restrições / Reporte).
 
 import { describeEdge, type KindEdge } from '../architecture/kind-phrase'
+import type { HandoffMode } from '../../../../shared/types/ipc'
 
 // HandoffEdge é a aresta orientada ao repo-mãe (ver KindEdge no módulo compartilhado).
 //   'from-mother': a aresta sai do repo-mãe (mãe → este repo).
@@ -18,6 +19,8 @@ export interface ComposeHandoffArgs {
   edges: HandoffEdge[]
   featureTitle?: string | null
   handoffId: string
+  // Modo de permissão com que a filha sobe — molda as restrições do prompt.
+  mode?: HandoffMode
 }
 
 export function composeHandoffPrompt(args: ComposeHandoffArgs): string {
@@ -40,10 +43,21 @@ export function composeHandoffPrompt(args: ComposeHandoffArgs): string {
     '- [ ] Se algo não está no código real, diga "não encontrado" em vez de inferir.',
     '- [ ] Não fazer git push nem criar PR sem pedido explícito.',
   ]
+  if (args.mode === 'plan') {
+    restricoes.push(
+      '- [ ] Você está em PLAN MODE (read-only): investigue e proponha, NÃO edite arquivos.',
+    )
+  } else if (args.mode === 'auto-edits') {
+    restricoes.push(
+      '- [ ] Modo auto-edits: edições são aplicadas automaticamente; comandos destrutivos (rm, git push/reset --hard, force push) estão bloqueados.',
+    )
+  }
 
   const reporte = [
     '## Reporte',
-    `Ao terminar, chame a MCP tool \`handoff_report\` com handoffId="${args.handoffId}" e um resumo de até 250 palavras (descoberta principal + arquivos tocados + próximo passo recomendado). NÃO cole código longo no resumo.`,
+    `- Chame \`handoff_progress\` com handoffId="${args.handoffId}" e um \`step\` curto ao longo do trabalho (ex.: "mapeando handlers", "rodando testes") — assim a mãe acompanha o andamento.`,
+    `- Só chame \`handoff_report\` (handoffId="${args.handoffId}") quando o trabalho estiver REALMENTE concluído E verificado (testes/typecheck passando). "done" significa done — não reporte antes de terminar.`,
+    '- O resumo do report: até 250 palavras (descoberta principal + arquivos tocados + próximo passo). NÃO cole código longo.',
   ]
 
   return [

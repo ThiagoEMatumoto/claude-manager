@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
+import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
 import type { LiveSessionInfo } from '../../../shared/types/ipc'
 
 type LiveStatus = LiveSessionInfo['status']
@@ -80,10 +81,17 @@ function matches(query: string, ...fields: (string | null | undefined)[]): boole
 }
 
 export function SessionSwitcher({ open, onClose }: Props) {
-  const liveSessions = useAppStore((s) => s.liveSessions)
+  const allLiveSessions = useAppStore((s) => s.liveSessions)
   const panes = useAppStore((s) => s.panes)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const openSessionsInGrid = useAppStore((s) => s.openSessionsInGrid)
+  const handoffs = useHandoffsStore((s) => s.handoffs)
+
+  // Filhas de handoffs ativos ficam no rollup do painel Handoffs, fora do seletor.
+  const liveSessions = useMemo(() => {
+    const childIds = childSessionIds(handoffs)
+    return allLiveSessions.filter((s) => !childIds.has(s.id))
+  }, [allLiveSessions, handoffs])
 
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())

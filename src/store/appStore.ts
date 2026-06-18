@@ -194,6 +194,18 @@ interface AppState {
     // Retorna o id da sessão criada. Callers existentes ignoram o retorno; o fluxo
     // de handoff usa pra marcar mark-running com o childSessionId.
   ) => Promise<string>
+  // Spawna uma sessão SEM abrir pane/xterm (usado pelo handoff: a filha sobe em
+  // background e aparece só no liveSessions/rollup). Retorna o id da sessão criada.
+  // Aceita permissionMode/disallowedTools repassados ao spawn (o main valida).
+  spawnSessionBackground: (input: {
+    repoId?: string | null
+    name?: string
+    featureId?: string
+    initialCommand?: string
+    systemPromptText?: string
+    permissionMode?: string
+    disallowedTools?: string[]
+  }) => Promise<string>
   // Sessão avulsa: spawn sem repo (cwd = scratch dir do backend).
   openQuickSession: () => Promise<void>
   resumeSession: (
@@ -330,6 +342,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       ],
     }))
     schedulePersist(get().panes)
+    void get().refreshLiveSessions()
+    return session.id
+  },
+
+  spawnSessionBackground: async (input) => {
+    // Sem set(panes): a PTY sobe no main e o watch global a adiciona ao
+    // liveSessions sozinho. refreshLiveSessions adianta a aparição no rollup.
+    const session = await sessionsApi.spawn({
+      repoId: input.repoId ?? null,
+      name: input.name,
+      featureId: input.featureId,
+      initialCommand: input.initialCommand,
+      systemPromptText: input.systemPromptText,
+      permissionMode: input.permissionMode,
+      disallowedTools: input.disallowedTools,
+    })
     void get().refreshLiveSessions()
     return session.id
   },

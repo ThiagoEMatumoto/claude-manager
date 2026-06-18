@@ -91,4 +91,30 @@ describe('buildSpawnInnerCmd', () => {
     const cmd = buildSpawnInnerCmd(base)
     expect(cmd).not.toContain('--model')
   })
+
+  it('anexa --permission-mode quando passado (handoff plan/auto-edits)', () => {
+    expect(buildSpawnInnerCmd({ ...base, permissionMode: 'plan' })).toContain(
+      "--permission-mode 'plan'",
+    )
+    expect(buildSpawnInnerCmd({ ...base, permissionMode: 'acceptEdits' })).toContain(
+      "--permission-mode 'acceptEdits'",
+    )
+  })
+
+  it('NÃO inclui --permission-mode quando ausente (comportamento legado)', () => {
+    expect(buildSpawnInnerCmd(base)).not.toContain('--permission-mode')
+  })
+
+  it('anexa --disallowedTools com cada spec quotado (denylist destrutivo)', () => {
+    const cmd = buildSpawnInnerCmd({
+      ...base,
+      disallowedTools: ['Bash(rm:*)', 'Bash(git push:*)'],
+    })
+    expect(cmd).toContain("--disallowedTools 'Bash(rm:*)' 'Bash(git push:*)'")
+  })
+
+  it('NÃO inclui --disallowedTools quando a lista é vazia/ausente', () => {
+    expect(buildSpawnInnerCmd({ ...base, disallowedTools: [] })).not.toContain('--disallowedTools')
+    expect(buildSpawnInnerCmd(base)).not.toContain('--disallowedTools')
+  })
 })

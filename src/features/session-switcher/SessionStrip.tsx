@@ -4,6 +4,7 @@ import { Circle, Loader, Maximize2, Zap, type LucideProps } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
+import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
 import type { LiveSessionInfo } from '../../../shared/types/ipc'
 
 type LiveStatus = LiveSessionInfo['status']
@@ -50,6 +51,7 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
   const focusPaneId = useAppStore((s) => s.focusPaneId)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const endSession = useAppStore((s) => s.endSession)
+  const handoffs = useHandoffsStore((s) => s.handoffs)
   // Tick pra reavaliar os tempos relativos no tooltip sem novos broadcasts.
   const [, setNow] = useState(() => Date.now())
 
@@ -57,6 +59,14 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
     const id = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(id)
   }, [])
+
+  // Filhas de handoffs ativos vivem no rollup do painel Handoffs, não na lista
+  // flat — senão o usuário fica com N chips pra monitorar.
+  const childIds = useMemo(() => childSessionIds(handoffs), [handoffs])
+  const visibleSessions = useMemo(
+    () => liveSessions.filter((item) => !childIds.has(item.id)),
+    [liveSessions, childIds],
+  )
 
   // ccSessionId → paneId das sessões exibidas no split (destaque "aberta").
   const openByCc = useMemo(() => {
@@ -71,13 +81,13 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
     <div
       className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2"
     >
-      {liveSessions.length === 0 ? (
+      {visibleSessions.length === 0 ? (
         <span className="px-1 text-[11px] text-[var(--color-text-dim)]">
           Nenhuma sessão viva — clique num repo.
         </span>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {liveSessions
+          {visibleSessions
             .filter((item) => item.status !== 'ended')
             .map((item) => {
             const paneId = openByCc.get(item.ccSessionId)

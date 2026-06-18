@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore } from '@/store/handoffsStore'
 import type { Handoff, HandoffStatus } from '../../../shared/types/ipc'
 
@@ -65,10 +66,20 @@ function formatDate(ts: number): string {
 
 function HandoffCard({ handoff }: { handoff: Handoff }) {
   const [expanded, setExpanded] = useState(false)
+  const liveSessions = useAppStore((s) => s.liveSessions)
+  const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const repoLabel = handoff.targetRepoLabel ?? handoff.targetRepoId
   const hasDetail =
     (handoff.status === 'done' && !!handoff.summary) ||
     (handoff.status === 'failed' && !!handoff.error)
+
+  // A filha já está rodando num PTY. "Abrir terminal" RE-ATTACHA uma pane à
+  // sessão viva (focusOrOpenSession → paneFromLiveSession), nunca re-spawn/--resume.
+  // Só dá pra attachar se a filha ainda aparece no liveSessions (PTY viva).
+  const childLive =
+    handoff.status === 'running' && handoff.childSessionId
+      ? liveSessions.find((s) => s.id === handoff.childSessionId)
+      : undefined
 
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -81,10 +92,28 @@ function HandoffCard({ handoff }: { handoff: Handoff }) {
             <StatusBadge status={handoff.status} />
           </div>
           <div className="mt-1 text-sm text-[var(--color-text-dim)]">{handoff.task}</div>
+          {handoff.status === 'running' && handoff.currentStep && (
+            <div className="mt-1 truncate text-xs text-[var(--color-info)]" title={handoff.currentStep}>
+              {handoff.currentStep}
+            </div>
+          )}
         </div>
-        <span className="shrink-0 text-[11px] text-[var(--color-text-dim)]">
-          {formatDate(handoff.createdAt)}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="text-[11px] text-[var(--color-text-dim)]">
+            {formatDate(handoff.createdAt)}
+          </span>
+          {childLive && (
+            <button
+              type="button"
+              onClick={() => void focusOrOpenSession(childLive)}
+              title="Anexar o terminal desta sessão-filha"
+              className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+            >
+              <Icon as={TerminalSquare} size={12} />
+              Abrir terminal
+            </button>
+          )}
+        </div>
       </div>
 
       {hasDetail && (

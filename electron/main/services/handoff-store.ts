@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { getDb } from './db'
-import type { CreateHandoffInput, Handoff, HandoffStatus } from '../../../shared/types/ipc'
+import type {
+  CreateHandoffInput,
+  Handoff,
+  HandoffMode,
+  HandoffStatus,
+} from '../../../shared/types/ipc'
 
 interface HandoffRow {
   id: string
@@ -12,6 +17,9 @@ interface HandoffRow {
   context_json: string | null
   composed_prompt: string
   status: string
+  mode: string
+  current_step: string | null
+  step_updated_at: number | null
   summary: string | null
   error: string | null
   created_at: number
@@ -37,6 +45,9 @@ function toEntity(row: HandoffRow): Handoff {
     contextJson: row.context_json,
     composedPrompt: row.composed_prompt,
     status: row.status as HandoffStatus,
+    mode: row.mode as HandoffMode,
+    currentStep: row.current_step,
+    stepUpdatedAt: row.step_updated_at,
     summary: row.summary,
     error: row.error,
     createdAt: row.created_at,
@@ -62,9 +73,11 @@ export function create(input: CreateHandoffInput): Handoff {
     .prepare(
       `INSERT INTO handoffs
          (id, mother_session_id, target_repo_id, child_session_id, feature_id, task,
-          context_json, composed_prompt, status, summary, error, created_at, updated_at)
+          context_json, composed_prompt, status, mode, current_step, step_updated_at,
+          summary, error, created_at, updated_at)
        VALUES (@id, @mother_session_id, @target_repo_id, @child_session_id, @feature_id, @task,
-               @context_json, @composed_prompt, @status, @summary, @error, @created_at, @updated_at)`,
+               @context_json, @composed_prompt, @status, @mode, @current_step, @step_updated_at,
+               @summary, @error, @created_at, @updated_at)`,
     )
     .run({
       id,
@@ -76,6 +89,9 @@ export function create(input: CreateHandoffInput): Handoff {
       context_json: input.contextJson ?? null,
       composed_prompt: input.composedPrompt,
       status: 'pending',
+      mode: input.mode ?? 'interactive',
+      current_step: null,
+      step_updated_at: null,
       summary: null,
       error: null,
       created_at: now,
@@ -146,9 +162,53 @@ export function report(id: string, summary: string): Handoff {
   return fresh(id)
 }
 
+// Progresso NÃO-terminal: a filha reporta o passo atual sem virar done. Só grava
+// se ainda estiver running (ignora se já terminou). done segue exclusivo de report.
+export function progress(id: string, step: string): Handoff {
+  const now = Date.now()
+  getDb()
+    .prepare(
+      "UPDATE handoffs SET current_step = ?, step_updated_at = ?, updated_at = ? WHERE id = ? AND status = 'running'",
+    )
+    .run(step, now, now, id)
+  return fresh(id)
+}
+
 export function fail(id: string, error: string): Handoff {
   getDb()
     .prepare('UPDATE handoffs SET status = ?, error = ?, updated_at = ? WHERE id = ?')
     .run('failed', error, Date.now(), id)
   return fresh(id)
+}
+
+// Reconciliação: a sessão-filha morreu (PTY exit/crash). Só transiciona para
+// failed se ainda estava running — NÃO sobrescreve um done/rejected já gravado.
+// Retorna o handoff atualizado, ou null se nada foi alterado (não estava running).
+export function failIfRunning(id: string, error: string): Handoff | null {
+  const res = getDb()
+    .prepare(
+      "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'running'",
+    )
+    .run(error, Date.now(), id)
+  return res.changes > 0 ? fresh(id) : null
+}
+
+// Busca o handoff cuja filha é esta sessão (pra reconciliar no PTY exit). NULL se
+// a sessão não veio de um handoff.
+export function getByChildSession(childSessionId: string): Handoff | null {
+  const row = getDb()
+    .prepare(`${SELECT_HANDOFF} WHERE h.child_session_id = ?`)
+    .get(childSessionId) as HandoffRow | undefined
+  return row ? toEntity(row) : null
+}
+
+// Dedup por alvo: handoff ativo (pending/approved/running) pro mesmo repo-alvo.
+// Usado pra evitar dois agentes mutando o mesmo repo em paralelo.
+export function findActiveByTarget(targetRepoId: string): Handoff | null {
+  const row = getDb()
+    .prepare(
+      `${SELECT_HANDOFF} WHERE h.target_repo_id = ? AND h.status IN ('pending','approved','running') ORDER BY h.created_at DESC LIMIT 1`,
+    )
+    .get(targetRepoId) as HandoffRow | undefined
+  return row ? toEntity(row) : null
 }

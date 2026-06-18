@@ -93,6 +93,12 @@ export type HandoffStatus =
   | 'rejected'
   | 'failed'
 
+// Modo de permissão com que a sessão-filha sobe:
+//  'plan'        → read-only (--permission-mode plan): explora mas não edita.
+//  'auto-edits'  → autônomo (--permission-mode acceptEdits) + denylist destrutivo.
+//  'interactive' → comportamento legado (pergunta cada ação).
+export type HandoffMode = 'plan' | 'auto-edits' | 'interactive'
+
 export interface Handoff {
   id: string
   // NULLABLE: a MCP tool pode não saber o id da própria sessão.
@@ -109,6 +115,12 @@ export interface Handoff {
   contextJson: string | null
   composedPrompt: string
   status: HandoffStatus
+  // Modo de permissão da filha (default 'interactive' p/ handoffs legados).
+  mode: HandoffMode
+  // Progresso não-terminal reportado pela filha via handoff_progress. NÃO implica
+  // conclusão — done só vem de handoff_report.
+  currentStep: string | null
+  stepUpdatedAt: number | null
   summary: string | null
   error: string | null
   createdAt: number
@@ -135,6 +147,8 @@ export interface CreateHandoffInput {
   task: string
   contextJson?: string | null
   composedPrompt: string
+  // Modo de permissão da filha; omitido = 'interactive'.
+  mode?: HandoffMode
 }
 
 // Pasta que existe fisicamente dentro do vault de um projeto mas ainda não foi
@@ -220,6 +234,13 @@ export interface SpawnSessionInput {
   // (em vez de injetá-lo no REPL, onde os \n viram Enter). Se também houver
   // featureId, os dois conteúdos são concatenados num único arquivo.
   systemPromptText?: string
+  // Modo de permissão inicial passado como `--permission-mode <mode>`. Validado
+  // contra whitelist no main. Usado pelo handoff (plan/acceptEdits). Ausente =
+  // default do claude (pergunta tudo).
+  permissionMode?: string
+  // Ferramentas a NEGAR via `--disallowedTools <specs...>` (ex.: 'Bash(rm:*)').
+  // Denylist destrutivo do handoff auto-edits. Cada spec é validado/escapado.
+  disallowedTools?: string[]
   cols?: number
   rows?: number
 }

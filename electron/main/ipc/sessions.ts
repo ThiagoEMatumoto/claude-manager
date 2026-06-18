@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
 import { get as getFeature } from '../services/feature-store'
+import * as handoffStore from '../services/handoff-store'
 import { featureMemory } from '../services/feature-memory'
 import { buildFeatureContextContent } from './feature-context'
 import { buildRepoArchitectureOrNull } from './repo-architecture-context'
@@ -58,6 +59,24 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Whitelist do --model no spawn: o valor vem do renderer (segmented control),
 // mas o main re-valida — nada fora desta lista chega à linha de comando.
 const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
+
+// Whitelist do --permission-mode no spawn. Só os modos usados pelo handoff são
+// aceitos — NUNCA 'bypassPermissions' (a filha jamais sobe pulando permissões).
+// O main é a autoridade: qualquer outro valor é descartado (vira null = default).
+const SPAWN_PERMISSION_MODE_WHITELIST = new Set(['plan', 'acceptEdits'])
+
+// Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a filha
+// sobe em modo que edita (acceptEdits). Bloqueia as ops irreversíveis das regras
+// do usuário. O main mescla isto a qualquer denylist vindo do renderer, então o
+// renderer não consegue enfraquecê-lo.
+const DESTRUCTIVE_DENYLIST = [
+  'Bash(rm:*)',
+  'Bash(git push:*)',
+  'Bash(git reset --hard:*)',
+  'Bash(git push --force:*)',
+  'Bash(git push -f:*)',
+  'Bash(git clean:*)',
+]
 
 const toSession = (row: SessionRow): Session => ({
   id: row.id,
@@ -150,10 +169,18 @@ export function buildSpawnInnerCmd(parts: {
   mcpConfigArg: string
   model: string | null
   systemPromptFilePath: string | null
+  permissionMode?: string | null
+  disallowedTools?: string[] | null
 }): string {
   let innerCmd = `${parts.claudeCmd} --session-id ${parts.sessionId} -n ${shquote(parts.name)}${parts.mcpConfigArg}`
   if (parts.model) {
     innerCmd += ` --model ${shquote(parts.model)}`
+  }
+  if (parts.permissionMode) {
+    innerCmd += ` --permission-mode ${shquote(parts.permissionMode)}`
+  }
+  if (parts.disallowedTools && parts.disallowedTools.length > 0) {
+    innerCmd += ` --disallowedTools ${parts.disallowedTools.map(shquote).join(' ')}`
   }
   if (parts.systemPromptFilePath) {
     innerCmd += ` --append-system-prompt-file ${shquote(parts.systemPromptFilePath)}`
@@ -284,6 +311,23 @@ export function registerSessionIpc(): void {
       ).run(e.exitCode === 0 ? 'exited' : 'crashed', Date.now(), e.sessionId)
       broadcast('pty:exit', e)
 
+      // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
+      // reportado conclusão (status ainda 'running'), o handoff ficaria preso
+      // pra sempre. failIfRunning transiciona running→failed SÓ nesse caso (não
+      // sobrescreve um done/rejected). Mata o "stuck-running".
+      try {
+        const linkedHandoff = handoffStore.getByChildSession(e.sessionId)
+        if (linkedHandoff && linkedHandoff.status === 'running') {
+          const reconciled = handoffStore.failIfRunning(
+            linkedHandoff.id,
+            `Sessão-filha encerrou (${e.exitCode === 0 ? 'exit' : 'crash'}) sem chamar handoff_report.`,
+          )
+          if (reconciled) broadcast('handoff:updated', reconciled)
+        }
+      } catch (err) {
+        console.error('[sessions] handoff reconciliation on exit failed:', err)
+      }
+
       // Fase 8: sempre dispara o serviço de memória no exit. Ele resolve a feature
       // (manual > por-branch > fuzzy > auto-cria), persiste sessions.feature_id e
       // sintetiza — com guarda de atividade própria. featureId null => auto-resolver.
@@ -372,6 +416,23 @@ export function registerSessionIpc(): void {
       console.error('[sessions] system-prompt injection failed:', err)
     }
 
+    // Permission mode: validado contra whitelist (nunca bypassPermissions). Em
+    // modo que edita (acceptEdits), aplica SEMPRE o denylist destrutivo canônico
+    // mesclado ao que veio do renderer — o renderer não consegue enfraquecê-lo.
+    const permissionMode =
+      input.permissionMode && SPAWN_PERMISSION_MODE_WHITELIST.has(input.permissionMode)
+        ? input.permissionMode
+        : null
+    const rendererDeny = (input.disallowedTools ?? []).filter(
+      (t) => typeof t === 'string' && t.length > 0,
+    )
+    const disallowedTools =
+      permissionMode === 'acceptEdits'
+        ? Array.from(new Set([...rendererDeny, ...DESTRUCTIVE_DENYLIST]))
+        : rendererDeny.length > 0
+          ? rendererDeny
+          : null
+
     const innerCmd = buildSpawnInnerCmd({
       claudeCmd,
       sessionId,
@@ -379,6 +440,8 @@ export function registerSessionIpc(): void {
       mcpConfigArg: mcpConfigArg(),
       model,
       systemPromptFilePath,
+      permissionMode,
+      disallowedTools,
     })
 
     return startSession({

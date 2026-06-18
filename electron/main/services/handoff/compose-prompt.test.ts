@@ -80,4 +80,39 @@ describe('composeHandoffPrompt', () => {
     })
     expect(p).toContain('se relaciona com')
   })
+
+  it('instrui handoff_progress (andamento) + report só após verificação', () => {
+    const p = composeHandoffPrompt({
+      targetRepoLabel: 'svc',
+      targetRepoPath: '/repos/svc',
+      task: 't',
+      edges: [],
+      handoffId: 'h-prog',
+    })
+    expect(p).toContain('handoff_progress')
+    expect(p).toContain('handoff_report')
+    expect(p).toMatch(/concluído|verificad/i)
+  })
+
+  it('plan mode injeta restrição read-only; auto-edits avisa do denylist', () => {
+    const plan = composeHandoffPrompt({
+      targetRepoLabel: 'svc',
+      targetRepoPath: '/repos/svc',
+      task: 't',
+      edges: [],
+      handoffId: 'h1',
+      mode: 'plan',
+    })
+    expect(plan).toMatch(/PLAN MODE|read-only/i)
+
+    const auto = composeHandoffPrompt({
+      targetRepoLabel: 'svc',
+      targetRepoPath: '/repos/svc',
+      task: 't',
+      edges: [],
+      handoffId: 'h2',
+      mode: 'auto-edits',
+    })
+    expect(auto).toMatch(/auto-edits|destrutivos/i)
+  })
 })

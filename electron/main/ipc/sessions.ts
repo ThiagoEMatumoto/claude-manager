@@ -312,12 +312,16 @@ export function registerSessionIpc(): void {
       broadcast('pty:exit', e)
 
       // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
-      // reportado conclusão (status ainda 'running'), o handoff ficaria preso
-      // pra sempre. failIfRunning transiciona running→failed SÓ nesse caso (não
-      // sobrescreve um done/rejected). Mata o "stuck-running".
+      // reportado conclusão (status ainda vivo: 'running' OU 'needs_input'), o
+      // handoff ficaria preso pra sempre. failIfRunning transiciona ambos→failed
+      // (não sobrescreve done/rejected). Inclui needs_input: uma filha que
+      // perguntou e cuja PTY morreu de fato não pode ficar órfã.
       try {
         const linkedHandoff = handoffStore.getByChildSession(e.sessionId)
-        if (linkedHandoff && linkedHandoff.status === 'running') {
+        if (
+          linkedHandoff &&
+          (linkedHandoff.status === 'running' || linkedHandoff.status === 'needs_input')
+        ) {
           const reconciled = handoffStore.failIfRunning(
             linkedHandoff.id,
             `Sessão-filha encerrou (${e.exitCode === 0 ? 'exit' : 'crash'}) sem chamar handoff_report.`,

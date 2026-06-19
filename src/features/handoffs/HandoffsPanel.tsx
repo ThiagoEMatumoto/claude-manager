@@ -34,6 +34,7 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
   pending: 'Pendente',
   approved: 'Aprovado',
   running: 'Em andamento',
+  needs_input: 'Aguardando resposta',
   done: 'Concluído',
   rejected: 'Rejeitado',
   failed: 'Falhou',
@@ -43,6 +44,7 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
 const STATUS_COLOR: Record<HandoffStatus, string> = {
   pending: 'var(--color-warning)',
   running: 'var(--color-info)',
+  needs_input: 'var(--color-warning)',
   done: 'var(--color-success)',
   failed: 'var(--color-danger)',
   rejected: 'var(--color-text-dim)',
@@ -54,6 +56,7 @@ const STATUS_ORDER: HandoffStatus[] = [
   'pending',
   'approved',
   'running',
+  'needs_input',
   'done',
   'failed',
   'rejected',

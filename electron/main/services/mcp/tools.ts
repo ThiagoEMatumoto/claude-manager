@@ -550,13 +550,19 @@ const sessionHandoffSchema = z.object({
 
 const handoffResultSchema = z.object({ handoffId: z.string().min(1) })
 
+// Espelha HandoffStatus em shared/types/ipc.ts. needs_input é in-flight (vivo).
+const handoffStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'running',
+  'needs_input',
+  'done',
+  'rejected',
+  'failed',
+])
+
 const handoffListSchema = z.object({
-  status: z
-    .union([
-      z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed']),
-      z.array(z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed'])),
-    ])
-    .optional(),
+  status: z.union([handoffStatusEnum, z.array(handoffStatusEnum)]).optional(),
 })
 
 const handoffReportSchema = z.object({
@@ -616,15 +622,21 @@ function handoffTools(notify: McpNotify): ToolDef[] {
         handoffStore.reconcileStuck()
 
         // Cap de concorrência: não acumula handoffs ativos além do teto.
+        // needs_input conta como ativo (filha viva aguardando a mãe).
         const maxActive = getPref('handoffs.maxActive', DEFAULT_MAX_ACTIVE_HANDOFFS)
-        const activeHandoffs = handoffStore.list({ status: ['pending', 'approved', 'running'] })
+        const activeHandoffs = handoffStore.list({
+          status: ['pending', 'approved', 'running', 'needs_input'],
+        })
         if (activeHandoffs.length >= maxActive) {
           // Mensagem honesta: breakdown REAL por status. Sem pendentes a resolver,
           // não mandar "resolver pendentes" — os bloqueadores estão em andamento.
           const pending = activeHandoffs.filter(
             (h) => h.status === 'pending' || h.status === 'approved',
           )
-          const running = activeHandoffs.filter((h) => h.status === 'running')
+          // running + needs_input contam como "em andamento" no breakdown.
+          const running = activeHandoffs.filter(
+            (h) => h.status === 'running' || h.status === 'needs_input',
+          )
           const fmt = (h: (typeof activeHandoffs)[number]): string =>
             `${h.targetRepoLabel ?? h.targetRepoId} (${h.id})`
           let error: string

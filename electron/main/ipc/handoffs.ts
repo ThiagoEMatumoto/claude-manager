@@ -44,6 +44,7 @@ const handoffStatus = z.enum([
   'pending',
   'approved',
   'running',
+  'needs_input',
   'done',
   'rejected',
   'failed',

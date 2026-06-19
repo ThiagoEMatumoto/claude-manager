@@ -1,9 +1,29 @@
-import { useMemo, useState } from 'react'
-import { RefreshCw, TerminalSquare } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, RefreshCw, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { handoffsApi, prefsApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore } from '@/store/handoffsStore'
 import type { Handoff, HandoffStatus } from '../../../shared/types/ipc'
+
+const HEARTBEAT_TTL_KEY = 'handoffs.heartbeatTtlHours'
+const HEARTBEAT_TTL_DEFAULT = 2
+
+// Um handoff `running` está "sem heartbeat" se o último sinal de progresso é mais
+// antigo que o TTL. Usa step_updated_at (último handoff_progress) e cai pra
+// updated_at quando a filha nunca reportou passo. Puro → testável.
+export function isStale(handoff: Handoff, ttlHours: number, now: number): boolean {
+  if (handoff.status !== 'running') return false
+  const last = handoff.stepUpdatedAt ?? handoff.updatedAt
+  return now - last > ttlHours * 3_600_000
+}
+
+// "há Xh" arredondado pra baixo (mínimo 1h, já que só chamamos quando stale).
+export function staleLabel(handoff: Handoff, now: number): string {
+  const last = handoff.stepUpdatedAt ?? handoff.updatedAt
+  const hours = Math.max(1, Math.floor((now - last) / 3_600_000))
+  return `sem progresso há ${hours}h`
+}
 
 // Inbox de handoffs cross-repo: lista todos agrupados por status, com label do
 // repo-alvo (resolvido no store via JOIN), tarefa, badge de status, data, e —
@@ -64,14 +84,40 @@ function formatDate(ts: number): string {
   }
 }
 
-function HandoffCard({ handoff }: { handoff: Handoff }) {
+function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number }) {
   const [expanded, setExpanded] = useState(false)
+  const [failing, setFailing] = useState(false)
   const liveSessions = useAppStore((s) => s.liveSessions)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
+  const load = useHandoffsStore((s) => s.load)
   const repoLabel = handoff.targetRepoLabel ?? handoff.targetRepoId
   const hasDetail =
     (handoff.status === 'done' && !!handoff.summary) ||
     (handoff.status === 'failed' && !!handoff.error)
+
+  // Sem heartbeat: só faz sentido pra running. Calculado no render — a lista
+  // recarrega periodicamente via watch, mantendo o "há Xh" razoavelmente fresco.
+  const stale = isStale(handoff, ttlHours, Date.now())
+
+  // Recovery manual: força failed via IPC handoffs:fail. Disponível pra running e
+  // pra approved travado (aprovado mas a filha nunca subiu). Confirmação evita
+  // matar uma filha viva em trabalho longo por engano.
+  const canForceFail = handoff.status === 'running' || handoff.status === 'approved'
+
+  async function forceFail() {
+    if (failing) return
+    const ok = window.confirm(
+      `Forçar falha deste handoff para "${repoLabel}"? A sessão-filha não será encerrada automaticamente; use isto quando ela travou ou já morreu.`,
+    )
+    if (!ok) return
+    setFailing(true)
+    try {
+      await handoffsApi.fail({ id: handoff.id, error: 'Falha forçada manualmente pelo usuário' })
+      await load()
+    } catch {
+      setFailing(false)
+    }
+  }
 
   // A filha já está rodando num PTY. "Abrir terminal" RE-ATTACHA uma pane à
   // sessão viva (focusOrOpenSession → paneFromLiveSession), nunca re-spawn/--resume.
@@ -97,6 +143,15 @@ function HandoffCard({ handoff }: { handoff: Handoff }) {
               {handoff.currentStep}
             </div>
           )}
+          {stale && (
+            <div
+              className="mt-1 flex items-center gap-1 text-xs text-[var(--color-warning)]"
+              title="A sessão-filha não reporta progresso há um tempo — pode ter travado."
+            >
+              <Icon as={AlertTriangle} size={12} />
+              {staleLabel(handoff, Date.now())}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className="text-[11px] text-[var(--color-text-dim)]">
@@ -111,6 +166,18 @@ function HandoffCard({ handoff }: { handoff: Handoff }) {
             >
               <Icon as={TerminalSquare} size={12} />
               Abrir terminal
+            </button>
+          )}
+          {canForceFail && (
+            <button
+              type="button"
+              onClick={() => void forceFail()}
+              disabled={failing}
+              title="Marcar este handoff como falho (recovery manual)"
+              className="flex items-center gap-1 rounded border border-[var(--color-danger)]/40 px-2 py-0.5 text-[11px] text-[var(--color-danger)] transition hover:bg-[var(--color-danger)]/10 disabled:opacity-50"
+            >
+              <Icon as={AlertTriangle} size={12} />
+              {failing ? 'Falhando…' : 'Forçar falha'}
             </button>
           )}
         </div>
@@ -152,6 +219,13 @@ export function HandoffsPanel() {
   const handoffs = useHandoffsStore((s) => s.handoffs)
   const loading = useHandoffsStore((s) => s.loading)
   const load = useHandoffsStore((s) => s.load)
+  const [ttlHours, setTtlHours] = useState(HEARTBEAT_TTL_DEFAULT)
+
+  useEffect(() => {
+    void prefsApi
+      .get<number>(HEARTBEAT_TTL_KEY)
+      .then((v) => setTtlHours(v ?? HEARTBEAT_TTL_DEFAULT))
+  }, [])
 
   // Agrupa por status na ordem ativos → terminais; cada grupo já vem ordenado
   // por createdAt DESC do store.
@@ -198,7 +272,7 @@ export function HandoffsPanel() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {group.items.map((h) => (
-                    <HandoffCard key={h.id} handoff={h} />
+                    <HandoffCard key={h.id} handoff={h} ttlHours={ttlHours} />
                   ))}
                 </div>
               </section>

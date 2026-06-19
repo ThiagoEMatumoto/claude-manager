@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
 import { ptyManager } from './services/pty-manager'
+import * as handoffStore from './services/handoff-store'
 import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc } from './ipc/sessions'
@@ -141,6 +142,14 @@ app.whenReady().then(async () => {
   startUsageMonitor()
   startFeatureWatcher()
 
+  // Self-heal periódico de handoffs presos em 'running' cuja filha já morreu em
+  // runtime (PTY exit pode não ter disparado a reconciliação). Não bloqueia o
+  // boot e é idempotente — a query só toca handoffs órfãos.
+  handoffReconcileTimer = setInterval(
+    () => handoffStore.reconcileStuck(),
+    HANDOFF_RECONCILE_INTERVAL_MS,
+  )
+
   // Pull-no-boot CONSERVADOR em BACKGROUND: importa só fast-forward limpo (sem
   // trabalho local não-empurrado), bounded por timeout e NÃO-fatal (offline/erro
   // → segue com dados locais). Roda sob o mutex de sync (não corre com o
@@ -159,6 +168,10 @@ app.whenReady().then(async () => {
   })
 })
 
+// Self-heal de handoffs órfãos a cada 5min (ver app.whenReady).
+const HANDOFF_RECONCILE_INTERVAL_MS = 5 * 60 * 1000
+let handoffReconcileTimer: ReturnType<typeof setInterval> | null = null
+
 // Shutdown síncrono final: roda DEPOIS do flush de sync (que lê o DB), porque a
 // última operação fecha o DB. Idempotente via flag `didShutdown`.
 let didShutdown = false
@@ -168,6 +181,10 @@ function runFinalShutdown(): void {
   void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
+  if (handoffReconcileTimer) {
+    clearInterval(handoffReconcileTimer)
+    handoffReconcileTimer = null
+  }
   syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()

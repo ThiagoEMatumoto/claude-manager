@@ -24,11 +24,11 @@ export function Dialog({ open, onClose, title, children, footer, widthClassName 
       }}
     >
       <div
-        className={`${widthClassName ?? 'w-[28rem]'} max-w-[90vw] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl`}
+        className={`${widthClassName ?? 'w-[28rem]'} flex max-h-[85vh] max-w-[90vw] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl`}
       >
-        {title && <div className="mb-4 text-lg font-semibold">{title}</div>}
-        {children}
-        {footer && <div className="mt-6 flex justify-end gap-2">{footer}</div>}
+        {title && <div className="mb-4 shrink-0 text-lg font-semibold">{title}</div>}
+        <div className="min-h-0 overflow-y-auto pr-1">{children}</div>
+        {footer && <div className="mt-6 flex shrink-0 justify-end gap-2">{footer}</div>}
       </div>
     </div>,
     document.body,

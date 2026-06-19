@@ -193,6 +193,23 @@ export function failIfRunning(id: string, error: string): Handoff | null {
   return res.changes > 0 ? fresh(id) : null
 }
 
+// Reconciliação em runtime, independente do evento PTY exit: pega filhas
+// fechadas/crashadas (ou nunca atreladas) sem esperar o exit. SEGURA por design —
+// só falha handoffs cuja session-filha NÃO está 'running'. Um filho VIVO em
+// trabalho longo (que não reporta progresso) NÃO pode ser morto. Retorna o nº de
+// handoffs reconciliados. Coluna de status viva em sessions = status='running'.
+export function reconcileStuck(): number {
+  const res = getDb()
+    .prepare(
+      `UPDATE handoffs SET status = 'failed', error = ?, updated_at = ?
+       WHERE status = 'running'
+         AND (child_session_id IS NULL
+              OR child_session_id NOT IN (SELECT id FROM sessions WHERE status = 'running'))`,
+    )
+    .run('Sessão-filha encerrada sem reportar conclusão', Date.now())
+  return res.changes
+}
+
 // Busca o handoff cuja filha é esta sessão (pra reconciliar no PTY exit). NULL se
 // a sessão não veio de um handoff.
 export function getByChildSession(childSessionId: string): Handoff | null {

@@ -26,6 +26,14 @@ export function getDb(): Database.Database {
     Date.now(),
   )
 
+  // Handoffs 'running' de um boot anterior também são órfãos: a sessão-filha (PTY)
+  // não sobrevive ao restart, e a reconciliação via evento PTY exit nunca dispara
+  // (o ptyManager morreu junto). Sem isto, órfãos travam MAX_ACTIVE_HANDOFFS para
+  // sempre. No boot TODO 'running' é órfão — nenhum PTY-filho sobrevive ao restart.
+  db.prepare(
+    "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE status = 'running'",
+  ).run('Sessão-filha órfã: app reiniciou sem reconciliar o handoff', Date.now())
+
   dbInstance = db
   return db
 }

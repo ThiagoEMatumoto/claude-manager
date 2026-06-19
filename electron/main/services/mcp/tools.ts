@@ -12,6 +12,7 @@ import * as repoDepStore from '../repo-dependency-store'
 import * as handoffStore from '../handoff-store'
 import { composeHandoffPrompt, type HandoffEdge } from '../handoff/compose-prompt'
 import { getDb } from '../db'
+import { getPref } from '../prefs-store'
 import { randomUUID } from 'node:crypto'
 import type {
   FeatureObjectiveLink,
@@ -568,9 +569,10 @@ const handoffProgressSchema = z.object({
   step: z.string().min(1),
 })
 
-// Teto de handoffs ativos (pending/approved/running) simultâneos por instância.
-// Evita inundar o gate humano e estourar sessões-filhas concorrentes.
-const MAX_ACTIVE_HANDOFFS = 5
+// Default do teto de handoffs ativos (pending/approved/running) simultâneos por
+// instância. Evita inundar o gate humano e estourar sessões-filhas concorrentes.
+// Override via pref 'handoffs.maxActive'.
+const DEFAULT_MAX_ACTIVE_HANDOFFS = 5
 
 function handoffTools(notify: McpNotify): ToolDef[] {
   return [
@@ -609,12 +611,34 @@ function handoffTools(notify: McpNotify): ToolDef[] {
       handler: (args) => {
         const input = sessionHandoffSchema.parse(args)
 
+        // Reconcilia órfãos ANTES de contar: filhas mortas/crashadas não devem
+        // inflar a contagem e travar o teto com falsos-ativos.
+        handoffStore.reconcileStuck()
+
         // Cap de concorrência: não acumula handoffs ativos além do teto.
-        const active = handoffStore.list({ status: ['pending', 'approved', 'running'] }).length
-        if (active >= MAX_ACTIVE_HANDOFFS) {
-          return ok({
-            error: `Limite de ${MAX_ACTIVE_HANDOFFS} handoffs ativos atingido; resolva os pendentes (aprovar/rejeitar) ou aguarde os em andamento concluírem antes de criar outro.`,
-          })
+        const maxActive = getPref('handoffs.maxActive', DEFAULT_MAX_ACTIVE_HANDOFFS)
+        const activeHandoffs = handoffStore.list({ status: ['pending', 'approved', 'running'] })
+        if (activeHandoffs.length >= maxActive) {
+          // Mensagem honesta: breakdown REAL por status. Sem pendentes a resolver,
+          // não mandar "resolver pendentes" — os bloqueadores estão em andamento.
+          const pending = activeHandoffs.filter(
+            (h) => h.status === 'pending' || h.status === 'approved',
+          )
+          const running = activeHandoffs.filter((h) => h.status === 'running')
+          const fmt = (h: (typeof activeHandoffs)[number]): string =>
+            `${h.targetRepoLabel ?? h.targetRepoId} (${h.id})`
+          let error: string
+          if (pending.length === 0 && running.length > 0) {
+            error = `Limite de ${maxActive} handoffs ativos atingido — ${running.length} em andamento (targets: ${running.map(fmt).join(', ')}). Acompanhe/destrave no painel Handoffs ou aguarde concluírem antes de criar outro.`
+          } else {
+            const parts: string[] = []
+            if (pending.length > 0)
+              parts.push(`${pending.length} pendente(s) de aprovação (${pending.map(fmt).join(', ')})`)
+            if (running.length > 0)
+              parts.push(`${running.length} em andamento (${running.map(fmt).join(', ')})`)
+            error = `Limite de ${maxActive} handoffs ativos atingido — ${parts.join('; ')}. Aprove/rejeite os pendentes ou aguarde os em andamento concluírem no painel Handoffs antes de criar outro.`
+          }
+          return ok({ error })
         }
 
         const target = resolveRepo(input.targetRepo)

@@ -126,6 +126,103 @@ describe('handoff-store', () => {
     })
   })
 
+  // Helper: cria uma session-filha viva/morta na tabela sessions e atrela ao
+  // handoff (markRunning). Espelha o que o fluxo real faz no spawn da filha.
+  function spawnChild(handoffId: string, childSessionId: string, childStatus: string): void {
+    testDb
+      .prepare(
+        `INSERT INTO sessions (id, repo_id, status, started_at) VALUES (?, 'r1', ?, ?)`,
+      )
+      .run(childSessionId, childStatus, Date.now())
+    store.markRunning(handoffId, childSessionId)
+  }
+
+  describe('boot sweep (handoffs órfãos do boot anterior)', () => {
+    // O sweep vive em db.ts (getDb), acoplado a electron.app; aqui exercemos o
+    // MESMO SQL literal contra o testDb pra travar o contrato.
+    function bootSweep(): void {
+      testDb
+        .prepare(
+          "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE status = 'running'",
+        )
+        .run('Sessão-filha órfã: app reiniciou sem reconciliar o handoff', Date.now())
+    }
+
+    it("running → failed; done/rejected/failed permanecem intactos", () => {
+      const running = newHandoff('r1')
+      store.approve(running.id, {})
+      store.markRunning(running.id, 's-run')
+
+      const done = newHandoff('r2')
+      store.approve(done.id, {})
+      store.markRunning(done.id, 's-done')
+      store.report(done.id, 'ok')
+
+      const rejected = newHandoff('r1')
+      store.reject(rejected.id)
+
+      const failed = newHandoff('r2')
+      store.fail(failed.id, 'erro original')
+
+      bootSweep()
+
+      const swept = store.get(running.id)
+      expect(swept?.status).toBe('failed')
+      expect(swept?.error).toBe('Sessão-filha órfã: app reiniciou sem reconciliar o handoff')
+      expect(store.get(done.id)?.status).toBe('done')
+      expect(store.get(rejected.id)?.status).toBe('rejected')
+      // Não sobrescreve a mensagem de erro de um failed pré-existente.
+      expect(store.get(failed.id)?.status).toBe('failed')
+      expect(store.get(failed.id)?.error).toBe('erro original')
+    })
+  })
+
+  describe('reconcileStuck (self-heal de filha morta em runtime)', () => {
+    it('running com filha NÃO-running → failed', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      spawnChild(h.id, 's-dead', 'exited')
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(1)
+      const after = store.get(h.id)
+      expect(after?.status).toBe('failed')
+      expect(after?.error).toBe('Sessão-filha encerrada sem reportar conclusão')
+    })
+
+    it('running com filha viva (running) → PERMANECE running (guarda de segurança)', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      spawnChild(h.id, 's-alive', 'running')
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(0)
+      expect(store.get(h.id)?.status).toBe('running')
+    })
+
+    it('running sem filha atrelada (child_session_id NULL) → failed', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      // Sem markRunning: força running diretamente, child_session_id permanece null.
+      testDb.prepare("UPDATE handoffs SET status = 'running' WHERE id = ?").run(h.id)
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(1)
+      expect(store.get(h.id)?.status).toBe('failed')
+    })
+
+    it('NÃO toca handoffs em estado terminal (done permanece done)', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      spawnChild(h.id, 's-done', 'exited')
+      store.report(h.id, 'concluído')
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(0)
+      expect(store.get(h.id)?.status).toBe('done')
+    })
+  })
+
   describe('findActiveByTarget (dedup por alvo)', () => {
     it('acha handoff ativo pro mesmo repo-alvo', () => {
       const h = newHandoff('r1')

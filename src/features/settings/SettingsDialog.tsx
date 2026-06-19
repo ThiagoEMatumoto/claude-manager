@@ -84,6 +84,8 @@ export function SettingsDialog({ open, onClose }: Props) {
 }
 
 const SCRATCH_DIR_DEFAULT = '~/ClaudeManager/scratch'
+const HANDOFFS_MAX_ACTIVE_DEFAULT = 5
+const HANDOFFS_HEARTBEAT_TTL_DEFAULT = 2
 
 function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
@@ -95,6 +97,8 @@ function GeneralTab({ open }: { open: boolean }) {
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
   const [autoApproveHandoffs, setAutoApproveHandoffs] = useState(false)
+  const [maxActiveHandoffs, setMaxActiveHandoffs] = useState(HANDOFFS_MAX_ACTIVE_DEFAULT)
+  const [heartbeatTtlHours, setHeartbeatTtlHours] = useState(HANDOFFS_HEARTBEAT_TTL_DEFAULT)
 
   useEffect(() => {
     if (!open) return
@@ -103,6 +107,12 @@ function GeneralTab({ open }: { open: boolean }) {
     void prefsApi
       .get<boolean>('handoffs.autoApprove')
       .then((v) => setAutoApproveHandoffs(v ?? false))
+    void prefsApi
+      .get<number>('handoffs.maxActive')
+      .then((v) => setMaxActiveHandoffs(v ?? HANDOFFS_MAX_ACTIVE_DEFAULT))
+    void prefsApi
+      .get<number>('handoffs.heartbeatTtlHours')
+      .then((v) => setHeartbeatTtlHours(v ?? HANDOFFS_HEARTBEAT_TTL_DEFAULT))
     void mcpApi.status().then(setMcpStatus)
     setMcpCopied(false)
     void useTerminalPrefsStore.getState().load()
@@ -111,6 +121,16 @@ function GeneralTab({ open }: { open: boolean }) {
   function updateAutoApprove(v: boolean) {
     setAutoApproveHandoffs(v)
     void prefsApi.set('handoffs.autoApprove', v)
+  }
+
+  function updateMaxActive(v: number) {
+    setMaxActiveHandoffs(v)
+    if (Number.isFinite(v) && v >= 1) void prefsApi.set('handoffs.maxActive', v)
+  }
+
+  function updateHeartbeatTtl(v: number) {
+    setHeartbeatTtlHours(v)
+    if (Number.isFinite(v) && v >= 1) void prefsApi.set('handoffs.heartbeatTtlHours', v)
   }
 
   function copyMcpCommand() {
@@ -278,6 +298,46 @@ function GeneralTab({ open }: { open: boolean }) {
             className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
           />
         </label>
+
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Máximo de handoffs ativos</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Limite de delegações simultâneas (pending/approved/running) antes de novas serem
+              barradas. (1–50)
+            </div>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            step={1}
+            value={maxActiveHandoffs}
+            onChange={(e) => updateMaxActive(Number(e.target.value))}
+            className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">
+              TTL de heartbeat (horas)
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Sem progresso por mais que isto, a sessão-filha é marcada como sem heartbeat no
+              inbox. (1–48)
+            </div>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={48}
+            step={1}
+            value={heartbeatTtlHours}
+            onChange={(e) => updateHeartbeatTtl(Number(e.target.value))}
+            className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
       </div>
     </div>
   )

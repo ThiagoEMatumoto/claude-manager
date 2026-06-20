@@ -391,10 +391,6 @@ def transcribe(wav_path):
     duration_ms = int((getattr(info, "duration", 0.0) or 0.0) * 1000)
     n = 0
     for seg in segments:
-        if _stop.is_set():
-            # Stop durante a transcrição: encerra o que já saiu (graceful).
-            log("stop durante transcrição — interrompendo o stream de segments")
-            break
         confidence = None
         if seg.avg_logprob is not None:
             # avg_logprob (log-prob) → ~[0,1] só pra UI; não é probabilidade real.

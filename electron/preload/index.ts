@@ -43,6 +43,7 @@ import type {
   MeetingSegment,
   MeetingStatusEvent,
   MeetingPartialEvent,
+  MeetingActivationDraft,
   CreateMeetingInput,
   UpdateMeetingInput,
   MaterializeMeetingTaskInput,
@@ -263,6 +264,8 @@ const api: Api = {
     onTranscriptPartial: (handler) =>
       subscribe<MeetingPartialEvent>('meeting:transcript:partial', handler),
     onStatus: (handler) => subscribe<MeetingStatusEvent>('meeting:status', handler),
+    onCalendarActivate: (handler) =>
+      subscribe<MeetingActivationDraft>('meeting:calendar:activate', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

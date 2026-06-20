@@ -3,7 +3,12 @@ import { Plus, Mic, Square, Sparkles, AlertTriangle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import { objectivesApi, featuresApi, meetingsApi } from '@/lib/ipc'
-import type { Feature, Meeting, ObjectiveWithProgress } from '../../../shared/types/ipc'
+import type {
+  Feature,
+  Meeting,
+  MeetingActivationDraft,
+  ObjectiveWithProgress,
+} from '../../../shared/types/ipc'
 import { MeetingList } from './MeetingList'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
 import { ExtractionReview } from './ExtractionReview'
@@ -16,6 +21,15 @@ const ENRICHABLE: ReadonlySet<Meeting['status']> = new Set(['ready', 'extracted'
 const LIVE: ReadonlySet<Meeting['status']> = new Set(['capturing', 'recording'])
 
 const NOTES_SAVE_DEBOUNCE_MS = 600
+
+// Notas iniciais de uma reunião nascida do Google Calendar: link do Meet +
+// participantes viram cabeçalho pré-preenchido (o usuário continua editando).
+function composeDraftNotes(draft: MeetingActivationDraft): string {
+  const lines: string[] = []
+  if (draft.meetUrl) lines.push(`Google Meet: ${draft.meetUrl}`)
+  if (draft.attendees.length > 0) lines.push(`Participantes: ${draft.attendees.join(', ')}`)
+  return lines.join('\n')
+}
 
 export function MeetingsArea() {
   useMeetings()
@@ -33,6 +47,8 @@ export function MeetingsArea() {
   const clearExtraction = useMeetingsStore((s) => s.clearExtraction)
   const materializeTask = useMeetingsStore((s) => s.materializeTask)
   const sidecarConfigured = useMeetingsStore((s) => s.sidecarConfigured)
+  const activationDraft = useMeetingsStore((s) => s.activationDraft)
+  const clearActivationDraft = useMeetingsStore((s) => s.clearActivationDraft)
 
   const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
   const [features, setFeatures] = useState<Feature[]>([])
@@ -89,6 +105,30 @@ export function MeetingsArea() {
   useEffect(() => {
     clearExtraction()
   }, [selectedId, clearExtraction])
+
+  // Consome o draft de ativação por Google Calendar: cria a reunião pré-preenchida
+  // (título do evento, participantes + link do Meet nas notas) e a seleciona. O
+  // draft é limpo ANTES do await pra que o duplo-mount do StrictMode e o set de
+  // `area` não criem 2 reuniões. Botão "Nova" manual segue intacto.
+  const consumingDraft = useRef(false)
+  useEffect(() => {
+    if (!activationDraft || consumingDraft.current) return
+    consumingDraft.current = true
+    const draft = activationDraft
+    clearActivationDraft()
+    void (async () => {
+      try {
+        const created = await createMeeting({
+          title: draft.title,
+          source: 'calendar',
+          rawNotes: composeDraftNotes(draft),
+        })
+        setSelectedId(created.id)
+      } finally {
+        consumingDraft.current = false
+      }
+    })()
+  }, [activationDraft, clearActivationDraft, createMeeting])
 
   const reviewForSelected =
     selected && extraction && extractingId !== selected.id ? extraction : null

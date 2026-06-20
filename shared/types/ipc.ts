@@ -755,6 +755,15 @@ export interface MeetingExtractResult {
   extractions: MeetingExtraction[]
 }
 
+// Renomear um speaker da reunião (SPEAKER_0X → pessoa). O label é o gerado pela
+// diarização; displayName é persistido em meeting_speakers.display_name e
+// substitui o label na UI.
+export interface SetSpeakerNameInput {
+  meetingId: string
+  label: string
+  displayName: string
+}
+
 // Materialização de UMA extração revisada como task real. O vínculo (objective/
 // feature) é o conjunto reusado do TaskDialog; quote/speaker/timestamp viram
 // proveniência na descrição. extractionId dá idempotência (markMaterialized).
@@ -1485,6 +1494,10 @@ export interface Api {
     update(input: UpdateMeetingInput): Promise<Meeting>
     delete(id: string): Promise<void>
     listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Speakers da reunião (label→pessoa + is_local_user da diarização).
+    listSpeakers(meetingId: string): Promise<MeetingSpeaker[]>
+    // Renomeia SPEAKER_0X → pessoa (persistido em display_name).
+    setSpeakerName(input: SetSpeakerNameInput): Promise<MeetingSpeaker>
     // Busca full-text (FTS5) entre reuniões: casa transcript + notas aumentadas
     // + itens extraídos e devolve as reuniões com snippet/origem do match.
     search(query: string): Promise<MeetingSearchMatch[]>
@@ -1506,6 +1519,9 @@ export interface Api {
     onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
     onTranscriptPartial(handler: (partial: MeetingPartialEvent) => void): () => void
     onStatus(handler: (payload: MeetingStatusEvent) => void): () => void
+    // Speaker descoberto/renomeado (diarização ou rename manual). A UI atualiza
+    // o mapa label→nome sem recarregar tudo.
+    onSpeaker(handler: (speaker: MeetingSpeaker) => void): () => void
     // Ativação assistida por Google Calendar: emitido quando o usuário clica na
     // notificação nativa de "reunião começando agora". O renderer vai pra área
     // Reuniões e cria uma reunião pré-preenchida com o draft.

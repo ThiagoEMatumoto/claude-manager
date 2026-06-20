@@ -14,7 +14,9 @@ import type {
   MeetingListFilter,
   MeetingSearchMatch,
   MeetingSegment,
+  MeetingSpeaker,
   MaterializeMeetingTaskInput,
+  SetSpeakerNameInput,
   Task,
   UpdateMeetingInput,
 } from '../../../shared/types/ipc'
@@ -51,6 +53,25 @@ export function registerMeetingsIpc(): void {
   ipcMain.handle('meetings:list-segments', (_e, meetingId: string): MeetingSegment[] => {
     return meetingStore.listSegments(meetingId)
   })
+
+  ipcMain.handle('meetings:list-speakers', (_e, meetingId: string): MeetingSpeaker[] => {
+    return meetingStore.listSpeakers(meetingId)
+  })
+
+  // Renomear SPEAKER_0X → pessoa (persistido em meeting_speakers.display_name).
+  // Upsert: cria o label se a diarização ainda não o tiver registrado.
+  ipcMain.handle(
+    'meetings:set-speaker-name',
+    (_e, input: SetSpeakerNameInput): MeetingSpeaker => {
+      const speaker = meetingStore.setSpeakerName(
+        input.meetingId,
+        input.label,
+        input.displayName.trim(),
+      )
+      broadcast('meeting:speaker', speaker)
+      return speaker
+    },
+  )
 
   // Busca FTS5 entre reuniões (transcript + notas aumentadas + extrações).
   // Devolve reuniões com snippet/origem do match, ordenadas por relevância.

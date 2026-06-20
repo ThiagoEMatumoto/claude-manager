@@ -4,7 +4,7 @@ import {
   type SidecarBroadcast,
   type SidecarStore,
 } from './meeting-sidecar-manager'
-import type { MeetingSegment } from '../../../shared/types/ipc'
+import type { MeetingSegment, MeetingSpeaker } from '../../../shared/types/ipc'
 
 // Sidecar fake EM NODE (process.execPath + node -e) — NÃO depende de python3 no
 // test runner. O script emite NDJSON no stdout com delays curtos, igual ao
@@ -28,6 +28,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 })()
 `
 
+// Diarização: status → 2 speaker events (1 local) → 2 segments rotulados → done.
+// Os speaker events PRECEDEM os segments (contrato do sidecar real).
+const DIARIZED_SCRIPT = `
+const emit = (o) => { process.stdout.write(JSON.stringify(o) + "\\n") }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+;(async () => {
+  emit({ type: "status", state: "diarizing" })
+  await sleep(20)
+  emit({ type: "speaker", label: "SPEAKER_00", is_local_user: true })
+  emit({ type: "speaker", label: "SPEAKER_01", is_local_user: false })
+  await sleep(20)
+  emit({ type: "segment", idx: 0, start_ms: 0, end_ms: 1000, speaker: "SPEAKER_00", text: "eu", confidence: 0.9 })
+  emit({ type: "segment", idx: 1, start_ms: 1000, end_ms: 2000, speaker: "SPEAKER_01", text: "outro", confidence: 0.8 })
+  await sleep(20)
+  emit({ type: "done", segments: 2, duration_ms: 2000 })
+})()
+`
+
 // Sobe (status capturing), emite 1 segment, e fica vivo aguardando — para
 // exercitar stop() e o cenário de morte sem done.
 const HANG_SCRIPT = `
@@ -42,12 +60,14 @@ interface Recorder {
   broadcast: SidecarBroadcast
   updates: Array<{ id: string; status?: string; durationMs?: number | null }>
   segments: MeetingSegment[]
+  speakers: MeetingSpeaker[]
   events: Array<{ channel: string; payload: unknown }>
 }
 
 function makeRecorder(): Recorder {
   const updates: Recorder['updates'] = []
   const segments: MeetingSegment[] = []
+  const speakers: MeetingSpeaker[] = []
   const events: Recorder['events'] = []
   let seq = 0
   const store: SidecarStore = {
@@ -72,11 +92,21 @@ function makeRecorder(): Recorder {
       segments.push(seg)
       return seg
     },
+    registerSpeaker: (meetingId, label, isLocalUser) => {
+      const speaker: MeetingSpeaker = {
+        meetingId,
+        label,
+        displayName: null,
+        isLocalUser,
+      }
+      speakers.push(speaker)
+      return speaker
+    },
   }
   const broadcast: SidecarBroadcast = (channel, payload) => {
     events.push({ channel, payload })
   }
-  return { store, broadcast, updates, segments, events }
+  return { store, broadcast, updates, segments, speakers, events }
 }
 
 function makeManager(rec: Recorder): MeetingSidecarManager {
@@ -129,6 +159,26 @@ describe('MeetingSidecarManager', () => {
 
     // exit limpo: não está mais rodando
     expect(mgr.isRunning('m1')).toBe(false)
+  })
+
+  it('persists speaker events (is_local_user) and broadcasts meeting:speaker', async () => {
+    const rec = makeRecorder()
+    mgr = makeManager(rec)
+    const exited = waitForExit(mgr)
+    await mgr.start('mdia', { command: NODE, args: ['-e', DIARIZED_SCRIPT] })
+    await exited
+
+    // 2 speakers registrados; SPEAKER_00 marcado como o usuário local.
+    expect(rec.speakers.map((s) => s.label)).toEqual(['SPEAKER_00', 'SPEAKER_01'])
+    expect(rec.speakers.find((s) => s.label === 'SPEAKER_00')?.isLocalUser).toBe(true)
+    expect(rec.speakers.find((s) => s.label === 'SPEAKER_01')?.isLocalUser).toBe(false)
+
+    // broadcast meeting:speaker por label
+    const speakerEvents = rec.events.filter((e) => e.channel === 'meeting:speaker')
+    expect(speakerEvents).toHaveLength(2)
+
+    // segments carregam o speaker_label da diarização
+    expect(rec.segments.map((s) => s.speakerLabel)).toEqual(['SPEAKER_00', 'SPEAKER_01'])
   })
 
   it('stop() kills the running process', async () => {

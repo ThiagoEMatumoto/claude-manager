@@ -435,6 +435,33 @@ export function listSpeakers(meetingId: string): MeetingSpeaker[] {
   }))
 }
 
+// Registra um speaker descoberto pela diarização (evento `speaker` do sidecar):
+// cria a linha com o flag is_local_user (a trilha do mic identifica "você"). Não
+// toca o display_name (renomear é ação humana via setSpeakerName). Idempotente:
+// re-emitir o mesmo label só atualiza o flag.
+export function registerSpeaker(
+  meetingId: string,
+  label: string,
+  isLocalUser: boolean,
+): MeetingSpeaker {
+  getDb()
+    .prepare(
+      `INSERT INTO meeting_speakers (meeting_id, label, is_local_user)
+       VALUES (?, ?, ?)
+       ON CONFLICT (meeting_id, label) DO UPDATE SET is_local_user = excluded.is_local_user`,
+    )
+    .run(meetingId, label, isLocalUser ? 1 : 0)
+  const row = getDb()
+    .prepare('SELECT * FROM meeting_speakers WHERE meeting_id = ? AND label = ?')
+    .get(meetingId, label) as SpeakerRow
+  return {
+    meetingId: row.meeting_id,
+    label: row.label,
+    displayName: row.display_name,
+    isLocalUser: row.is_local_user === 1,
+  }
+}
+
 // Upsert do nome do speaker (label→pessoa). Cria a linha se o label ainda não
 // existe (o sidecar pode não ter pré-registrado os labels).
 export function setSpeakerName(

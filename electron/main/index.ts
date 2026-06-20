@@ -106,6 +106,15 @@ app.whenReady().then(async () => {
   // colando via clipboard nativo do Chromium. Coerente com autoHideMenuBar.
   Menu.setApplicationMenu(null)
   getDb()
+  // Boot reconcile de reuniões presas em estados "vivos" após um crash/quit sujo:
+  // num processo fresco nenhum sidecar pode estar vivo, então qualquer reunião
+  // nesses estados é órfã → failed. Idempotente; ended_at preserva o existente.
+  getDb()
+    .prepare(
+      `UPDATE meetings SET status = 'failed', ended_at = COALESCE(ended_at, ?)
+       WHERE status IN ('capturing', 'recording', 'transcribing', 'diarizing')`,
+    )
+    .run(Date.now())
   // MCP server local (writes externos via Claude Code). Async e fire-and-forget:
   // EADDRINUSE etc. são logados dentro do start — nunca derrubam o boot.
   void startMcpServer()

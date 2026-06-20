@@ -119,6 +119,12 @@ const ACTIVE_STATES: ReadonlySet<MeetingStatus> = new Set<MeetingStatus>([
 
 const STOP_GRACE_MS = 3000
 
+// Grace CURTO e bounded p/ o shutdown forçado: SIGTERM (o sidecar trata SIGINT/
+// SIGTERM e para o pw-record, liberando o device) → espera → SIGKILL. Coordenado
+// com o budget do before-quit (~6s): ~1.5s é confortável e evita orfanar o
+// processo de captura no quit/crash.
+const KILL_GRACE_MS = 1500
+
 interface Tracked {
   child: ChildProcessWithoutNullStreams
   rl: Interface
@@ -306,13 +312,23 @@ export class MeetingSidecarManager extends TypedEmitter {
     timer.unref?.()
   }
 
-  // Shutdown: SIGKILL imediato (o before-quit é bounded, sem tempo p/ grace). NÃO
-  // emite 'exit' manualmente nem limpa o Map — deixa o 'exit' natural do processo
-  // disparar handleExit, que faz a reconciliação (capturing sem done → failed) e
-  // remove a entrada. Marca como morte forçada p/ não ficar pendente.
+  // Shutdown: SIGTERM primeiro (o sidecar trata e para o pw-record, liberando o
+  // device — SIGKILL direto orfanaria a captura no quit/crash) → grace CURTO e
+  // bounded → SIGKILL p/ quem não saiu. Síncrono e não-bloqueante: o escalonamento
+  // roda via timer unref'd (não segura o event loop no quit). NÃO emite 'exit'
+  // manualmente nem limpa o Map — deixa o 'exit' natural disparar handleExit, que
+  // reconcilia (capturing sem done → failed) e remove a entrada.
   killAllSidecars(): void {
-    for (const tracked of this.procs.values()) {
-      tracked.child.kill('SIGKILL')
+    const children = Array.from(this.procs.values()).map((t) => t.child)
+    for (const child of children) {
+      child.kill('SIGTERM')
     }
+    if (children.length === 0) return
+    const timer = setTimeout(() => {
+      for (const child of children) {
+        if (!child.killed) child.kill('SIGKILL')
+      }
+    }, KILL_GRACE_MS)
+    timer.unref?.()
   }
 }

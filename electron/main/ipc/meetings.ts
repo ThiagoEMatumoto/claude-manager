@@ -104,6 +104,16 @@ export function registerMeetingsIpc(): void {
   ipcMain.handle(
     'meetings:materialize-task',
     (_e, input: MaterializeMeetingTaskInput): Task => {
+      // Idempotência real: se a extração já foi materializada, devolve a task
+      // existente em vez de criar uma 2ª (o usuário pode re-aprovar o mesmo item).
+      if (input.extractionId) {
+        const existing = meetingStore.getExtraction(input.extractionId)
+        if (existing?.materializedTaskId) {
+          const task = taskStore.get(existing.materializedTaskId)
+          if (task) return task
+        }
+      }
+
       const ts = formatTimestamp(input.startMs)
       const provenance = [
         input.quote ? `> ${input.quote}` : null,

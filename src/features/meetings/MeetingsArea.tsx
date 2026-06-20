@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Mic, Square, Sparkles, AlertTriangle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMeetingsStore } from '@/store/meetingsStore'
-import { objectivesApi, featuresApi } from '@/lib/ipc'
+import { objectivesApi, featuresApi, meetingsApi } from '@/lib/ipc'
 import type { Feature, Meeting, ObjectiveWithProgress } from '../../../shared/types/ipc'
 import { MeetingList } from './MeetingList'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
@@ -11,6 +11,9 @@ import { useMeetings } from './useMeetings'
 
 // status >= ready significa que há transcript fechado pronto pra enriquecer.
 const ENRICHABLE: ReadonlySet<Meeting['status']> = new Set(['ready', 'extracted'])
+
+// Estados em que a captura está em curso e o botão "Encerrar" deve aparecer.
+const LIVE: ReadonlySet<Meeting['status']> = new Set(['capturing', 'recording'])
 
 const NOTES_SAVE_DEBOUNCE_MS = 600
 
@@ -45,6 +48,28 @@ export function MeetingsArea() {
     () => meetings.find((m) => m.id === selectedId) ?? null,
     [meetings, selectedId],
   )
+
+  // Contagem de segments da reunião selecionada: usada pra desabilitar "Enriquecer"
+  // quando o transcript está vazio (evita o erro genérico "não tem transcript").
+  // Carrega ao trocar de reunião e incrementa com os segments que chegam ao vivo.
+  const [segmentCount, setSegmentCount] = useState(0)
+  useEffect(() => {
+    if (!selected) {
+      setSegmentCount(0)
+      return
+    }
+    let alive = true
+    void meetingsApi.listSegments(selected.id).then((segs) => {
+      if (alive) setSegmentCount(segs.length)
+    })
+    const off = meetingsApi.onTranscriptSegment((segment) => {
+      if (segment.meetingId === selected.id) setSegmentCount((n) => n + 1)
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [selected])
 
   // Objetivos/features pros selects de vínculo da ExtractionReview (mesmo
   // fan-out leve de TasksArea — app pessoal).
@@ -186,11 +211,17 @@ export function MeetingsArea() {
                   <button
                     type="button"
                     onClick={() => void handleEnrich(selected)}
-                    disabled={!ENRICHABLE.has(selected.status) || extractingId === selected.id}
+                    disabled={
+                      !ENRICHABLE.has(selected.status) ||
+                      segmentCount === 0 ||
+                      extractingId === selected.id
+                    }
                     title={
-                      ENRICHABLE.has(selected.status)
-                        ? 'Enriquecer notas e extrair itens'
-                        : 'Disponível quando a reunião estiver pronta (transcrita)'
+                      !ENRICHABLE.has(selected.status)
+                        ? 'Disponível quando a reunião estiver pronta (transcrita)'
+                        : segmentCount === 0
+                          ? 'Sem transcript: grave ou importe áudio antes de enriquecer'
+                          : 'Enriquecer notas e extrair itens'
                     }
                     className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -198,7 +229,7 @@ export function MeetingsArea() {
                     {extractingId === selected.id ? 'Enriquecendo…' : 'Enriquecer'}
                   </button>
                 )}
-                {selected.status === 'capturing' ? (
+                {LIVE.has(selected.status) ? (
                   <button
                     type="button"
                     onClick={() => void stopCapture(selected.id)}

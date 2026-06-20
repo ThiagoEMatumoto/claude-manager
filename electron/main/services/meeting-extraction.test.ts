@@ -119,6 +119,9 @@ function makeStore(captured: MeetingExtraction[], updates: UpdateMeetingInput[])
       captured.push(ex)
       return ex
     }),
+    deleteExtractions: vi.fn((): void => {
+      captured.length = 0
+    }),
   } satisfies ExtractDeps['store']
 }
 
@@ -142,6 +145,16 @@ describe('normalizeForMatch / isGrounded', () => {
 
   it('quote vazia não é grounded', () => {
     expect(isGrounded('   ', SEGMENTS)).toBe(false)
+  })
+
+  it('quote que cruza 2 segments casa via concatenação (fallback)', () => {
+    // A frase atravessa a fronteira seg(1)→seg(2): nenhum segment isolado a
+    // contém, mas a concatenação normalizada sim.
+    const crossSegment = 'até sexta. A integração com o Calendar'
+    expect(SEGMENTS.some((s) => normalizeForMatch(s.text).includes(normalizeForMatch(crossSegment)))).toBe(
+      false,
+    )
+    expect(isGrounded(crossSegment, SEGMENTS)).toBe(true)
   })
 })
 
@@ -200,6 +213,43 @@ describe('extractMeeting', () => {
 
     expect(result.summary).toContain('planejamento')
     expect(result.extractions).toHaveLength(2)
+  })
+
+  it('re-extração limpa as extrações antigas ANTES de re-inserir (sem duplicar)', async () => {
+    const captured: MeetingExtraction[] = []
+    const store = makeStore(captured, [])
+    const runClaude = vi.fn(async (): Promise<RunResult> => okRun(JSON.stringify(MODEL_JSON)))
+
+    // 1ª extração: 2 itens.
+    const first = await extractMeeting('m1', { runClaude, store })
+    expect(first.extractions).toHaveLength(2)
+    expect(captured).toHaveLength(2)
+
+    // 2ª extração (re-enriquecer): deleteExtractions zera antes do loop, então o
+    // total persistido continua 2 (não 4).
+    const second = await extractMeeting('m1', { runClaude, store })
+    expect(store.deleteExtractions).toHaveBeenCalledTimes(2)
+    expect(second.extractions).toHaveLength(2)
+    expect(captured).toHaveLength(2)
+  })
+
+  it('roda delete + inserts dentro de runInTransaction quando disponível', async () => {
+    const captured: MeetingExtraction[] = []
+    let txCalls = 0
+    const store: ExtractDeps['store'] = {
+      ...makeStore(captured, []),
+      runInTransaction: <T>(fn: () => T): T => {
+        txCalls++
+        return fn()
+      },
+    }
+    const runClaude = vi.fn(async (): Promise<RunResult> => okRun(JSON.stringify(MODEL_JSON)))
+
+    await extractMeeting('m1', { runClaude, store })
+    expect(txCalls).toBe(1)
+    // delete + inserts aconteceram dentro do wrapper.
+    expect(store.deleteExtractions).toHaveBeenCalledOnce()
+    expect(captured).toHaveLength(2)
   })
 
   it('faz retry 1x quando o primeiro JSON é inválido', async () => {

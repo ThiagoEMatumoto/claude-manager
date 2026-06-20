@@ -7,6 +7,8 @@
 #
 # faster-whisper traz ctranslate2 (runtime de inferência). Versão recente é
 # necessária para wheels compatíveis com CUDA 12.x.
-faster-whisper>=1.1.0
-soundfile>=0.12.1
-numpy>=1.26
+# Versões EXATAS testadas (reprodutibilidade — pisos >= deixavam o resolver
+# puxar builds não-validadas).
+faster-whisper==1.2.1
+soundfile==0.14.0
+numpy==2.4.6

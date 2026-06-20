@@ -186,6 +186,21 @@ describe('MeetingSidecarManager', () => {
     expect(rec.updates.some((u) => u.status === 'failed')).toBe(false)
   })
 
+  it('killAllSidecars termina via SIGTERM (sem precisar escalar pra SIGKILL)', async () => {
+    const rec = makeRecorder()
+    mgr = makeManager(rec)
+    const exited = waitForExit(mgr)
+    // HANG_SCRIPT ignora SIGINT mas o handler default do Node encerra no SIGTERM.
+    await mgr.start('mkill', { command: NODE, args: ['-e', HANG_SCRIPT] })
+    await vi.waitFor(() => expect(mgr!.isRunning('mkill')).toBe(true))
+
+    mgr.killAllSidecars()
+    const result = await exited
+    // Saiu por sinal de terminação (SIGTERM), não por SIGKILL forçado.
+    expect(result.meetingId).toBe('mkill')
+    expect(mgr.isRunning('mkill')).toBe(false)
+  })
+
   it('rejects starting the same meeting twice', async () => {
     const rec = makeRecorder()
     mgr = makeManager(rec)

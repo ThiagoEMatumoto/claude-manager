@@ -66,7 +66,10 @@ VENV_PY="${VENV_DIR}/bin/python"
 # Instalado ANTES do faster-whisper para fixar a build cu128 (evita o resolver
 # do faster-whisper puxar um torch do PyPI sem CUDA).
 echo "==> instalando torch (cu128 / Blackwell)"
-uv pip install --python "${VENV_PY}" --index-url "${TORCH_INDEX}" torch
+# torch==2.11.0: versão validada na RTX 5070 Laptop (Blackwell, sm_120) com o
+# índice cu128. Pin exato p/ reprodutibilidade — versões mais novas podem mudar
+# o ABI de CUDA/wheels.
+uv pip install --python "${VENV_PY}" --index-url "${TORCH_INDEX}" torch==2.11.0
 
 # --- faster-whisper + soundfile + numpy -----------------------------------
 echo "==> instalando faster-whisper + soundfile + numpy"

@@ -75,7 +75,12 @@ export function normalizeForMatch(s: string): string {
 export function isGrounded(quote: string, segments: { text: string }[]): boolean {
   const q = normalizeForMatch(quote)
   if (!q) return false
-  return segments.some((seg) => normalizeForMatch(seg.text).includes(q))
+  if (segments.some((seg) => normalizeForMatch(seg.text).includes(q))) return true
+  // Fallback p/ quotes que CRUZAM 2+ segments (o modelo cita uma frase contínua
+  // que a diarização quebrou em linhas): compara contra a concatenação normalizada
+  // de todos os segments (com espaço entre eles).
+  const joined = normalizeForMatch(segments.map((seg) => seg.text).join(' '))
+  return joined.includes(q)
 }
 
 // ---- parse tolerante a banner/code fence ----
@@ -140,6 +145,12 @@ export interface ExtractStore {
   listSegments: (meetingId: string) => MeetingSegment[]
   update: (input: UpdateMeetingInput) => Meeting
   addExtraction: (input: AddExtractionInput) => MeetingExtraction
+  // Limpa extrações não-materializadas antes do re-insert (evita duplicar na
+  // re-extração e orfanar materialized_task_id).
+  deleteExtractions: (meetingId: string) => void
+  // Atomicidade do delete + re-inserts. Opcional: sem ela rodamos sem transação
+  // (stubs de teste podem omitir).
+  runInTransaction?: <T>(fn: () => T) => T
 }
 
 export interface ExtractDeps {
@@ -237,32 +248,42 @@ export async function extractMeeting(
   const summary = payload.summary?.trim() || null
   const augmentedNotes = payload.augmented_notes?.trim() || null
 
-  store.update({
-    id: meetingId,
-    summary,
-    augmentedNotes,
-    extractor: 'claude -p',
-    status: 'extracted',
-  })
-
-  const extractions: MeetingExtraction[] = []
-  for (const item of payload.items) {
-    const grounded = isGrounded(item.quote, segments)
-    const extraction = store.addExtraction({
-      meetingId,
-      type: item.type as ExtractionKind,
-      text: item.text,
-      assignee: item.assignee ?? null,
-      dueHint: item.due_hint ?? null,
-      quote: item.quote,
-      startMs: item.start_ms ?? null,
-      endMs: item.end_ms ?? null,
-      speakerLabel: item.speaker_label ?? null,
-      confidence: item.confidence ?? null,
-      grounded,
+  // Persist atômico: status + limpeza das extrações antigas (não-materializadas) +
+  // re-inserts numa única transação. Re-enriquecer não duplica itens nem orfana os
+  // já materializados.
+  const persist = (): MeetingExtraction[] => {
+    store.update({
+      id: meetingId,
+      summary,
+      augmentedNotes,
+      extractor: 'claude -p',
+      status: 'extracted',
     })
-    extractions.push(extraction)
+    store.deleteExtractions(meetingId)
+
+    const out: MeetingExtraction[] = []
+    for (const item of payload.items) {
+      const grounded = isGrounded(item.quote, segments)
+      out.push(
+        store.addExtraction({
+          meetingId,
+          type: item.type as ExtractionKind,
+          text: item.text,
+          assignee: item.assignee ?? null,
+          dueHint: item.due_hint ?? null,
+          quote: item.quote,
+          startMs: item.start_ms ?? null,
+          endMs: item.end_ms ?? null,
+          speakerLabel: item.speaker_label ?? null,
+          confidence: item.confidence ?? null,
+          grounded,
+        }),
+      )
+    }
+    return out
   }
+
+  const extractions = store.runInTransaction ? store.runInTransaction(persist) : persist()
 
   return { summary, augmentedNotes, extractions }
 }

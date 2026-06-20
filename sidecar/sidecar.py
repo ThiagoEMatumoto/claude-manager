@@ -39,6 +39,7 @@ compensa nesta fatia. `--audio-file` exercita exatamente o mesmo caminho de STT.
 """
 
 import argparse
+import ctypes
 import json
 import os
 import signal
@@ -162,6 +163,17 @@ def _resolve_capture_targets():
 # ---------------------------------------------------------------------------
 
 
+def _set_pdeathsig():
+    """preexec_fn (filho): pede ao kernel um SIGTERM no filho assim que o pai
+    (este python) morrer — incl. SIGKILL no python (killAllSidecars no quit/crash).
+    Sem isto, o pw-record reparenta pro init e segura o sink-monitor + mic
+    indefinidamente. PR_SET_PDEATHSIG=1. Best-effort: silencia em libc ausente."""
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)
+    except Exception:
+        pass
+
+
 def _spawn_pw_record(target, out_path):
     """Inicia `pw-record` gravando `target` em `out_path` (WAV). pw-record grava
     até receber SIGINT/SIGTERM. `--target` aceita o node.name resolvido.
@@ -181,13 +193,17 @@ def _spawn_pw_record(target, out_path):
         out_path,
     ]
     try:
-        # stdin=DEVNULL: pw-record não lê stdin; stdout/stderr → PIPE só p/ não
-        # poluir o NDJSON do nosso stdout.
+        # stdin=DEVNULL: pw-record não lê stdin. stdout/stderr → DEVNULL: o áudio
+        # vai pro ARQUIVO out_path; DEVNULL evita poluir o NDJSON E elimina o
+        # deadlock de PIPE (~64KB) que ninguém drena em sessão longa. A morte
+        # precoce é detectada via proc.poll(), não por ler stderr.
+        # preexec_fn=_set_pdeathsig: pw-record recebe SIGTERM quando o python morre.
         return subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=_set_pdeathsig,
         )
     except FileNotFoundError:
         return None
@@ -214,63 +230,72 @@ def capture_two_tracks(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     tracks = []  # (proc, path, kind)
 
-    if monitor_target:
-        p = os.path.join(out_dir, "monitor.wav")
-        proc = _spawn_pw_record(monitor_target, p)
-        if proc:
-            tracks.append((proc, p, "monitor"))
+    # try/finally: garante que TODO pw-record spawnado é parado mesmo em exceção/
+    # KeyboardInterrupt — caminhos que o PR_SET_PDEATHSIG não cobre (o python
+    # ainda está vivo, então o kernel não disparou o death-signal nos filhos).
+    try:
+        if monitor_target:
+            p = os.path.join(out_dir, "monitor.wav")
+            proc = _spawn_pw_record(monitor_target, p)
+            if proc:
+                tracks.append((proc, p, "monitor"))
+            else:
+                log("pw-record ausente — não foi possível capturar o monitor")
         else:
-            log("pw-record ausente — não foi possível capturar o monitor")
-    else:
-        log("monitor source não descoberto (sink default ausente?)")
+            log("monitor source não descoberto (sink default ausente?)")
 
-    if mic_target:
-        p = os.path.join(out_dir, "mic.wav")
-        proc = _spawn_pw_record(mic_target, p)
-        if proc:
-            tracks.append((proc, p, "mic"))
+        if mic_target:
+            p = os.path.join(out_dir, "mic.wav")
+            proc = _spawn_pw_record(mic_target, p)
+            if proc:
+                tracks.append((proc, p, "mic"))
+            else:
+                log("pw-record ausente — não foi possível capturar o mic")
         else:
-            log("pw-record ausente — não foi possível capturar o mic")
-    else:
-        log("mic source não descoberto (source default ausente?)")
+            log("mic source não descoberto (source default ausente?)")
 
-    if not tracks:
-        raise RuntimeError(
-            "nenhum device de áudio capturável (verifique pw-record e os devices "
-            "default do PipeWire via `wpctl status`)"
-        )
+        if not tracks:
+            raise RuntimeError(
+                "nenhum device de áudio capturável (verifique pw-record e os "
+                "devices default do PipeWire via `wpctl status`)"
+            )
 
-    # Detecta falha imediata de um pw-record (ex.: target inválido) sem abortar a
-    # captura inteira se a OUTRA trilha estiver de pé.
-    time.sleep(0.4)
-    alive = []
-    for proc, path, kind in tracks:
-        if proc.poll() is not None:
-            err = (proc.stderr.read() or b"").decode("utf-8", "replace").strip()
-            log(f"trilha {kind} morreu ao iniciar (rc={proc.returncode}): {err}")
-        else:
-            alive.append((proc, path, kind))
+        # Detecta falha imediata de um pw-record (ex.: target inválido) sem
+        # abortar a captura inteira se a OUTRA trilha estiver de pé. stderr é
+        # DEVNULL agora; o motivo da morte sai do rc + log do pw-record.
+        time.sleep(0.4)
+        alive = []
+        for proc, path, kind in tracks:
+            if proc.poll() is not None:
+                log(f"trilha {kind} morreu ao iniciar (rc={proc.returncode})")
+            else:
+                alive.append((proc, path, kind))
 
-    if not alive:
-        raise RuntimeError(
-            "todas as trilhas de captura falharam ao iniciar (target inválido?)"
-        )
+        if not alive:
+            raise RuntimeError(
+                "todas as trilhas de captura falharam ao iniciar (target inválido?)"
+            )
 
-    log(f"capturando {len(alive)} trilha(s); aguardando stop…")
-    emit({"type": "status", "state": "capturing"})
+        log(f"capturando {len(alive)} trilha(s); aguardando stop…")
+        emit({"type": "status", "state": "capturing"})
 
-    # Bloqueia até stop. _stop é setado por SIGINT/SIGTERM ou stdin fechado.
-    _stop.wait()
-    log("stop sinalizado — encerrando as gravações")
+        # Bloqueia até stop. _stop é setado por SIGINT/SIGTERM ou stdin fechado.
+        _stop.wait()
+        log("stop sinalizado — encerrando as gravações")
 
-    paths = []
-    for proc, path, _kind in alive:
-        _stop_proc(proc)
-        if os.path.exists(path) and os.path.getsize(path) > 44:  # > header WAV
-            paths.append(path)
-    if not paths:
-        raise RuntimeError("captura encerrou sem produzir áudio")
-    return paths
+        paths = []
+        for proc, path, _kind in alive:
+            _stop_proc(proc)
+            if os.path.exists(path) and os.path.getsize(path) > 44:  # > header WAV
+                paths.append(path)
+        if not paths:
+            raise RuntimeError("captura encerrou sem produzir áudio")
+        return paths
+    finally:
+        # Defesa final: nenhum pw-record sobrevive a esta função, mesmo se uma
+        # exceção pular o _stop_proc acima. _stop_proc é no-op em proc já morto.
+        for proc, _path, _kind in tracks:
+            _stop_proc(proc)
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +458,11 @@ def run_audio_file(wav_path):
 
 def run_capture(out_dir):
     started = time.monotonic()
+    # TemporaryDirectory(dir=out_dir) usa mkdtemp, que NÃO cria o parent.
+    # <userData>/meetings precisa existir antes, senão é FileNotFoundError em
+    # toda captura real (o modo --audio-file não passa --out-dir, por isso passava).
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="meeting-cap-", dir=out_dir or None) as tmp:
         try:
             paths = capture_two_tracks(tmp)

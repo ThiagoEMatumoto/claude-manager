@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -99,7 +100,16 @@ async function resolveStart(meetingId: string): Promise<{ command: string; args:
 
   const args = [resolution.script, '--meeting-id', meetingId]
   const outDir = meetingsOutDir()
-  if (outDir) args.push('--out-dir', outDir)
+  if (outDir) {
+    // O sidecar escreve os WAVs temporários aqui, mas não cria o diretório —
+    // garantimos a existência antes de passar --out-dir (recursive: idempotente).
+    try {
+      mkdirSync(outDir, { recursive: true })
+      args.push('--out-dir', outDir)
+    } catch (err) {
+      console.error(`[meeting-sidecar] falha ao criar out-dir ${outDir}:`, err)
+    }
+  }
   return { command: resolution.command, args }
 }
 

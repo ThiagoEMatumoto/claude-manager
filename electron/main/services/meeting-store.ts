@@ -455,6 +455,32 @@ export function addExtraction(input: AddExtractionInput): MeetingExtraction {
   return extraction
 }
 
+// SELECT por id (idempotência da materialização: o handler checa
+// materialized_task_id antes de criar uma 2ª task).
+export function getExtraction(extractionId: string): MeetingExtraction | null {
+  const row = getDb()
+    .prepare('SELECT * FROM meeting_extractions WHERE id = ?')
+    .get(extractionId) as ExtractionRow | undefined
+  return row ? rowToExtraction(row) : null
+}
+
+// Limpa extrações de uma reunião ANTES de re-extrair (re-enriquecer duplicaria os
+// itens e orfanaria as já materializadas). Preserva as que viraram task —
+// materialized_task_id != NULL — pra não quebrar o vínculo task↔extração.
+export function deleteExtractions(meetingId: string): void {
+  getDb()
+    .prepare(
+      'DELETE FROM meeting_extractions WHERE meeting_id = ? AND materialized_task_id IS NULL',
+    )
+    .run(meetingId)
+}
+
+// Roda `fn` numa transação better-sqlite3 (atomicidade do delete + re-inserts da
+// re-extração). Exposto pra que meeting-extraction não precise importar `db`.
+export function runInTransaction<T>(fn: () => T): T {
+  return getDb().transaction(fn)()
+}
+
 export function listExtractions(meetingId: string): MeetingExtraction[] {
   const rows = getDb()
     .prepare('SELECT * FROM meeting_extractions WHERE meeting_id = ? ORDER BY created_at ASC')

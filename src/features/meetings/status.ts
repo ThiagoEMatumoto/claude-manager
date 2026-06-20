@@ -1,4 +1,4 @@
-import type { MeetingStatus } from '../../../shared/types/ipc'
+import type { ExtractionKind, MeetingStatus } from '../../../shared/types/ipc'
 
 // Cor (var CSS) + label pt-BR por status de reunião. Mesmo padrão de
 // tasks/status.ts: reaproveita o design system.
@@ -12,3 +12,20 @@ export const MEETING_STATUS_META: Record<MeetingStatus, { label: string; color: 
   extracted: { label: 'extraída', color: 'var(--color-success)' },
   failed: { label: 'falhou', color: 'var(--color-text-dim)' },
 }
+
+// Label + cor por tipo de item extraído (action item/decisão/feedback…).
+export const EXTRACTION_KIND_META: Record<ExtractionKind, { label: string; color: string }> = {
+  action_item: { label: 'Ação', color: 'var(--color-accent)' },
+  decision: { label: 'Decisão', color: 'var(--color-success)' },
+  feedback: { label: 'Feedback', color: 'var(--color-info)' },
+  risk: { label: 'Risco', color: 'var(--color-danger)' },
+  question: { label: 'Pergunta', color: 'var(--color-warning)' },
+}
+
+export const EXTRACTION_KIND_ORDER: ExtractionKind[] = [
+  'action_item',
+  'decision',
+  'feedback',
+  'risk',
+  'question',
+]

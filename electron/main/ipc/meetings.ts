@@ -1,12 +1,19 @@
 import { ipcMain } from 'electron'
 import * as meetingStore from '../services/meeting-store'
+import * as taskStore from '../services/task-store'
+import * as objectiveStore from '../services/objective-store'
+import * as featureStore from '../services/feature-store'
 import { broadcast } from '../services/notify'
 import { meetingSidecarManager } from '../services/meeting-sidecar'
+import { extractMeeting } from '../services/meeting-extraction'
 import type {
   CreateMeetingInput,
   Meeting,
+  MeetingExtractResult,
   MeetingListFilter,
   MeetingSegment,
+  MaterializeMeetingTaskInput,
+  Task,
   UpdateMeetingInput,
 } from '../../../shared/types/ipc'
 
@@ -60,4 +67,71 @@ export function registerMeetingsIpc(): void {
   ipcMain.handle('meetings:stop-capture', (_e, meetingId: string): void => {
     meetingSidecarManager.stop(meetingId)
   })
+
+  // Extração (coração): transcript + notas → claude -p → notas aumentadas +
+  // itens com quote/grounding. Injeta objetivos/features ativos como referência
+  // pro modelo SUGERIR vínculos (decisão final é humana na ExtractionReview).
+  ipcMain.handle('meetings:extract', async (_e, meetingId: string): Promise<MeetingExtractResult> => {
+    const objectives = objectiveStore.list().map((o) => ({ id: o.id, title: o.title }))
+    const features = featureStore.list().map((f) => ({ id: f.id, title: f.title }))
+    // DI: injeta o store real (este handler já roda em contexto Electron).
+    // meeting-extraction NÃO importa meeting-store — evita o require lazy que o
+    // electron-vite não inlina (Cannot find module './meeting-store' no build).
+    const result = await extractMeeting(meetingId, {
+      store: meetingStore,
+      objectives,
+      features,
+    })
+    const meeting = meetingStore.get(meetingId)
+    if (meeting) broadcast('meeting:updated', meeting)
+    return {
+      summary: result.summary,
+      augmentedNotes: result.augmentedNotes,
+      extractions: result.extractions,
+    }
+  })
+
+  // Materializa uma extração revisada como task real, linkada a objective/
+  // feature, com a quote+timestamp na descrição. Idempotente: grava
+  // materialized_task_id pra re-aprovar não duplicar.
+  ipcMain.handle(
+    'meetings:materialize-task',
+    (_e, input: MaterializeMeetingTaskInput): Task => {
+      const ts = formatTimestamp(input.startMs)
+      const provenance = [
+        input.quote ? `> ${input.quote}` : null,
+        input.speakerLabel || ts ? `— ${[input.speakerLabel, ts].filter(Boolean).join(' @ ')}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+      const description = [input.description?.trim() || null, provenance || null]
+        .filter(Boolean)
+        .join('\n\n')
+
+      const task = taskStore.create({
+        title: input.title.trim(),
+        description: description || null,
+        priority: input.priority ?? null,
+        tags: ['meeting', 'auto'],
+        links: input.link ? [input.link] : [],
+      })
+
+      if (input.extractionId) {
+        meetingStore.markExtractionMaterialized(input.extractionId, task.id)
+      }
+      broadcast('task:updated', { id: task.id })
+      for (const objId of taskStore.affectedObjectiveIds(task.links)) {
+        broadcast('objective:updated', { id: objId })
+      }
+      return task
+    },
+  )
+}
+
+function formatTimestamp(startMs: number | null | undefined): string | null {
+  if (startMs == null || !Number.isFinite(startMs) || startMs < 0) return null
+  const totalSeconds = Math.floor(startMs / 1000)
+  const mm = String(Math.floor(totalSeconds / 60)).padStart(2, '0')
+  const ss = String(totalSeconds % 60).padStart(2, '0')
+  return `${mm}:${ss}`
 }

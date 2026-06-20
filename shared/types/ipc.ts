@@ -734,6 +734,28 @@ export interface MeetingPartialEvent {
   text: string
 }
 
+// Resultado da extração (`meetings:extract`): notas aumentadas + resumo
+// persistidos + os itens já com grounding. A UI mostra pra revisão humana.
+export interface MeetingExtractResult {
+  summary: string | null
+  augmentedNotes: string | null
+  extractions: MeetingExtraction[]
+}
+
+// Materialização de UMA extração revisada como task real. O vínculo (objective/
+// feature) é o conjunto reusado do TaskDialog; quote/speaker/timestamp viram
+// proveniência na descrição. extractionId dá idempotência (markMaterialized).
+export interface MaterializeMeetingTaskInput {
+  extractionId?: string
+  title: string
+  description?: string | null
+  priority?: TaskPriority | null
+  link?: TaskLink | null
+  quote?: string | null
+  speakerLabel?: string | null
+  startMs?: number | null
+}
+
 // ---- Dashboard / visão hierárquica (Fase 4) ----
 
 // Projeção enxuta de tarefa pros nós da árvore do dashboard.
@@ -1441,6 +1463,10 @@ export interface Api {
     // Inicia/encerra a captura do sidecar para a reunião (idle ⇄ capturing).
     startCapture(meetingId: string): Promise<void>
     stopCapture(meetingId: string): Promise<void>
+    // Extração via claude -p (notas aumentadas + itens com grounding) e
+    // materialização de um item revisado como task linkada.
+    extract(meetingId: string): Promise<MeetingExtractResult>
+    materializeTask(input: MaterializeMeetingTaskInput): Promise<Task>
     // Payload varia por mutação (Meeting completa ou marcador {id, deleted}) —
     // o renderer trata como sinal de recarga.
     onUpdated(handler: (payload: unknown) => void): () => void

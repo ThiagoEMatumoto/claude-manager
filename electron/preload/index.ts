@@ -45,6 +45,7 @@ import type {
   MeetingPartialEvent,
   CreateMeetingInput,
   UpdateMeetingInput,
+  MaterializeMeetingTaskInput,
   SyncConfigureInput,
   SyncResolveConflictInput,
   SyncSetProjectsRootInput,
@@ -252,6 +253,9 @@ const api: Api = {
     listSegments: (meetingId: string) => invoke('meetings:list-segments', meetingId),
     startCapture: (meetingId: string) => invoke('meetings:start-capture', meetingId),
     stopCapture: (meetingId: string) => invoke('meetings:stop-capture', meetingId),
+    extract: (meetingId: string) => invoke('meetings:extract', meetingId),
+    materializeTask: (input: MaterializeMeetingTaskInput) =>
+      invoke('meetings:materialize-task', input),
     onUpdated: (handler) => subscribe<unknown>('meeting:updated', handler),
     onTranscriptSegment: (handler) =>
       subscribe<MeetingSegment>('meeting:transcript:segment', handler),

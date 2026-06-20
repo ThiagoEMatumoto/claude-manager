@@ -2,8 +2,12 @@ import { create } from 'zustand'
 import { meetingsApi } from '@/lib/ipc'
 import type {
   CreateMeetingInput,
+  MaterializeMeetingTaskInput,
   Meeting,
+  MeetingExtractResult,
+  MeetingExtraction,
   MeetingListFilter,
+  Task,
   UpdateMeetingInput,
 } from '../../shared/types/ipc'
 
@@ -18,6 +22,11 @@ interface MeetingsState {
   filter: MeetingListFilter
   loading: boolean
   error: string | null
+  // Resultado da última extração por reunião (efêmero — alimenta a
+  // ExtractionReview). null = ainda não extraída nesta sessão.
+  extraction: MeetingExtractResult | null
+  extractingId: string | null
+  extractError: string | null
 
   load: () => Promise<void>
   refresh: () => Promise<void>
@@ -30,6 +39,10 @@ interface MeetingsState {
   startCapture: (meetingId: string) => Promise<void>
   stopCapture: (meetingId: string) => Promise<void>
 
+  extract: (meetingId: string) => Promise<MeetingExtractResult | null>
+  clearExtraction: () => void
+  materializeTask: (input: MaterializeMeetingTaskInput) => Promise<Task>
+
   startUpdatedWatch: () => void
   stopUpdatedWatch: () => void
 }
@@ -39,6 +52,9 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   filter: {},
   loading: false,
   error: null,
+  extraction: null,
+  extractingId: null,
+  extractError: null,
 
   load: async () => {
     set({ loading: true, error: null })
@@ -82,6 +98,42 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
 
   stopCapture: async (meetingId) => {
     await meetingsApi.stopCapture(meetingId)
+  },
+
+  extract: async (meetingId) => {
+    set({ extractingId: meetingId, extractError: null })
+    try {
+      const result = await meetingsApi.extract(meetingId)
+      set({ extraction: result, extractingId: null })
+      await get().refresh()
+      return result
+    } catch (err) {
+      set({
+        extractingId: null,
+        extractError: err instanceof Error ? err.message : String(err),
+      })
+      return null
+    }
+  },
+
+  clearExtraction: () => set({ extraction: null, extractError: null }),
+
+  materializeTask: async (input) => {
+    const task = await meetingsApi.materializeTask(input)
+    // Atualiza o item local pra refletir que virou task (some do "pendente").
+    if (input.extractionId) {
+      set((state) => ({
+        extraction: state.extraction
+          ? {
+              ...state.extraction,
+              extractions: state.extraction.extractions.map((e): MeetingExtraction =>
+                e.id === input.extractionId ? { ...e, materializedTaskId: task.id } : e,
+              ),
+            }
+          : null,
+      }))
+    }
+    return task
   },
 
   startUpdatedWatch: () => {

@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Mic, Square } from 'lucide-react'
+import { Plus, Mic, Square, Sparkles } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMeetingsStore } from '@/store/meetingsStore'
-import type { Meeting } from '../../../shared/types/ipc'
+import { objectivesApi, featuresApi } from '@/lib/ipc'
+import type { Feature, Meeting, ObjectiveWithProgress } from '../../../shared/types/ipc'
 import { MeetingList } from './MeetingList'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
+import { ExtractionReview } from './ExtractionReview'
 import { useMeetings } from './useMeetings'
+
+// status >= ready significa que há transcript fechado pronto pra enriquecer.
+const ENRICHABLE: ReadonlySet<Meeting['status']> = new Set(['ready', 'extracted'])
 
 const NOTES_SAVE_DEBOUNCE_MS = 600
 
@@ -18,6 +23,15 @@ export function MeetingsArea() {
   const deleteMeeting = useMeetingsStore((s) => s.deleteMeeting)
   const startCapture = useMeetingsStore((s) => s.startCapture)
   const stopCapture = useMeetingsStore((s) => s.stopCapture)
+  const extract = useMeetingsStore((s) => s.extract)
+  const extraction = useMeetingsStore((s) => s.extraction)
+  const extractingId = useMeetingsStore((s) => s.extractingId)
+  const extractError = useMeetingsStore((s) => s.extractError)
+  const clearExtraction = useMeetingsStore((s) => s.clearExtraction)
+  const materializeTask = useMeetingsStore((s) => s.materializeTask)
+
+  const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
+  const [features, setFeatures] = useState<Feature[]>([])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
@@ -30,6 +44,28 @@ export function MeetingsArea() {
     () => meetings.find((m) => m.id === selectedId) ?? null,
     [meetings, selectedId],
   )
+
+  // Objetivos/features pros selects de vínculo da ExtractionReview (mesmo
+  // fan-out leve de TasksArea — app pessoal).
+  useEffect(() => {
+    let alive = true
+    void Promise.all([objectivesApi.list(), featuresApi.list()]).then(([objs, feats]) => {
+      if (!alive) return
+      setObjectives(objs)
+      setFeatures(feats)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Troca de reunião limpa a revisão da anterior (a extração é por reunião).
+  useEffect(() => {
+    clearExtraction()
+  }, [selectedId, clearExtraction])
+
+  const reviewForSelected =
+    selected && extraction && extractingId !== selected.id ? extraction : null
 
   // Seleção inicial/auto: se nada selecionado, pega a primeira; se a selecionada
   // sumiu (delete), limpa.
@@ -79,6 +115,10 @@ export function MeetingsArea() {
     await deleteMeeting(meeting.id)
   }
 
+  async function handleEnrich(meeting: Meeting) {
+    await extract(meeting.id)
+  }
+
   return (
     <>
       <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -110,14 +150,38 @@ export function MeetingsArea() {
         </div>
       </aside>
 
-      <main className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
         {selected ? (
           <>
-            <section className="flex min-w-0 flex-1 flex-col border-r border-[var(--color-border)]">
-              <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">
-                <h2 className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">
-                  {selected.title}
-                </h2>
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">
+              <h2 className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">
+                {selected.title}
+              </h2>
+              <div className="flex shrink-0 items-center gap-2">
+                {reviewForSelected ? (
+                  <button
+                    type="button"
+                    onClick={clearExtraction}
+                    className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+                  >
+                    Voltar às notas
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleEnrich(selected)}
+                    disabled={!ENRICHABLE.has(selected.status) || extractingId === selected.id}
+                    title={
+                      ENRICHABLE.has(selected.status)
+                        ? 'Enriquecer notas e extrair itens'
+                        : 'Disponível quando a reunião estiver pronta (transcrita)'
+                    }
+                    className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Icon as={Sparkles} size={12} />
+                    {extractingId === selected.id ? 'Enriquecendo…' : 'Enriquecer'}
+                  </button>
+                )}
                 {selected.status === 'capturing' ? (
                   <button
                     type="button"
@@ -139,21 +203,44 @@ export function MeetingsArea() {
                   </button>
                 )}
               </div>
-              <textarea
-                value={notes}
-                onChange={(e) => onNotesChange(e.target.value)}
-                placeholder="Suas notas da reunião…"
-                className="flex-1 resize-none bg-transparent px-5 py-4 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)]"
-              />
-            </section>
-            <section className="flex w-96 shrink-0 flex-col">
-              <div className="border-b border-[var(--color-border)] px-5 py-3">
-                <h3 className="text-sm font-medium text-[var(--color-text)]">Transcript</h3>
+            </div>
+
+            {extractError && extractingId !== selected.id && !reviewForSelected && (
+              <div className="border-b border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-5 py-2 text-xs text-[var(--color-danger)]">
+                Falha ao enriquecer: {extractError}
               </div>
+            )}
+
+            {reviewForSelected ? (
               <div className="min-h-0 flex-1">
-                <LiveTranscriptPanel meetingId={selected.id} />
+                <ExtractionReview
+                  meetingId={selected.id}
+                  result={reviewForSelected}
+                  objectives={objectives}
+                  features={features}
+                  onMaterialize={materializeTask}
+                />
               </div>
-            </section>
+            ) : (
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                <section className="flex min-w-0 flex-1 flex-col border-r border-[var(--color-border)]">
+                  <textarea
+                    value={notes}
+                    onChange={(e) => onNotesChange(e.target.value)}
+                    placeholder="Suas notas da reunião…"
+                    className="flex-1 resize-none bg-transparent px-5 py-4 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)]"
+                  />
+                </section>
+                <section className="flex w-96 shrink-0 flex-col">
+                  <div className="border-b border-[var(--color-border)] px-5 py-3">
+                    <h3 className="text-sm font-medium text-[var(--color-text)]">Transcript</h3>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <LiveTranscriptPanel meetingId={selected.id} />
+                  </div>
+                </section>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-dim)]">

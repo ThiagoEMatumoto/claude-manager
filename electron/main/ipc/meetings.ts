@@ -11,6 +11,7 @@ import type {
   Meeting,
   MeetingExtractResult,
   MeetingListFilter,
+  MeetingSearchMatch,
   MeetingSegment,
   MaterializeMeetingTaskInput,
   Task,
@@ -48,6 +49,12 @@ export function registerMeetingsIpc(): void {
 
   ipcMain.handle('meetings:list-segments', (_e, meetingId: string): MeetingSegment[] => {
     return meetingStore.listSegments(meetingId)
+  })
+
+  // Busca FTS5 entre reuniões (transcript + notas aumentadas + extrações).
+  // Devolve reuniões com snippet/origem do match, ordenadas por relevância.
+  ipcMain.handle('meetings:search', (_e, query: string): MeetingSearchMatch[] => {
+    return meetingStore.searchMeetings(query)
   })
 
   // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +

@@ -195,6 +195,108 @@ describe('meeting-store', () => {
     })
   })
 
+  describe('searchMeetings (FTS5)', () => {
+    it('casa termo no transcript e devolve a reunião com snippet marcado', () => {
+      const a = store.create({ title: 'Planning' })
+      store.appendSegment({ meetingId: a.id, text: 'precisamos migrar o banco de dados' })
+      const b = store.create({ title: 'Retro' })
+      store.appendSegment({ meetingId: b.id, text: 'falamos sobre deploy' })
+
+      const results = store.searchMeetings('migrar')
+      expect(results.map((r) => r.meeting.id)).toEqual([a.id])
+      expect(results[0].source).toBe('segment')
+      expect(results[0].snippet).toContain('<mark>migrar</mark>')
+    })
+
+    it('casa nas notas aumentadas e nas extrações', () => {
+      const m = store.create({ title: 'X' })
+      store.update({ id: m.id, augmentedNotes: 'resumo: contratamos um fornecedor novo' })
+      const e = store.create({ title: 'Y' })
+      store.addExtraction({ meetingId: e.id, type: 'action_item', text: 'enviar a proposta comercial' })
+
+      expect(store.searchMeetings('fornecedor').map((r) => r.meeting.id)).toEqual([m.id])
+      expect(store.searchMeetings('fornecedor')[0].source).toBe('notes')
+
+      const prop = store.searchMeetings('proposta')
+      expect(prop.map((r) => r.meeting.id)).toEqual([e.id])
+      expect(prop[0].source).toBe('extraction')
+    })
+
+    it('prefix-match: termo parcial casa (busca incremental)', () => {
+      const m = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: m.id, text: 'a refatoração ficou pronta' })
+      expect(store.searchMeetings('refator').map((r) => r.meeting.id)).toEqual([m.id])
+    })
+
+    it('é case- e accent-insensitive (remove_diacritics)', () => {
+      const m = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: m.id, text: 'a Migração foi concluída' })
+      expect(store.searchMeetings('migracao').map((r) => r.meeting.id)).toEqual([m.id])
+      expect(store.searchMeetings('MIGRAÇÃO').map((r) => r.meeting.id)).toEqual([m.id])
+    })
+
+    it('agrupa por reunião (uma linha por meeting, mesmo com N matches)', () => {
+      const m = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: m.id, text: 'bug no login' })
+      store.appendSegment({ meetingId: m.id, text: 'outro bug no checkout' })
+      const results = store.searchMeetings('bug')
+      expect(results).toHaveLength(1)
+      expect(results[0].meeting.id).toBe(m.id)
+    })
+
+    it('AND implícito entre tokens', () => {
+      const a = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: a.id, text: 'migrar o banco para postgres' })
+      const b = store.create({ title: 'Y' })
+      store.appendSegment({ meetingId: b.id, text: 'migrar o frontend' })
+      expect(store.searchMeetings('migrar banco').map((r) => r.meeting.id)).toEqual([a.id])
+    })
+
+    it('query vazia ou só símbolos retorna []', () => {
+      const m = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: m.id, text: 'algo' })
+      expect(store.searchMeetings('')).toEqual([])
+      expect(store.searchMeetings('   ')).toEqual([])
+      expect(store.searchMeetings('!!! @#$')).toEqual([])
+    })
+
+    it('input com aspas/operadores FTS não quebra a query (sanitização)', () => {
+      const m = store.create({ title: 'X' })
+      store.appendSegment({ meetingId: m.id, text: 'discussão sobre o roadmap aberto' })
+      // Operadores do FTS (aspas, *, parênteses) viram tokens literais — não
+      // lançam SqliteError. Os tokens 'roadmap' e 'aberto' existem → casa.
+      expect(() => store.searchMeetings('roadmap" (aberto)*')).not.toThrow()
+      expect(store.searchMeetings('roadmap" (aberto)*').map((r) => r.meeting.id)).toEqual([m.id])
+      // E um operador isolado não derruba nada nem casa indevidamente.
+      expect(() => store.searchMeetings('AND OR NOT')).not.toThrow()
+    })
+
+    it('triggers mantêm o índice em sync: delete de segment some da busca', () => {
+      const m = store.create({ title: 'X' })
+      const seg = store.appendSegment({ meetingId: m.id, text: 'palavra unica xyzzy' })
+      expect(store.searchMeetings('xyzzy')).toHaveLength(1)
+      testDb.prepare('DELETE FROM meeting_segments WHERE id = ?').run(seg.id)
+      expect(store.searchMeetings('xyzzy')).toEqual([])
+    })
+
+    it('delete da reunião remove suas notas do índice (trigger meetings_notes_ad)', () => {
+      const m = store.create({ title: 'X' })
+      store.update({ id: m.id, augmentedNotes: 'token exclusivo plugh' })
+      expect(store.searchMeetings('plugh')).toHaveLength(1)
+      store.remove(m.id)
+      expect(store.searchMeetings('plugh')).toEqual([])
+    })
+
+    it('atualizar augmented_notes reindexa (some o texto antigo, entra o novo)', () => {
+      const m = store.create({ title: 'X' })
+      store.update({ id: m.id, augmentedNotes: 'versao antiga waldo' })
+      expect(store.searchMeetings('waldo')).toHaveLength(1)
+      store.update({ id: m.id, augmentedNotes: 'versao nova fred' })
+      expect(store.searchMeetings('waldo')).toEqual([])
+      expect(store.searchMeetings('fred')).toHaveLength(1)
+    })
+  })
+
   // Espelha o UPDATE idempotente do boot reconcile (index.ts whenReady): num
   // processo fresco nenhum sidecar está vivo, então reuniões em estados "vivos"
   // são órfãs → failed. Testa a SEMÂNTICA da query (o index.ts em si puxa electron

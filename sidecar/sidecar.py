@@ -24,18 +24,25 @@ o device de áudio.
 Modos:
   --audio-file <wav>  MODO TESTE/OFFLINE: pula a captura e transcreve um WAV
                       existente, emitindo todos os segments + done. OBRIGATÓRIO
-                      para validação sem hardware/áudio ao vivo.
-  (sem --audio-file)  Captura 2 trilhas (monitor + mic) com pw-record, mixa em
-                      numpy, e transcreve em batch ao fim da captura.
+                      para validação sem hardware/áudio ao vivo. Caminho BATCH
+                      puro (sem janelas ao vivo).
+  (sem --audio-file)  Captura 2 trilhas (monitor + mic) com pw-record em paralelo
+                      e transcreve AO VIVO por janelas: a cada ~WINDOW_SEC lê a
+                      janela NOVA de áudio já gravado, transcreve e emite os
+                      `segment` provisórios (is_partial via NDJSON `partial`)
+                      com start_ms ABSOLUTO. No stop, faz uma passada FINAL sobre
+                      o mix completo e reconcilia (emite os `segment` finais).
 
-Decisão de design (ao-vivo vs batch): a captura grava as 2 trilhas em arquivos
-temporários durante a reunião; a transcrição roda em BATCH no fechamento (sobre o
-mix completo). faster-whisper já segmenta por VAD e cada `Segment` vira um evento
-`segment` — então mesmo no modo batch a UI recebe todos os segments granulares.
-O streaming ao-vivo por janelas deslizantes (emitir segments DURANTE a captura)
-fica como follow-up: o risco de gerenciar buffers/janelas em paralelo com a
-captura (e o custo de carregar o WhisperModel co-residente com a gravação) não
-compensa nesta fatia. `--audio-file` exercita exatamente o mesmo caminho de STT.
+Decisão de design (ao-vivo por janelas): a captura grava as 2 trilhas em arquivos
+temporários numa thread dedicada; a thread principal roda um loop de transcrição
+que lê o áudio JÁ gravado a partir de um offset (samples já processados), mixa a
+janela nova e a transcreve com faster-whisper, emitindo segments provisórios com
+timestamp absoluto. O modelo é carregado UMA vez e reusado por todas as janelas
++ a passada final. CUIDADO crítico: `_stop` encerra a CAPTURA, não a transcrição
+— o loop NÃO faz `if _stop.is_set(): break` (isso zerava os segments). Após o
+stop, drena o resto e roda a passada FINAL sobre o mix completo, substituindo os
+provisórios pelos finais (a UI reconcilia por idx). `--audio-file` continua sendo
+batch puro e exercita o mesmo caminho de STT (load do modelo + transcribe).
 """
 
 import argparse
@@ -51,6 +58,13 @@ import time
 
 # Taxa de amostragem alvo do STT. faster-whisper espera 16kHz mono.
 TARGET_SR = 16000
+
+# Cadência do transcript ao vivo: a cada WINDOW_SEC de áudio NOVO acumulado, a
+# janela é transcrita e emitida como provisória. 7s equilibra latência percebida
+# (segments aparecendo) vs. ter contexto suficiente p/ o VAD/whisper não picotar
+# palavras. MIN_WINDOW_SEC evita transcrever janelas minúsculas (ruído/custo).
+WINDOW_SEC = 7.0
+MIN_WINDOW_SEC = 2.5
 
 
 # ---------------------------------------------------------------------------
@@ -220,82 +234,72 @@ def _stop_proc(proc, grace=3.0):
         proc.wait(timeout=grace)
 
 
-def capture_two_tracks(out_dir):
-    """Grava monitor + mic em 2 WAVs temporários até `_stop` ser sinalizado.
-    Retorna a lista de caminhos efetivamente gravados (pode ser 1 se só um
-    device existir). Levanta RuntimeError se NENHUM device gravar."""
+def start_capture_tracks(out_dir):
+    """Faz spawn das gravações (monitor + mic) e retorna (tracks_vivos, paths) SEM
+    bloquear até o stop — o caller roda a transcrição ao vivo em paralelo e só
+    depois para os procs. `tracks_vivos` é lista de (proc, path, kind); `paths` os
+    caminhos das trilhas que efetivamente subiram. Levanta RuntimeError se NENHUM
+    device subir (o caller é dono de parar os procs no erro/fim)."""
     monitor_target, mic_target = _resolve_capture_targets()
     log(f"targets de captura: monitor={monitor_target!r} mic={mic_target!r}")
 
     os.makedirs(out_dir, exist_ok=True)
     tracks = []  # (proc, path, kind)
 
-    # try/finally: garante que TODO pw-record spawnado é parado mesmo em exceção/
-    # KeyboardInterrupt — caminhos que o PR_SET_PDEATHSIG não cobre (o python
-    # ainda está vivo, então o kernel não disparou o death-signal nos filhos).
-    try:
-        if monitor_target:
-            p = os.path.join(out_dir, "monitor.wav")
-            proc = _spawn_pw_record(monitor_target, p)
-            if proc:
-                tracks.append((proc, p, "monitor"))
-            else:
-                log("pw-record ausente — não foi possível capturar o monitor")
+    if monitor_target:
+        p = os.path.join(out_dir, "monitor.wav")
+        proc = _spawn_pw_record(monitor_target, p)
+        if proc:
+            tracks.append((proc, p, "monitor"))
         else:
-            log("monitor source não descoberto (sink default ausente?)")
+            log("pw-record ausente — não foi possível capturar o monitor")
+    else:
+        log("monitor source não descoberto (sink default ausente?)")
 
-        if mic_target:
-            p = os.path.join(out_dir, "mic.wav")
-            proc = _spawn_pw_record(mic_target, p)
-            if proc:
-                tracks.append((proc, p, "mic"))
-            else:
-                log("pw-record ausente — não foi possível capturar o mic")
+    if mic_target:
+        p = os.path.join(out_dir, "mic.wav")
+        proc = _spawn_pw_record(mic_target, p)
+        if proc:
+            tracks.append((proc, p, "mic"))
         else:
-            log("mic source não descoberto (source default ausente?)")
+            log("pw-record ausente — não foi possível capturar o mic")
+    else:
+        log("mic source não descoberto (source default ausente?)")
 
-        if not tracks:
-            raise RuntimeError(
-                "nenhum device de áudio capturável (verifique pw-record e os "
-                "devices default do PipeWire via `wpctl status`)"
-            )
+    if not tracks:
+        raise RuntimeError(
+            "nenhum device de áudio capturável (verifique pw-record e os "
+            "devices default do PipeWire via `wpctl status`)"
+        )
 
-        # Detecta falha imediata de um pw-record (ex.: target inválido) sem
-        # abortar a captura inteira se a OUTRA trilha estiver de pé. stderr é
-        # DEVNULL agora; o motivo da morte sai do rc + log do pw-record.
-        time.sleep(0.4)
-        alive = []
-        for proc, path, kind in tracks:
-            if proc.poll() is not None:
-                log(f"trilha {kind} morreu ao iniciar (rc={proc.returncode})")
-            else:
-                alive.append((proc, path, kind))
+    # Detecta falha imediata de um pw-record (ex.: target inválido) sem abortar a
+    # captura inteira se a OUTRA trilha estiver de pé. stderr é DEVNULL; o motivo
+    # da morte sai do rc + log do pw-record.
+    time.sleep(0.4)
+    alive = []
+    for proc, path, kind in tracks:
+        if proc.poll() is not None:
+            log(f"trilha {kind} morreu ao iniciar (rc={proc.returncode})")
+        else:
+            alive.append((proc, path, kind))
 
-        if not alive:
-            raise RuntimeError(
-                "todas as trilhas de captura falharam ao iniciar (target inválido?)"
-            )
-
-        log(f"capturando {len(alive)} trilha(s); aguardando stop…")
-        emit({"type": "status", "state": "capturing"})
-
-        # Bloqueia até stop. _stop é setado por SIGINT/SIGTERM ou stdin fechado.
-        _stop.wait()
-        log("stop sinalizado — encerrando as gravações")
-
-        paths = []
-        for proc, path, _kind in alive:
+    if not alive:
+        for proc, _p, _k in tracks:
             _stop_proc(proc)
-            if os.path.exists(path) and os.path.getsize(path) > 44:  # > header WAV
-                paths.append(path)
-        if not paths:
-            raise RuntimeError("captura encerrou sem produzir áudio")
-        return paths
-    finally:
-        # Defesa final: nenhum pw-record sobrevive a esta função, mesmo se uma
-        # exceção pular o _stop_proc acima. _stop_proc é no-op em proc já morto.
-        for proc, _path, _kind in tracks:
-            _stop_proc(proc)
+        raise RuntimeError(
+            "todas as trilhas de captura falharam ao iniciar (target inválido?)"
+        )
+
+    log(f"capturando {len(alive)} trilha(s) ao vivo")
+    emit({"type": "status", "state": "capturing"})
+    return alive, [path for _proc, path, _kind in alive]
+
+
+def stop_capture_tracks(tracks):
+    """Para todos os pw-record (SIGINT → timeout → SIGKILL). No-op em proc já
+    morto. Defesa: o caller chama no finally pra nenhum pw-record sobreviver."""
+    for proc, _path, _kind in tracks:
+        _stop_proc(proc)
 
 
 # ---------------------------------------------------------------------------
@@ -321,30 +325,53 @@ def _read_mono_16k(path):
     return mono
 
 
-def mix_tracks_to_wav(paths, out_path):
-    """Lê N trilhas, alinha pelo comprimento (zero-pad), soma e normaliza pra
-    evitar clipping. Escreve um WAV 16kHz mono. Retorna out_path."""
+def _mix_arrays(tracks):
+    """Soma N arrays mono (zero-pad ao mais longo) e normaliza p/ evitar clipping.
+    Retorna float32 mono (vazio se não houver trilha)."""
     import numpy as np
-    import soundfile as sf
 
-    tracks = [_read_mono_16k(p) for p in paths]
     tracks = [t for t in tracks if t.size > 0]
     if not tracks:
-        raise RuntimeError("trilhas vazias após decodificação")
-
+        return np.zeros(0, dtype=np.float32)
     length = max(t.size for t in tracks)
     acc = np.zeros(length, dtype=np.float32)
     for t in tracks:
         if t.size < length:
             t = np.pad(t, (0, length - t.size))
         acc += t
-
     peak = float(np.max(np.abs(acc))) if acc.size else 0.0
     if peak > 1.0:
-        acc = acc / peak  # normaliza só se estourou
+        acc = acc / peak
+    return acc
+
+
+def _read_mix_16k(paths):
+    """Lê e mixa as trilhas atuais (best-effort: trilha ainda sendo gravada pode
+    falhar a leitura num instante; ignoramos e seguimos com as legíveis). Retorna
+    float32 mono 16kHz. Usado pelas janelas ao vivo, que leem WAVs em escrita."""
+    import numpy as np
+
+    arrays = []
+    for p in paths:
+        try:
+            arrays.append(_read_mono_16k(p))
+        except Exception as e:  # noqa: BLE001
+            log(f"leitura parcial de {p} falhou (em escrita?): {e}")
+    return _mix_arrays(arrays) if arrays else np.zeros(0, dtype=np.float32)
+
+
+def mix_tracks_to_wav(paths, out_path):
+    """Lê N trilhas, alinha pelo comprimento (zero-pad), soma e normaliza pra
+    evitar clipping. Escreve um WAV 16kHz mono. Retorna out_path."""
+    import soundfile as sf
+
+    tracks = [_read_mono_16k(p) for p in paths]
+    acc = _mix_arrays(tracks)
+    if acc.size == 0:
+        raise RuntimeError("trilhas vazias após decodificação")
 
     sf.write(out_path, acc, TARGET_SR, subtype="PCM_16")
-    log(f"mix escrito: {out_path} ({length / TARGET_SR:.1f}s, {len(tracks)} trilhas)")
+    log(f"mix escrito: {out_path} ({acc.size / TARGET_SR:.1f}s)")
     return out_path
 
 
@@ -379,12 +406,11 @@ def _pick_device():
     return "cpu", "int8"
 
 
-def transcribe(wav_path):
-    """Transcreve `wav_path` com faster-whisper large-v3 (pt, VAD). Emite um
-    evento `segment` por Segment retornado e devolve (n_segments, duration_ms).
-
-    Robustez Blackwell: se a inicialização do modelo na GPU explodir (ex.: kernel
-    incompatível em runtime, não pego pelo cuda.is_available), reinicia na CPU."""
+def load_model():
+    """Carrega o WhisperModel large-v3 (pt) uma única vez. GPU → fallback CPU.
+    Robustez Blackwell: se a inicialização na GPU explodir (kernel incompatível em
+    runtime, não pego por cuda.is_available), reinicia na CPU. Retorna o modelo;
+    levanta se até a CPU falhar."""
     from faster_whisper import WhisperModel
 
     device, compute_type = _pick_device()
@@ -394,48 +420,65 @@ def transcribe(wav_path):
         return WhisperModel("large-v3", device=dev, compute_type=ct)
 
     try:
-        model = _load(device, compute_type)
+        return _load(device, compute_type)
     except Exception as e:  # noqa: BLE001
         if device != "cpu":
             log(f"falha ao carregar na GPU ({e}) — fallback CPU")
-            device, compute_type = "cpu", "int8"
-            model = _load(device, compute_type)
-        else:
-            raise
+            return _load("cpu", "int8")
+        raise
 
-    emit({"type": "status", "state": "transcribing"})
 
+def _confidence(avg_logprob):
+    if avg_logprob is None:
+        return None
+    import math
+
+    # avg_logprob (log-prob) → ~[0,1] só pra UI; não é probabilidade real.
+    return round(float(math.exp(avg_logprob)), 4)
+
+
+def _transcribe_segments(model, audio, offset_ms=0, emit_type="segment", base_idx=0):
+    """Roda o STT sobre `audio` (path WAV OU np.ndarray float32 16kHz mono) e emite
+    um evento por Segment. `offset_ms` desloca os timestamps p/ o eixo absoluto da
+    reunião (necessário nas janelas ao vivo, que recebem só um pedaço). `emit_type`
+    é 'segment' (final, persiste) ou 'partial' (provisório, efêmero). `base_idx`
+    numera os eventos a partir desse valor. Retorna (n_emitidos, duracao_ms_local).
+
+    NÃO observa `_stop`: a transcrição é independente da captura — parar aqui no
+    meio zeraria o transcript (bug histórico)."""
     segments, info = model.transcribe(
-        wav_path,
+        audio,
         language="pt",
         vad_filter=True,
         condition_on_previous_text=False,
         beam_size=5,
     )
-
     duration_ms = int((getattr(info, "duration", 0.0) or 0.0) * 1000)
     n = 0
     for seg in segments:
-        confidence = None
-        if seg.avg_logprob is not None:
-            # avg_logprob (log-prob) → ~[0,1] só pra UI; não é probabilidade real.
-            import math
-
-            confidence = round(float(math.exp(seg.avg_logprob)), 4)
-        emit(
-            {
-                "type": "segment",
-                "idx": n,
-                "start_ms": int(seg.start * 1000),
-                "end_ms": int(seg.end * 1000),
-                "speaker": None,  # diarização é outra task
-                "text": seg.text.strip(),
-                "confidence": confidence,
-            }
-        )
+        event = {
+            "type": emit_type,
+            "idx": base_idx + n,
+            "start_ms": int(seg.start * 1000) + offset_ms,
+            "end_ms": int(seg.end * 1000) + offset_ms,
+            "speaker": None,  # diarização é outra task
+            "text": seg.text.strip(),
+        }
+        # `partial` (efêmero) não carrega confidence no contrato; `segment` sim.
+        if emit_type == "segment":
+            event["confidence"] = _confidence(seg.avg_logprob)
+        emit(event)
         n += 1
+    return n, duration_ms
 
-    log(f"transcrição concluída: {n} segments, {duration_ms}ms (device={device})")
+
+def transcribe(wav_path):
+    """BATCH puro (modo --audio-file): carrega o modelo, emite status e transcreve
+    o WAV inteiro como segments finais. Retorna (n_segments, duration_ms)."""
+    model = load_model()
+    emit({"type": "status", "state": "transcribing"})
+    n, duration_ms = _transcribe_segments(model, wav_path)
+    log(f"transcrição (batch) concluída: {n} segments, {duration_ms}ms")
     return n, duration_ms
 
 
@@ -456,6 +499,58 @@ def run_audio_file(wav_path):
     return 0
 
 
+def _live_window_loop(model, paths):
+    """Loop de transcrição AO VIVO por janelas: enquanto a captura roda (ou ainda
+    há áudio novo após o stop), a cada WINDOW_SEC de áudio NOVO lê a janela a
+    partir de `offset_samples` (o que já foi transcrito), transcreve e emite
+    `partial`s com start_ms ABSOLUTO. Mantém o offset em SAMPLES p/ alinhar o eixo.
+
+    Crítico: NÃO faz `if _stop.is_set(): break`. O `_stop` para a CAPTURA; aqui
+    apenas deixamos de esperar novas janelas QUANDO o stop chegou E não há mais
+    áudio novo pra processar — então drenamos o resto antes de sair."""
+    offset_samples = 0
+    while True:
+        stopped = _stop.is_set()
+        # Espera acumular uma janela cheia enquanto captura; após o stop, drena
+        # qualquer resto (mesmo < WINDOW_SEC) e então encerra o loop.
+        if not stopped:
+            _stop.wait(timeout=WINDOW_SEC)
+
+        mix = _read_mix_16k(paths)
+        new = mix[offset_samples:]
+        new_sec = new.size / float(TARGET_SR)
+
+        offset_ms = int(offset_samples / TARGET_SR * 1000)
+        # base_idx ESTÁVEL e único por janela: deriva do offset (em centésimos de
+        # segundo), então os `partial`s de janelas distintas nunca colidem de idx
+        # e a UI os mantém lado a lado em vez de sobrescrever.
+        base_idx = int(offset_samples / TARGET_SR * 100)
+
+        if stopped:
+            # Pós-stop: processa o resto (se relevante) e sai do loop.
+            if new.size > 0 and new_sec >= 0.3:
+                _transcribe_segments(
+                    model,
+                    new,
+                    offset_ms=offset_ms,
+                    emit_type="partial",
+                    base_idx=base_idx,
+                )
+            return
+        if new_sec < MIN_WINDOW_SEC:
+            continue  # ainda não há janela suficiente — aguarda mais
+
+        try:
+            _transcribe_segments(
+                model, new, offset_ms=offset_ms, emit_type="partial", base_idx=base_idx
+            )
+        except Exception as e:  # noqa: BLE001
+            # Falha numa janela ao vivo não derruba a captura — a passada final
+            # reconcilia tudo. Loga e segue.
+            log(f"janela ao vivo falhou ({e}) — segue; a final reconcilia")
+        offset_samples = mix.size
+
+
 def run_capture(out_dir):
     started = time.monotonic()
     # TemporaryDirectory(dir=out_dir) usa mkdtemp, que NÃO cria o parent.
@@ -464,20 +559,49 @@ def run_capture(out_dir):
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="meeting-cap-", dir=out_dir or None) as tmp:
+        # Modelo carregado ANTES de iniciar as trilhas (e reusado por todas as
+        # janelas + a final). Se falhar, aborta sem segurar o device.
         try:
-            paths = capture_two_tracks(tmp)
+            model = load_model()
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "error", "message": f"falha ao carregar STT: {e}"})
+            return 1
+
+        try:
+            tracks, paths = start_capture_tracks(tmp)
         except RuntimeError as e:
             emit({"type": "error", "message": str(e)})
             return 1
 
+        # Loop ao vivo roda na thread principal; a captura (pw-record) é process
+        # externo. O loop só retorna após o _stop ter sido sinalizado e o resto
+        # drenado. try/finally garante que os pw-record morrem em qualquer saída.
+        try:
+            _live_window_loop(model, paths)
+        finally:
+            log("stop sinalizado — encerrando as gravações")
+            stop_capture_tracks(tracks)
+
+        # Coleta as trilhas que produziram áudio (> header WAV) p/ a passada final.
+        final_paths = [
+            p for p in paths if os.path.exists(p) and os.path.getsize(p) > 44
+        ]
+        if not final_paths:
+            emit({"type": "error", "message": "captura encerrou sem produzir áudio"})
+            return 1
+
         mix_path = os.path.join(tmp, "mix.wav")
         try:
-            mix_tracks_to_wav(paths, mix_path)
+            mix_tracks_to_wav(final_paths, mix_path)
         except Exception as e:  # noqa: BLE001
             emit({"type": "error", "message": f"falha no mix de áudio: {e}"})
             return 1
 
-        n, duration_ms = transcribe(mix_path)
+        # Passada FINAL sobre o mix completo: emite os `segment` finais (que
+        # persistem e reconciliam os `partial`s provisórios pelo idx).
+        emit({"type": "status", "state": "transcribing"})
+        n, duration_ms = _transcribe_segments(model, mix_path)
+        log(f"transcrição final concluída: {n} segments, {duration_ms}ms")
 
     if duration_ms <= 0:
         duration_ms = int((time.monotonic() - started) * 1000)

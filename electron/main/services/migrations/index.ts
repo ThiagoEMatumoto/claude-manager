@@ -22,6 +22,7 @@ import * as handoffModeProgress from './020_handoff_mode_progress'
 import * as handoffPendingQuestion from './021_handoff_pending_question'
 import * as meetings from './022_meetings'
 import * as meetingsCaptureStatus from './023_meetings_capture_status'
+import * as meetingsFts from './024_meetings_fts'
 
 interface Migration {
   version: number
@@ -59,6 +60,7 @@ export const migrations: Migration[] = [
   handoffPendingQuestion,
   meetings,
   meetingsCaptureStatus,
+  meetingsFts,
 ]
 
 export function runMigrations(db: Database.Database): void {

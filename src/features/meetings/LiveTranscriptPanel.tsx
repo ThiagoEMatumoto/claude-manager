@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { meetingsApi } from '@/lib/ipc'
-import type { MeetingSegment } from '../../../shared/types/ipc'
+import type { MeetingPartialEvent, MeetingSegment } from '../../../shared/types/ipc'
 
 function formatMs(ms: number | null): string {
   if (ms == null) return '--:--'
@@ -10,24 +10,38 @@ function formatMs(ms: number | null): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+// Linha renderizável: une o segment persistido (final) e o partial (provisório
+// das janelas ao vivo). `key` é estável p/ o React; `partial` muda o estilo.
+interface Line {
+  key: string
+  startMs: number | null
+  speakerLabel: string | null
+  text: string
+  partial: boolean
+}
+
 interface Props {
   meetingId: string
 }
 
-// Transcript ao vivo: carrega os segmentos persistidos e faz merge incremental
-// dos que chegam pelo stream do sidecar. Nesta fatia (sem sidecar) a lista vem
-// só do store e fica vazia até a captura existir.
+// Transcript ao vivo: combina os segmentos PERSISTIDOS (finais, via
+// onTranscriptSegment) com os PROVISÓRIOS das janelas ao vivo (onTranscriptPartial,
+// efêmeros — sem id de banco, reconciliados por idx). Os partials aparecem em
+// itálico/dim enquanto a captura roda; ao chegar o transcript final (status
+// ready/done) eles são descartados — os finais persistidos os substituem.
 export function LiveTranscriptPanel({ meetingId }: Props) {
   const [segments, setSegments] = useState<MeetingSegment[]>([])
+  const [partials, setPartials] = useState<Map<number, MeetingPartialEvent>>(new Map())
 
   useEffect(() => {
     let alive = true
+    setPartials(new Map())
     void (async () => {
       const loaded = await meetingsApi.listSegments(meetingId)
       if (alive) setSegments(loaded)
     })()
 
-    const off = meetingsApi.onTranscriptSegment((segment) => {
+    const offSegment = meetingsApi.onTranscriptSegment((segment) => {
       if (segment.meetingId !== meetingId) return
       setSegments((prev) => {
         const idx = prev.findIndex((s) => s.id === segment.id)
@@ -40,13 +54,51 @@ export function LiveTranscriptPanel({ meetingId }: Props) {
       })
     })
 
+    const offPartial = meetingsApi.onTranscriptPartial((partial) => {
+      if (partial.meetingId !== meetingId) return
+      setPartials((prev) => {
+        const next = new Map(prev)
+        next.set(partial.idx, partial)
+        return next
+      })
+    })
+
+    // A passada final (status ready) torna os partials obsoletos: os `segment`
+    // finais persistidos passam a ser a fonte de verdade. Limpa os provisórios.
+    const offStatus = meetingsApi.onStatus(({ id, status }) => {
+      if (id !== meetingId) return
+      if (status === 'ready' || status === 'extracted') setPartials(new Map())
+    })
+
     return () => {
       alive = false
-      off()
+      offSegment()
+      offPartial()
+      offStatus()
     }
   }, [meetingId])
 
-  if (segments.length === 0) {
+  const lines = useMemo<Line[]>(() => {
+    const finalLines: Line[] = segments.map((s) => ({
+      key: s.id,
+      startMs: s.startMs,
+      speakerLabel: s.speakerLabel,
+      text: s.text,
+      partial: s.isPartial,
+    }))
+    const partialLines: Line[] = Array.from(partials.values()).map((p) => ({
+      key: `partial-${p.idx}`,
+      startMs: p.startMs,
+      speakerLabel: p.speakerLabel,
+      text: p.text,
+      partial: true,
+    }))
+    return [...finalLines, ...partialLines].sort(
+      (a, b) => (a.startMs ?? 0) - (b.startMs ?? 0),
+    )
+  }, [segments, partials])
+
+  if (lines.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-center text-sm text-[var(--color-text-dim)]">
         O transcript ao vivo aparece aqui durante a gravação.
@@ -56,22 +108,22 @@ export function LiveTranscriptPanel({ meetingId }: Props) {
 
   return (
     <ul className="flex flex-col gap-2 overflow-y-auto p-4">
-      {segments.map((segment) => (
-        <li key={segment.id} className="text-sm">
+      {lines.map((line) => (
+        <li key={line.key} className="text-sm">
           <span className="mr-2 font-mono text-xs text-[var(--color-text-dim)]">
-            {formatMs(segment.startMs)}
+            {formatMs(line.startMs)}
           </span>
-          {segment.speakerLabel && (
+          {line.speakerLabel && (
             <span className="mr-2 font-medium text-[var(--color-accent)]">
-              {segment.speakerLabel}
+              {line.speakerLabel}
             </span>
           )}
           <span
             className={
-              segment.isPartial ? 'text-[var(--color-text-dim)] italic' : 'text-[var(--color-text)]'
+              line.partial ? 'text-[var(--color-text-dim)] italic' : 'text-[var(--color-text)]'
             }
           >
-            {segment.text}
+            {line.text}
           </span>
         </li>
       ))}

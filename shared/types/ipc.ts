@@ -597,6 +597,123 @@ export interface TaskListFilter {
   parentId?: string
 }
 
+// ---- Reuniões (Meeting Intelligence) ----
+
+export type MeetingStatus =
+  | 'recording'
+  | 'transcribing'
+  | 'diarizing'
+  | 'ready'
+  | 'extracted'
+  | 'failed'
+
+export type ExtractionKind =
+  | 'action_item'
+  | 'decision'
+  | 'feedback'
+  | 'risk'
+  | 'question'
+
+// Cabeçalho da reunião + proveniência (stt/diar/extractor) + notas livres.
+// Persistência SQLite-only (molde de Task): segments/speakers/extractions vivem
+// em tabelas filhas (CASCADE) e são carregados sob demanda, não embutidos aqui.
+export interface Meeting {
+  id: string
+  title: string
+  startedAt: number | null
+  endedAt: number | null
+  source: string | null
+  audioPath: string | null
+  durationMs: number | null
+  lang: string
+  sttModel: string | null
+  diarModel: string | null
+  extractor: string | null
+  status: MeetingStatus
+  rawNotes: string | null
+  augmentedNotes: string | null
+  summary: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+// label→pessoa: o sidecar emite labels anônimos (SPEAKER_00…); a UI resolve o
+// nome e marca o canal do mic como o usuário local ("você").
+export interface MeetingSpeaker {
+  meetingId: string
+  label: string
+  displayName: string | null
+  isLocalUser: boolean
+}
+
+// Trecho do transcript. is_partial=true = provisório (janela ao vivo); o
+// fechamento reconcilia speaker_label e marca is_partial=false. words_json
+// guarda timestamps por palavra p/ citação fina.
+export interface MeetingSegment {
+  id: string
+  meetingId: string
+  idx: number
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  text: string
+  wordsJson: string | null
+  avgLogprob: number | null
+  noSpeechProb: number | null
+  isPartial: boolean
+}
+
+// Item extraído (action item/decisão/feedback…) com quote literal + grounded;
+// materializedTaskId dá idempotência na virada pra task real.
+export interface MeetingExtraction {
+  id: string
+  meetingId: string
+  type: ExtractionKind
+  text: string
+  assignee: string | null
+  dueHint: string | null
+  quote: string | null
+  quoteSegmentId: string | null
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  confidence: number | null
+  grounded: boolean
+  materializedTaskId: string | null
+  createdAt: number
+}
+
+export interface CreateMeetingInput {
+  title: string
+  source?: string | null
+  lang?: string
+  status?: MeetingStatus
+  rawNotes?: string | null
+}
+
+export interface UpdateMeetingInput {
+  id: string
+  title?: string
+  startedAt?: number | null
+  endedAt?: number | null
+  source?: string | null
+  audioPath?: string | null
+  durationMs?: number | null
+  lang?: string
+  sttModel?: string | null
+  diarModel?: string | null
+  extractor?: string | null
+  status?: MeetingStatus
+  rawNotes?: string | null
+  augmentedNotes?: string | null
+  summary?: string | null
+}
+
+export interface MeetingListFilter {
+  status?: MeetingStatus
+  search?: string
+}
+
 // ---- Dashboard / visão hierárquica (Fase 4) ----
 
 // Projeção enxuta de tarefa pros nós da árvore do dashboard.
@@ -1293,6 +1410,21 @@ export interface Api {
     // o renderer trata como sinal de recarga. Mutações com parent
     // objective/key_result também emitem 'objective:updated' com {id}.
     onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  meetings: {
+    list(filter?: MeetingListFilter): Promise<Meeting[]>
+    get(id: string): Promise<Meeting | null>
+    create(input: CreateMeetingInput): Promise<Meeting>
+    update(input: UpdateMeetingInput): Promise<Meeting>
+    delete(id: string): Promise<void>
+    listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Payload varia por mutação (Meeting completa ou marcador {id, deleted}) —
+    // o renderer trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
+    // Streams do sidecar (capture/STT) — vazios nesta fatia, fiados pra o
+    // increment do sidecar. A UI já assina pra não precisar mudar o contrato.
+    onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
+    onStatus(handler: (payload: { id: string; status: MeetingStatus }) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

@@ -20,6 +20,7 @@ import { registerRepoDependenciesIpc } from './ipc/repo-dependencies'
 import { registerHandoffsIpc } from './ipc/handoffs'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerMeetingsIpc } from './ipc/meetings'
 import { registerMcpIpc } from './ipc/mcp'
 import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
 import { setSyncMutationHook, broadcast } from './services/notify'
@@ -126,6 +127,7 @@ app.whenReady().then(async () => {
   registerFeaturesIpc()
   registerObjectivesIpc()
   registerTasksIpc()
+  registerMeetingsIpc()
   registerMcpIpc()
   registerSyncIpc()
   // Wire o ponto único de mutação → coordinator (auto-sync on-idle). Cobre

@@ -21,6 +21,7 @@ import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
 import { ArchitectureArea } from '@/features/architecture/ArchitectureArea'
 import { OverviewArea } from '@/features/overview/OverviewArea'
 import { TasksArea } from '@/features/tasks/TasksArea'
+import { MeetingsArea } from '@/features/meetings/MeetingsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
@@ -625,6 +626,8 @@ export function AppShell() {
       {area === 'handoffs' && <HandoffsPanel />}
 
       {area === 'tasks' && <TasksArea />}
+
+      {area === 'meetings' && <MeetingsArea />}
 
       {area === 'cc-configs' && <CcConfigsArea />}
 

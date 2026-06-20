@@ -39,6 +39,11 @@ import type {
   TaskLink,
   CreateTaskInput,
   UpdateTaskInput,
+  MeetingListFilter,
+  MeetingSegment,
+  MeetingStatus,
+  CreateMeetingInput,
+  UpdateMeetingInput,
   SyncConfigureInput,
   SyncResolveConflictInput,
   SyncSetProjectsRootInput,
@@ -236,6 +241,19 @@ const api: Api = {
     setLinks: (taskId: string, links: TaskLink[]) => invoke('tasks:set-links', taskId, links),
     reorder: (taskId: string, position: number) => invoke('tasks:reorder', taskId, position),
     onUpdated: (handler) => subscribe<unknown>('task:updated', handler),
+  },
+  meetings: {
+    list: (filter?: MeetingListFilter) => invoke('meetings:list', filter),
+    get: (id: string) => invoke('meetings:get', id),
+    create: (input: CreateMeetingInput) => invoke('meetings:create', input),
+    update: (input: UpdateMeetingInput) => invoke('meetings:update', input),
+    delete: (id: string) => invoke('meetings:delete', id),
+    listSegments: (meetingId: string) => invoke('meetings:list-segments', meetingId),
+    onUpdated: (handler) => subscribe<unknown>('meeting:updated', handler),
+    onTranscriptSegment: (handler) =>
+      subscribe<MeetingSegment>('meeting:transcript:segment', handler),
+    onStatus: (handler) =>
+      subscribe<{ id: string; status: MeetingStatus }>('meeting:status', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

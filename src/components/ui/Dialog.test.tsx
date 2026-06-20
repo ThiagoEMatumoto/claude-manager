@@ -20,8 +20,9 @@ describe('Dialog', () => {
         </Dialog>
       </div>,
     )
-    // getByText retorna o painel interno; o overlay é o pai direto
-    const overlay = screen.getByText('conteúdo').parentElement
+    // o overlay é a div .fixed portada direto no body (o conteúdo fica aninhado
+    // num wrapper de scroll, então não dá pra subir via parentElement do texto)
+    const overlay = document.body.querySelector('.fixed')
     expect(overlay).not.toBeNull()
     // portal: o overlay NÃO é descendente do ponto de render, é filho do body
     expect(container.querySelector('.fixed')).toBeNull()
@@ -39,7 +40,7 @@ describe('Dialog', () => {
     )
     fireEvent.mouseDown(screen.getByText('conteúdo'))
     expect(onClose).not.toHaveBeenCalled()
-    const overlay = screen.getByText('conteúdo').parentElement!
+    const overlay = document.body.querySelector('.fixed')!
     fireEvent.mouseDown(overlay)
     expect(onClose).toHaveBeenCalledTimes(1)
   })

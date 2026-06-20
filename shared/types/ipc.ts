@@ -1259,6 +1259,10 @@ export interface Api {
     reject(id: string): Promise<Handoff>
     markRunning(input: { id: string; childSessionId: string }): Promise<Handoff>
     fail(input: { id: string; error: string }): Promise<Handoff>
+    // Entrega uma mensagem do humano à sessão-filha (texto livre ou resposta a um
+    // handoff_ask). Resolve o childSessionId pelo handoffId; rejeita se a filha não
+    // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
+    sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
     onUpdated(handler: (payload: unknown) => void): () => void
   }

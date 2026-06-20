@@ -195,11 +195,14 @@ function meetingToRowParams(meeting: Meeting): Record<string, unknown> {
 
 export function create(input: CreateMeetingInput): Meeting {
   const now = Date.now()
-  const status = input.status ?? 'recording'
+  // Granola: nasce em 'idle' (rascunho, só notas). Vira 'capturing' quando
+  // start-capture dispara o sidecar — started_at é carimbado lá, não no create.
+  const status = input.status ?? 'idle'
+  const isLive = status === 'capturing' || status === 'recording'
   const meeting: Meeting = {
     id: randomUUID(),
     title: input.title.trim(),
-    startedAt: status === 'recording' ? now : null,
+    startedAt: isLive ? now : null,
     endedAt: null,
     source: input.source ?? null,
     audioPath: null,

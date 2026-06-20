@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
 import { ptyManager } from './services/pty-manager'
+import { meetingSidecarManager } from './services/meeting-sidecar'
 import * as handoffStore from './services/handoff-store'
 import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
@@ -190,6 +191,7 @@ function runFinalShutdown(): void {
   syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()
+  meetingSidecarManager.killAllSidecars()
   sessionActivityService.closeAll()
   getDb()
     .prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'")

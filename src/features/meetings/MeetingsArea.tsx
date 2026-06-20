@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Mic, Square } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import type { Meeting } from '../../../shared/types/ipc'
@@ -16,6 +16,8 @@ export function MeetingsArea() {
   const createMeeting = useMeetingsStore((s) => s.createMeeting)
   const updateMeeting = useMeetingsStore((s) => s.updateMeeting)
   const deleteMeeting = useMeetingsStore((s) => s.deleteMeeting)
+  const startCapture = useMeetingsStore((s) => s.startCapture)
+  const stopCapture = useMeetingsStore((s) => s.stopCapture)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
@@ -112,10 +114,30 @@ export function MeetingsArea() {
         {selected ? (
           <>
             <section className="flex min-w-0 flex-1 flex-col border-r border-[var(--color-border)]">
-              <div className="border-b border-[var(--color-border)] px-5 py-3">
-                <h2 className="truncate text-sm font-medium text-[var(--color-text)]">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">
+                <h2 className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">
                   {selected.title}
                 </h2>
+                {selected.status === 'capturing' ? (
+                  <button
+                    type="button"
+                    onClick={() => void stopCapture(selected.id)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--color-danger)] px-2.5 py-1 text-xs text-[var(--color-danger)] transition hover:bg-[var(--color-danger)]/10"
+                  >
+                    <Icon as={Square} size={12} />
+                    Encerrar
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void startCapture(selected.id)}
+                    disabled={selected.status !== 'idle'}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Icon as={Mic} size={12} />
+                    Iniciar
+                  </button>
+                )}
               </div>
               <textarea
                 value={notes}

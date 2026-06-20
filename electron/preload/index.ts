@@ -41,7 +41,8 @@ import type {
   UpdateTaskInput,
   MeetingListFilter,
   MeetingSegment,
-  MeetingStatus,
+  MeetingStatusEvent,
+  MeetingPartialEvent,
   CreateMeetingInput,
   UpdateMeetingInput,
   SyncConfigureInput,
@@ -249,11 +250,14 @@ const api: Api = {
     update: (input: UpdateMeetingInput) => invoke('meetings:update', input),
     delete: (id: string) => invoke('meetings:delete', id),
     listSegments: (meetingId: string) => invoke('meetings:list-segments', meetingId),
+    startCapture: (meetingId: string) => invoke('meetings:start-capture', meetingId),
+    stopCapture: (meetingId: string) => invoke('meetings:stop-capture', meetingId),
     onUpdated: (handler) => subscribe<unknown>('meeting:updated', handler),
     onTranscriptSegment: (handler) =>
       subscribe<MeetingSegment>('meeting:transcript:segment', handler),
-    onStatus: (handler) =>
-      subscribe<{ id: string; status: MeetingStatus }>('meeting:status', handler),
+    onTranscriptPartial: (handler) =>
+      subscribe<MeetingPartialEvent>('meeting:transcript:partial', handler),
+    onStatus: (handler) => subscribe<MeetingStatusEvent>('meeting:status', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

@@ -600,6 +600,8 @@ export interface TaskListFilter {
 // ---- Reuniões (Meeting Intelligence) ----
 
 export type MeetingStatus =
+  | 'idle'
+  | 'capturing'
   | 'recording'
   | 'transcribing'
   | 'diarizing'
@@ -712,6 +714,24 @@ export interface UpdateMeetingInput {
 export interface MeetingListFilter {
   status?: MeetingStatus
   search?: string
+}
+
+// Eventos do sidecar broadcastados ao renderer durante a captura.
+export interface MeetingStatusEvent {
+  id: string
+  status: MeetingStatus
+}
+
+// Segmento provisório (NDJSON `partial`): efêmero, NÃO persiste. Renderizado e
+// substituído pelo `segment` final que carrega o mesmo idx. Diferente de
+// MeetingSegment (persistido) por não ter id de banco.
+export interface MeetingPartialEvent {
+  meetingId: string
+  idx: number
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  text: string
 }
 
 // ---- Dashboard / visão hierárquica (Fase 4) ----
@@ -1418,13 +1438,17 @@ export interface Api {
     update(input: UpdateMeetingInput): Promise<Meeting>
     delete(id: string): Promise<void>
     listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Inicia/encerra a captura do sidecar para a reunião (idle ⇄ capturing).
+    startCapture(meetingId: string): Promise<void>
+    stopCapture(meetingId: string): Promise<void>
     // Payload varia por mutação (Meeting completa ou marcador {id, deleted}) —
     // o renderer trata como sinal de recarga.
     onUpdated(handler: (payload: unknown) => void): () => void
-    // Streams do sidecar (capture/STT) — vazios nesta fatia, fiados pra o
-    // increment do sidecar. A UI já assina pra não precisar mudar o contrato.
+    // Streams do sidecar: `segment` persistido (final) e `status` do ciclo de
+    // captura. `partial` é provisório/efêmero (não persiste).
     onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
-    onStatus(handler: (payload: { id: string; status: MeetingStatus }) => void): () => void
+    onTranscriptPartial(handler: (partial: MeetingPartialEvent) => void): () => void
+    onStatus(handler: (payload: MeetingStatusEvent) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

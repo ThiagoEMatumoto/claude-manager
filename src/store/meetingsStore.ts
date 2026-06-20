@@ -7,9 +7,10 @@ import type {
   UpdateMeetingInput,
 } from '../../shared/types/ipc'
 
-// Dono único da assinatura de onUpdated — assinada uma vez (StrictMode-safe),
-// mesmo padrão do tasksStore.
+// Dono único das assinaturas de onUpdated/onStatus — assinadas uma vez
+// (StrictMode-safe), mesmo padrão do tasksStore.
 let offUpdated: (() => void) | null = null
+let offStatus: (() => void) | null = null
 let updatedStarted = false
 
 interface MeetingsState {
@@ -25,6 +26,9 @@ interface MeetingsState {
   createMeeting: (input: CreateMeetingInput) => Promise<Meeting>
   updateMeeting: (input: UpdateMeetingInput) => Promise<Meeting>
   deleteMeeting: (id: string) => Promise<void>
+
+  startCapture: (meetingId: string) => Promise<void>
+  stopCapture: (meetingId: string) => Promise<void>
 
   startUpdatedWatch: () => void
   stopUpdatedWatch: () => void
@@ -72,6 +76,14 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
     await get().refresh()
   },
 
+  startCapture: async (meetingId) => {
+    await meetingsApi.startCapture(meetingId)
+  },
+
+  stopCapture: async (meetingId) => {
+    await meetingsApi.stopCapture(meetingId)
+  },
+
   startUpdatedWatch: () => {
     if (updatedStarted) return
     updatedStarted = true
@@ -79,12 +91,23 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
       // Payload varia (Meeting completa ou {id, deleted}) — tratamos como recarga.
       void get().refresh()
     })
+    // O sidecar emite status ao vivo (capturing→ready/failed); refletir na lista
+    // sem esperar um meeting:updated. Patch local evita um round-trip ao DB.
+    offStatus = meetingsApi.onStatus(({ id, status }) => {
+      set((state) => ({
+        meetings: state.meetings.map((m) => (m.id === id ? { ...m, status } : m)),
+      }))
+    })
   },
 
   stopUpdatedWatch: () => {
     if (offUpdated) {
       offUpdated()
       offUpdated = null
+    }
+    if (offStatus) {
+      offStatus()
+      offStatus = null
     }
     updatedStarted = false
   },

@@ -38,14 +38,21 @@ describe('meeting-store', () => {
   })
 
   describe('create + get', () => {
-    it('cria com defaults (status recording, lang pt, started_at carimbado)', () => {
+    it('cria com defaults Granola (status idle, lang pt, started_at vazio)', () => {
       const m = store.create({ title: '  Daily  ' })
       expect(m.title).toBe('Daily')
-      expect(m.status).toBe('recording')
+      // Nasce em rascunho (só notas); a captura é que dispara o início.
+      expect(m.status).toBe('idle')
       expect(m.lang).toBe('pt')
-      expect(m.startedAt).not.toBeNull()
+      expect(m.startedAt).toBeNull()
       expect(m.endedAt).toBeNull()
       expect(store.get(m.id)?.id).toBe(m.id)
+    })
+
+    it('status capturing/recording carimba started_at no create', () => {
+      const m = store.create({ title: 'Live', status: 'capturing' })
+      expect(m.status).toBe('capturing')
+      expect(m.startedAt).not.toBeNull()
     })
 
     it('respeita status e lang passados', () => {
@@ -53,7 +60,7 @@ describe('meeting-store', () => {
       expect(m.status).toBe('ready')
       expect(m.lang).toBe('en')
       expect(m.rawNotes).toBe('oi')
-      // status não-recording não carimba started_at.
+      // status não-ativo (nem capturing/recording) não carimba started_at.
       expect(m.startedAt).toBeNull()
     })
 

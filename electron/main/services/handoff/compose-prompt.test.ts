@@ -94,6 +94,19 @@ describe('composeHandoffPrompt', () => {
     expect(p).toMatch(/concluído|verificad/i)
   })
 
+  it('instrui handoff_ask para decisões da mãe (com o handoffId)', () => {
+    const p = composeHandoffPrompt({
+      targetRepoLabel: 'svc',
+      targetRepoPath: '/repos/svc',
+      task: 't',
+      edges: [],
+      handoffId: 'h-ask',
+    })
+    expect(p).toContain('handoff_ask')
+    expect(p).toContain('handoffId="h-ask"')
+    expect(p).toMatch(/decis|arquitetural/i)
+  })
+
   it('plan mode injeta restrição read-only; auto-edits avisa do denylist', () => {
     const plan = composeHandoffPrompt({
       targetRepoLabel: 'svc',

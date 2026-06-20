@@ -3,6 +3,8 @@ import { z } from 'zod'
 import * as store from '../services/handoff-store'
 import { getDb } from '../services/db'
 import { broadcast } from '../services/notify'
+import { ptyManager } from '../services/pty-manager'
+import { injectIntoChild } from '../services/handoff/inject'
 import type { HandoffSpawnContext, LinkKind, Handoff, HandoffStatus, Repo } from '../../../shared/types/ipc'
 
 interface RepoJoinRow {
@@ -44,6 +46,7 @@ const handoffStatus = z.enum([
   'pending',
   'approved',
   'running',
+  'needs_input',
   'done',
   'rejected',
   'failed',
@@ -68,6 +71,11 @@ const markRunningSchema = z.object({
 const failSchema = z.object({
   id: z.string().min(1),
   error: z.string().min(1),
+})
+
+const sendMessageSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().min(1),
 })
 
 export function registerHandoffsIpc(): void {
@@ -106,6 +114,25 @@ export function registerHandoffsIpc(): void {
     const handoff = store.fail(id, error)
     broadcast('handoff:updated', handoff)
     return handoff
+  })
+
+  // Intervenção do humano pelo inbox: entrega uma mensagem (texto livre OU resposta
+  // a um handoff_ask) à sessão-filha. Resolve o childSessionId pelo handoffId,
+  // exige PTY viva (isRunning) e injeta via injectIntoChild — bracketed-paste com
+  // submit, NÃO sessions:write cru (que não submeteria). Não muda o status do
+  // handoff: a transição needs_input→running é responsabilidade da filha (que
+  // chamará handoff_progress/report ao retomar).
+  ipcMain.handle('handoffs:send-message', (_e, raw: unknown): void => {
+    const { id, text } = sendMessageSchema.parse(raw)
+    const handoff = store.get(id)
+    if (!handoff) throw new Error(`Handoff não encontrado: ${id}`)
+    if (!handoff.childSessionId) {
+      throw new Error('Handoff ainda não tem sessão-filha (não aprovado).')
+    }
+    if (!ptyManager.isRunning(handoff.childSessionId)) {
+      throw new Error('A sessão-filha não está mais viva — não há para onde enviar.')
+    }
+    injectIntoChild(handoff.childSessionId, text)
   })
 
   // Resolve o repo-alvo + metadados do projeto pra UI conseguir chamar openSession.

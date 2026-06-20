@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, RefreshCw, TerminalSquare } from 'lucide-react'
+import { AlertTriangle, CornerDownLeft, RefreshCw, Send, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { handoffsApi, prefsApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore } from '@/store/handoffsStore'
-import type { Handoff, HandoffStatus } from '../../../shared/types/ipc'
+import type { Handoff, HandoffStatus, LiveSessionInfo } from '../../../shared/types/ipc'
 
 const HEARTBEAT_TTL_KEY = 'handoffs.heartbeatTtlHours'
 const HEARTBEAT_TTL_DEFAULT = 2
@@ -25,6 +25,53 @@ export function staleLabel(handoff: Handoff, now: number): string {
   return `sem progresso há ${hours}h`
 }
 
+// "há Xs / Xmin / Xh" pro último sinal de atividade da filha (reusa a escala do
+// Terminal). Puro → testável. Null se nunca houve atividade.
+export function liveActivityLabel(at: number | null, now: number): string | null {
+  if (at == null) return null
+  const s = Math.max(0, Math.round((now - at) / 1000))
+  if (s < 60) return `há ${s}s`
+  const m = Math.round(s / 60)
+  if (m < 60) return `há ${m}min`
+  const h = Math.round(m / 60)
+  return `há ${h}h`
+}
+
+// Tokens de contexto compactos: "128k ctx" / "12k ctx" / "900 ctx". Null se ausente.
+export function contextLabel(tokens: LiveSessionInfo['tokens']): string | null {
+  const ctx = tokens?.context
+  if (ctx == null) return null
+  if (ctx >= 1000) return `${Math.round(ctx / 1000)}k ctx`
+  return `${ctx} ctx`
+}
+
+// Liveness derivada do status da sessão-filha viva (LiveSessionInfo). `undefined`
+// = filha não está mais no liveSessions (PTY encerrou). Mapeia pra label + token
+// de cor existente. Puro → testável.
+export interface LiveBadge {
+  label: string
+  color: string
+  // waiting/ended pedem destaque/ação no card.
+  attention: boolean
+}
+
+export function liveBadgeFor(status: LiveSessionInfo['status'] | undefined): LiveBadge {
+  switch (status) {
+    case 'working':
+      return { label: 'trabalhando', color: 'var(--color-info)', attention: false }
+    case 'waiting':
+      return { label: 'aguardando você', color: 'var(--color-warning)', attention: true }
+    case 'starting':
+      return { label: 'iniciando', color: 'var(--color-info)', attention: false }
+    case 'idle':
+      return { label: 'ociosa', color: 'var(--color-text-dim)', attention: false }
+    case 'ended':
+    case undefined:
+    default:
+      return { label: 'filha encerrou', color: 'var(--color-danger)', attention: true }
+  }
+}
+
 // Inbox de handoffs cross-repo: lista todos agrupados por status, com label do
 // repo-alvo (resolvido no store via JOIN), tarefa, badge de status, data, e —
 // quando done/failed — o resumo/erro expansível. A assinatura load+watch já é
@@ -34,6 +81,7 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
   pending: 'Pendente',
   approved: 'Aprovado',
   running: 'Em andamento',
+  needs_input: 'Aguardando resposta',
   done: 'Concluído',
   rejected: 'Rejeitado',
   failed: 'Falhou',
@@ -43,6 +91,7 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
 const STATUS_COLOR: Record<HandoffStatus, string> = {
   pending: 'var(--color-warning)',
   running: 'var(--color-info)',
+  needs_input: 'var(--color-warning)',
   done: 'var(--color-success)',
   failed: 'var(--color-danger)',
   rejected: 'var(--color-text-dim)',
@@ -54,6 +103,7 @@ const STATUS_ORDER: HandoffStatus[] = [
   'pending',
   'approved',
   'running',
+  'needs_input',
   'done',
   'failed',
   'rejected',
@@ -87,6 +137,8 @@ function formatDate(ts: number): string {
 function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number }) {
   const [expanded, setExpanded] = useState(false)
   const [failing, setFailing] = useState(false)
+  const [message, setMessage] = useState('')
+  const [sending, setSending] = useState(false)
   const liveSessions = useAppStore((s) => s.liveSessions)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const load = useHandoffsStore((s) => s.load)
@@ -119,16 +171,57 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
     }
   }
 
-  // A filha já está rodando num PTY. "Abrir terminal" RE-ATTACHA uma pane à
-  // sessão viva (focusOrOpenSession → paneFromLiveSession), nunca re-spawn/--resume.
-  // Só dá pra attachar se a filha ainda aparece no liveSessions (PTY viva).
+  // A filha está num PTY enquanto o handoff está vivo (running OU needs_input —
+  // needs_input é um estado vivo dentro de running). "Abrir terminal" RE-ATTACHA
+  // uma pane à sessão viva (focusOrOpenSession → paneFromLiveSession), nunca
+  // re-spawn/--resume. Só aparece em liveSessions enquanto a PTY existe.
+  const isLiveHandoff = handoff.status === 'running' || handoff.status === 'needs_input'
   const childLive =
-    handoff.status === 'running' && handoff.childSessionId
+    isLiveHandoff && handoff.childSessionId
       ? liveSessions.find((s) => s.id === handoff.childSessionId)
       : undefined
 
+  // Sinais vivos da filha. badge.attention (waiting/ended) ou needs_input pedem
+  // realce âmbar. needs_input vence: a mãe pediu input explícito.
+  const live = isLiveHandoff ? liveBadgeFor(childLive?.status) : null
+  const needsInput = handoff.status === 'needs_input'
+  const highlight = needsInput || (live?.attention ?? false)
+  const lastText = childLive?.lastText?.trim() || null
+  const activityLabel = liveActivityLabel(childLive?.lastActivityAt ?? null, Date.now())
+  const ctxLabel = contextLabel(childLive?.tokens)
+
+  // Input de intervenção: só quando a filha está VIVA (childLive presente). Em
+  // needs_input/waiting o tom vira "Responder" com placeholder contextual.
+  const canSend = !!childLive
+  const sendLabel = needsInput || childLive?.status === 'waiting' ? 'Responder' : 'Enviar'
+  const sendPlaceholder = needsInput
+    ? 'Responder à pergunta da filha…'
+    : 'Enviar mensagem para a filha…'
+
+  async function sendMessage() {
+    const text = message.trim()
+    if (!text || sending || !childLive) return
+    setSending(true)
+    try {
+      await handoffsApi.sendMessage({ id: handoff.id, text })
+      setMessage('')
+    } catch {
+      // Falha (filha morreu entre o render e o envio): o load() seguinte atualiza
+      // o liveness e o input some. Mantém o texto pro usuário não perder o que digitou.
+    } finally {
+      setSending(false)
+      await load()
+    }
+  }
+
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+    <div
+      className="rounded-md border bg-[var(--color-surface)] p-3"
+      style={{
+        borderColor: highlight ? 'var(--color-warning)' : 'var(--color-border)',
+        background: highlight ? 'var(--color-warning)0d' : undefined,
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -136,11 +229,38 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
               → {repoLabel}
             </span>
             <StatusBadge status={handoff.status} />
+            {live && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+                style={{ color: live.color, borderColor: live.color, background: `${live.color}1a` }}
+                title="Estado ao vivo da sessão-filha"
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: live.color }}
+                />
+                {live.label}
+              </span>
+            )}
           </div>
           <div className="mt-1 text-sm text-[var(--color-text-dim)]">{handoff.task}</div>
-          {handoff.status === 'running' && handoff.currentStep && (
+          {isLiveHandoff && handoff.currentStep && (
             <div className="mt-1 truncate text-xs text-[var(--color-info)]" title={handoff.currentStep}>
               {handoff.currentStep}
+            </div>
+          )}
+          {lastText && (
+            <div
+              className="mt-1 truncate text-xs text-[var(--color-text-dim)]"
+              title={childLive?.lastText ?? undefined}
+            >
+              {lastText}
+            </div>
+          )}
+          {(activityLabel || ctxLabel) && (
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-dim)]">
+              {activityLabel && <span title="Última atividade da filha">{activityLabel}</span>}
+              {ctxLabel && <span title="Tokens de contexto em uso">{ctxLabel}</span>}
             </div>
           )}
           {stale && (
@@ -182,6 +302,62 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
           )}
         </div>
       </div>
+
+      {needsInput && handoff.pendingQuestion && (
+        <div
+          className="mt-2 rounded-md border px-3 py-2 text-sm"
+          style={{
+            borderColor: 'var(--color-warning)',
+            background: 'var(--color-warning)14',
+            color: 'var(--color-text)',
+          }}
+        >
+          <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[var(--color-warning)]">
+            <Icon as={AlertTriangle} size={12} />
+            A filha perguntou:
+          </div>
+          <div className="whitespace-pre-wrap">{handoff.pendingQuestion}</div>
+        </div>
+      )}
+
+      {canSend && (
+        <form
+          className="mt-2 flex items-start gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void sendMessage()
+          }}
+        >
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter envia; Shift+Enter quebra linha (multi-linha íntegra via
+              // bracketed-paste no main).
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void sendMessage()
+              }
+            }}
+            rows={1}
+            placeholder={sendPlaceholder}
+            className="min-h-[32px] flex-1 resize-y rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+          <button
+            type="submit"
+            disabled={sending || message.trim().length === 0}
+            title={`${sendLabel} (Enter)`}
+            className="flex shrink-0 items-center gap-1 rounded border px-2 py-1.5 text-[11px] font-medium transition disabled:opacity-40"
+            style={{
+              color: highlight ? 'var(--color-warning)' : 'var(--color-accent)',
+              borderColor: highlight ? 'var(--color-warning)' : 'var(--color-accent)',
+            }}
+          >
+            <Icon as={needsInput || childLive?.status === 'waiting' ? CornerDownLeft : Send} size={12} />
+            {sending ? 'Enviando…' : sendLabel}
+          </button>
+        </form>
+      )}
 
       {hasDetail && (
         <div className="mt-2">

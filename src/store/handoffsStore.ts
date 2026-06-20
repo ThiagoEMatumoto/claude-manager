@@ -161,11 +161,13 @@ export function pendingHandoffs(handoffs: Handoff[]): Handoff[] {
 // Status de handoff cuja filha está "viva e sob a alçada do rollup" — não deve
 // poluir a lista flat de sessões (o usuário monitora as não-filhas + o rollup).
 // pending/approved não têm filha ainda (childSessionId null), mas inclui-los é
-// inócuo; running é o caso real. done/failed/rejected liberam a sessão de volta.
+// inócuo; running e needs_input são os casos reais (filha viva: trabalhando ou
+// aguardando a mãe). done/failed/rejected liberam a sessão de volta.
 const ACTIVE_HANDOFF_STATUSES: ReadonlySet<Handoff['status']> = new Set([
   'pending',
   'approved',
   'running',
+  'needs_input',
 ])
 
 // Conjunto de Session.id que são filhas de handoffs ativos. Pura → testável e

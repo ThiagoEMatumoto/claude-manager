@@ -19,6 +19,7 @@ import * as repoDepsCanvas from './017_repo_deps_canvas'
 import * as handoffs from './018_handoffs'
 import * as repoHub from './019_repo_hub'
 import * as handoffModeProgress from './020_handoff_mode_progress'
+import * as handoffPendingQuestion from './021_handoff_pending_question'
 
 interface Migration {
   version: number
@@ -53,6 +54,7 @@ export const migrations: Migration[] = [
   handoffs,
   repoHub,
   handoffModeProgress,
+  handoffPendingQuestion,
 ]
 
 export function runMigrations(db: Database.Database): void {

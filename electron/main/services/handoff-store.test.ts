@@ -94,6 +94,55 @@ describe('handoff-store', () => {
     })
   })
 
+  describe('ask / resume (canal pergunta filha→mãe)', () => {
+    it('ask: running → needs_input, grava pergunta + timestamp', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's-child')
+      const after = store.ask(h.id, 'qual versão do node?')
+      expect(after.status).toBe('needs_input')
+      expect(after.pendingQuestion).toBe('qual versão do node?')
+      expect(after.questionAskedAt).not.toBeNull()
+    })
+
+    it('ask: NÃO transiciona fora de running (ex.: pending)', () => {
+      const h = newHandoff() // pending
+      const after = store.ask(h.id, 'cedo demais')
+      expect(after.status).toBe('pending')
+      expect(after.pendingQuestion).toBeNull()
+    })
+
+    it('resume: needs_input → running e limpa a pergunta', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's-child')
+      store.ask(h.id, 'pergunta')
+      const after = store.resume(h.id)
+      expect(after.status).toBe('running')
+      expect(after.pendingQuestion).toBeNull()
+      expect(after.questionAskedAt).toBeNull()
+    })
+
+    it('resume: idempotente fora de needs_input (running permanece running)', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's-child')
+      const after = store.resume(h.id)
+      expect(after.status).toBe('running')
+    })
+
+    it('progress após ask: retoma (needs_input → running) e limpa a pergunta', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's-child')
+      store.ask(h.id, 'pergunta')
+      const after = store.progress(h.id, 'retomei: rodando testes')
+      expect(after.status).toBe('running')
+      expect(after.currentStep).toBe('retomei: rodando testes')
+      expect(after.pendingQuestion).toBeNull()
+    })
+  })
+
   describe('failIfRunning (reconciliação de morte da filha)', () => {
     it('running → failed e retorna o handoff', () => {
       const h = newHandoff()
@@ -113,6 +162,15 @@ describe('handoff-store', () => {
       const res = store.failIfRunning(h.id, 'morte tardia')
       expect(res).toBeNull()
       expect(store.get(h.id)?.status).toBe('done')
+    })
+
+    it('needs_input → failed (a filha que perguntou e morreu também falha)', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's-child')
+      store.ask(h.id, 'pergunta')
+      const res = store.failIfRunning(h.id, 'PTY morreu durante a espera')
+      expect(res?.status).toBe('failed')
     })
   })
 
@@ -143,15 +201,21 @@ describe('handoff-store', () => {
     function bootSweep(): void {
       testDb
         .prepare(
-          "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE status = 'running'",
+          "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE status IN ('running','needs_input')",
         )
         .run('Sessão-filha órfã: app reiniciou sem reconciliar o handoff', Date.now())
     }
 
-    it("running → failed; done/rejected/failed permanecem intactos", () => {
+    it("running/needs_input → failed; done/rejected/failed permanecem intactos", () => {
       const running = newHandoff('r1')
       store.approve(running.id, {})
       store.markRunning(running.id, 's-run')
+
+      // needs_input também é órfão no boot (a filha que perguntou morreu junto).
+      const asking = newHandoff('r1')
+      store.approve(asking.id, {})
+      store.markRunning(asking.id, 's-ask')
+      store.ask(asking.id, 'pergunta órfã')
 
       const done = newHandoff('r2')
       store.approve(done.id, {})
@@ -169,6 +233,7 @@ describe('handoff-store', () => {
       const swept = store.get(running.id)
       expect(swept?.status).toBe('failed')
       expect(swept?.error).toBe('Sessão-filha órfã: app reiniciou sem reconciliar o handoff')
+      expect(store.get(asking.id)?.status).toBe('failed')
       expect(store.get(done.id)?.status).toBe('done')
       expect(store.get(rejected.id)?.status).toBe('rejected')
       // Não sobrescreve a mensagem de erro de um failed pré-existente.
@@ -198,6 +263,30 @@ describe('handoff-store', () => {
       const n = store.reconcileStuck()
       expect(n).toBe(0)
       expect(store.get(h.id)?.status).toBe('running')
+    })
+
+    it('needs_input com filha VIVA (session running) → PERMANECE needs_input', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      spawnChild(h.id, 's-asking', 'running')
+      store.ask(h.id, 'pergunta')
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(0)
+      expect(store.get(h.id)?.status).toBe('needs_input')
+    })
+
+    it('needs_input com filha MORTA (session exited) → failed', () => {
+      const h = newHandoff('r1')
+      store.approve(h.id, {})
+      spawnChild(h.id, 's-dead-ask', 'running')
+      store.ask(h.id, 'pergunta')
+      // Filha morreu de fato: marca a session como exited.
+      testDb.prepare("UPDATE sessions SET status = 'exited' WHERE id = 's-dead-ask'").run()
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(1)
+      expect(store.get(h.id)?.status).toBe('failed')
     })
 
     it('running sem filha atrelada (child_session_id NULL) → failed', () => {

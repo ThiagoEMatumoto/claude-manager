@@ -20,6 +20,8 @@ interface HandoffRow {
   mode: string
   current_step: string | null
   step_updated_at: number | null
+  pending_question: string | null
+  question_asked_at: number | null
   summary: string | null
   error: string | null
   created_at: number
@@ -48,6 +50,8 @@ function toEntity(row: HandoffRow): Handoff {
     mode: row.mode as HandoffMode,
     currentStep: row.current_step,
     stepUpdatedAt: row.step_updated_at,
+    pendingQuestion: row.pending_question,
+    questionAskedAt: row.question_asked_at,
     summary: row.summary,
     error: row.error,
     createdAt: row.created_at,
@@ -162,15 +166,50 @@ export function report(id: string, summary: string): Handoff {
   return fresh(id)
 }
 
-// Progresso NÃO-terminal: a filha reporta o passo atual sem virar done. Só grava
-// se ainda estiver running (ignora se já terminou). done segue exclusivo de report.
+// Progresso NÃO-terminal: a filha reporta o passo atual sem virar done. Grava se
+// estiver em estado VIVO (running OU needs_input) — reportar progresso após uma
+// pergunta significa que a filha retomou o trabalho, então needs_input volta a
+// running e a pergunta pendente é limpa (o ato de progredir = "retomei"). done
+// segue exclusivo de report.
 export function progress(id: string, step: string): Handoff {
   const now = Date.now()
   getDb()
     .prepare(
-      "UPDATE handoffs SET current_step = ?, step_updated_at = ?, updated_at = ? WHERE id = ? AND status = 'running'",
+      `UPDATE handoffs
+         SET current_step = ?, step_updated_at = ?, updated_at = ?,
+             status = 'running', pending_question = NULL, question_asked_at = NULL
+       WHERE id = ? AND status IN ('running','needs_input')`,
     )
     .run(step, now, now, id)
+  return fresh(id)
+}
+
+// A filha levanta uma pergunta (handoff_ask) e passa pra needs_input, gravando a
+// pergunta + timestamp. Só transiciona se estava running — não pergunta de novo
+// por cima de uma needs_input já aberta nem fora do estado vivo (pending/done/...).
+export function ask(id: string, question: string): Handoff {
+  const now = Date.now()
+  getDb()
+    .prepare(
+      `UPDATE handoffs
+         SET status = 'needs_input', pending_question = ?, question_asked_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(question, now, now, id)
+  return fresh(id)
+}
+
+// A mãe respondeu (handoff_message) e a filha deve retomar: needs_input → running,
+// limpa a pergunta pendente. Só age se estava needs_input (idempotente fora dele).
+export function resume(id: string): Handoff {
+  const now = Date.now()
+  getDb()
+    .prepare(
+      `UPDATE handoffs
+         SET status = 'running', pending_question = NULL, question_asked_at = NULL, updated_at = ?
+       WHERE id = ? AND status = 'needs_input'`,
+    )
+    .run(now, id)
   return fresh(id)
 }
 
@@ -182,12 +221,14 @@ export function fail(id: string, error: string): Handoff {
 }
 
 // Reconciliação: a sessão-filha morreu (PTY exit/crash). Só transiciona para
-// failed se ainda estava running — NÃO sobrescreve um done/rejected já gravado.
-// Retorna o handoff atualizado, ou null se nada foi alterado (não estava running).
+// failed se ainda estava VIVA (running OU needs_input) — NÃO sobrescreve um
+// done/rejected já gravado. Uma filha que perguntou (needs_input) e cuja PTY
+// morreu de fato também precisa falhar (senão trava o teto pra sempre).
+// Retorna o handoff atualizado, ou null se nada foi alterado (não estava vivo).
 export function failIfRunning(id: string, error: string): Handoff | null {
   const res = getDb()
     .prepare(
-      "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'running'",
+      "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status IN ('running','needs_input')",
     )
     .run(error, Date.now(), id)
   return res.changes > 0 ? fresh(id) : null
@@ -195,14 +236,15 @@ export function failIfRunning(id: string, error: string): Handoff | null {
 
 // Reconciliação em runtime, independente do evento PTY exit: pega filhas
 // fechadas/crashadas (ou nunca atreladas) sem esperar o exit. SEGURA por design —
-// só falha handoffs cuja session-filha NÃO está 'running'. Um filho VIVO em
-// trabalho longo (que não reporta progresso) NÃO pode ser morto. Retorna o nº de
-// handoffs reconciliados. Coluna de status viva em sessions = status='running'.
+// só falha handoffs cuja session-filha NÃO está 'running' na tabela sessions. Um
+// filho VIVO em trabalho longo OU aguardando a mãe (needs_input) NÃO pode ser
+// morto enquanto a session-filha segue 'running'. Cobre tanto running quanto
+// needs_input (ambos in-flight). Retorna o nº de handoffs reconciliados.
 export function reconcileStuck(): number {
   const res = getDb()
     .prepare(
       `UPDATE handoffs SET status = 'failed', error = ?, updated_at = ?
-       WHERE status = 'running'
+       WHERE status IN ('running','needs_input')
          AND (child_session_id IS NULL
               OR child_session_id NOT IN (SELECT id FROM sessions WHERE status = 'running'))`,
     )
@@ -219,12 +261,12 @@ export function getByChildSession(childSessionId: string): Handoff | null {
   return row ? toEntity(row) : null
 }
 
-// Dedup por alvo: handoff ativo (pending/approved/running) pro mesmo repo-alvo.
-// Usado pra evitar dois agentes mutando o mesmo repo em paralelo.
+// Dedup por alvo: handoff ativo (pending/approved/running/needs_input) pro mesmo
+// repo-alvo. Usado pra evitar dois agentes mutando o mesmo repo em paralelo.
 export function findActiveByTarget(targetRepoId: string): Handoff | null {
   const row = getDb()
     .prepare(
-      `${SELECT_HANDOFF} WHERE h.target_repo_id = ? AND h.status IN ('pending','approved','running') ORDER BY h.created_at DESC LIMIT 1`,
+      `${SELECT_HANDOFF} WHERE h.target_repo_id = ? AND h.status IN ('pending','approved','running','needs_input') ORDER BY h.created_at DESC LIMIT 1`,
     )
     .get(targetRepoId) as HandoffRow | undefined
   return row ? toEntity(row) : null

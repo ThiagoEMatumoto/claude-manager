@@ -7,6 +7,10 @@ import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
 import { get as getFeature } from '../services/feature-store'
 import * as handoffStore from '../services/handoff-store'
+// formatPtyInjection vive em services/handoff/inject.ts (fonte canônica, sem
+// dependência de electron). Reexportado abaixo para não quebrar quem importa
+// de './sessions' (ex.: sessions.test.ts).
+import { formatPtyInjection } from '../services/handoff/inject'
 import { featureMemory } from '../services/feature-memory'
 import { buildFeatureContextContent } from './feature-context'
 import { buildRepoArchitectureOrNull } from './repo-architecture-context'
@@ -188,12 +192,9 @@ export function buildSpawnInnerCmd(parts: {
   return innerCmd
 }
 
-// Envelopa o comando em bracketed-paste antes de mandar pro PTY. O TUI do claude
-// trata o conteúdo entre \x1b[200~ e \x1b[201~ como colagem literal (os \n NÃO
-// viram Enter), e só o \r final submete. Defesa pra prompts multi-linha.
-export function formatPtyInjection(cmd: string): string {
-  return `\x1b[200~${cmd}\x1b[201~\r`
-}
+// Reexport: mantém a superfície pública de './sessions' estável (sessions.test.ts
+// importa formatPtyInjection daqui). A definição mora em handoff/inject.ts.
+export { formatPtyInjection }
 
 // Injeta um comando inicial no REPL do claude assim que o TUI sobe. Como não há
 // sinal explícito de "pronto", esperamos o PRIMEIRO `data` do PTY daquela sessão
@@ -312,12 +313,16 @@ export function registerSessionIpc(): void {
       broadcast('pty:exit', e)
 
       // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
-      // reportado conclusão (status ainda 'running'), o handoff ficaria preso
-      // pra sempre. failIfRunning transiciona running→failed SÓ nesse caso (não
-      // sobrescreve um done/rejected). Mata o "stuck-running".
+      // reportado conclusão (status ainda vivo: 'running' OU 'needs_input'), o
+      // handoff ficaria preso pra sempre. failIfRunning transiciona ambos→failed
+      // (não sobrescreve done/rejected). Inclui needs_input: uma filha que
+      // perguntou e cuja PTY morreu de fato não pode ficar órfã.
       try {
         const linkedHandoff = handoffStore.getByChildSession(e.sessionId)
-        if (linkedHandoff && linkedHandoff.status === 'running') {
+        if (
+          linkedHandoff &&
+          (linkedHandoff.status === 'running' || linkedHandoff.status === 'needs_input')
+        ) {
           const reconciled = handoffStore.failIfRunning(
             linkedHandoff.id,
             `Sessão-filha encerrou (${e.exitCode === 0 ? 'exit' : 'crash'}) sem chamar handoff_report.`,

@@ -11,6 +11,11 @@ import * as featureStore from '../feature-store'
 import * as repoDepStore from '../repo-dependency-store'
 import * as handoffStore from '../handoff-store'
 import { composeHandoffPrompt, type HandoffEdge } from '../handoff/compose-prompt'
+// Seam de injeção mãe→filha (importa SÓ de inject.ts, não de ipc/sessions.ts —
+// evita arrastar electron/ipcMain pros handlers e permite mockar nos testes).
+import { injectIntoChild } from '../handoff/inject'
+import { getActivityFor } from '../session-activity'
+import { ptyManager } from '../pty-manager'
 import { getDb } from '../db'
 import { getPref } from '../prefs-store'
 import { randomUUID } from 'node:crypto'
@@ -520,6 +525,20 @@ function resolveRepo(ref: string): ResolvedRepo {
   }
 }
 
+// Resolve a atividade ao vivo da sessão-filha de um handoff: childSessionId
+// (sessions.id) → cc_session_id → derivação do session-activity (status do PID +
+// tail do JSONL). Null se não há filha atrelada, se ela não tem cc_session_id
+// ainda, ou se não está mais no índice. Reusa getActivityFor (mesma derivação do
+// watcher) — sem duplicar a lógica de status/enrichment.
+function childActivity(childSessionId: string | null): ReturnType<typeof getActivityFor> {
+  if (!childSessionId) return null
+  const row = getDb()
+    .prepare('SELECT cc_session_id FROM sessions WHERE id = ?')
+    .get(childSessionId) as { cc_session_id: string | null } | undefined
+  if (!row?.cc_session_id) return null
+  return getActivityFor(row.cc_session_id)
+}
+
 // Resolve label+role de um repo por id (pra descrever a ponta oposta de uma aresta).
 function repoBrief(id: string): { id: string; label: string; role: string | null } {
   const row = getDb()
@@ -550,13 +569,19 @@ const sessionHandoffSchema = z.object({
 
 const handoffResultSchema = z.object({ handoffId: z.string().min(1) })
 
+// Espelha HandoffStatus em shared/types/ipc.ts. needs_input é in-flight (vivo).
+const handoffStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'running',
+  'needs_input',
+  'done',
+  'rejected',
+  'failed',
+])
+
 const handoffListSchema = z.object({
-  status: z
-    .union([
-      z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed']),
-      z.array(z.enum(['pending', 'approved', 'running', 'done', 'rejected', 'failed'])),
-    ])
-    .optional(),
+  status: z.union([handoffStatusEnum, z.array(handoffStatusEnum)]).optional(),
 })
 
 const handoffReportSchema = z.object({
@@ -567,6 +592,19 @@ const handoffReportSchema = z.object({
 const handoffProgressSchema = z.object({
   handoffId: z.string().min(1),
   step: z.string().min(1),
+})
+
+// Mensagem da MÃE → filha (resposta a um needs_input, ou orientação no meio do
+// trabalho). text não-vazio, cap 4096 (uma colagem; prompts longos vão no kickoff).
+const handoffMessageSchema = z.object({
+  handoffId: z.string().min(1),
+  text: z.string().min(1).max(4096),
+})
+
+// Pergunta levantada PELA FILHA → mãe (decisão/bloqueio). question não-vazio.
+const handoffAskSchema = z.object({
+  handoffId: z.string().min(1),
+  question: z.string().min(1).max(4096),
 })
 
 // Default do teto de handoffs ativos (pending/approved/running) simultâneos por
@@ -616,15 +654,21 @@ function handoffTools(notify: McpNotify): ToolDef[] {
         handoffStore.reconcileStuck()
 
         // Cap de concorrência: não acumula handoffs ativos além do teto.
+        // needs_input conta como ativo (filha viva aguardando a mãe).
         const maxActive = getPref('handoffs.maxActive', DEFAULT_MAX_ACTIVE_HANDOFFS)
-        const activeHandoffs = handoffStore.list({ status: ['pending', 'approved', 'running'] })
+        const activeHandoffs = handoffStore.list({
+          status: ['pending', 'approved', 'running', 'needs_input'],
+        })
         if (activeHandoffs.length >= maxActive) {
           // Mensagem honesta: breakdown REAL por status. Sem pendentes a resolver,
           // não mandar "resolver pendentes" — os bloqueadores estão em andamento.
           const pending = activeHandoffs.filter(
             (h) => h.status === 'pending' || h.status === 'approved',
           )
-          const running = activeHandoffs.filter((h) => h.status === 'running')
+          // running + needs_input contam como "em andamento" no breakdown.
+          const running = activeHandoffs.filter(
+            (h) => h.status === 'running' || h.status === 'needs_input',
+          )
           const fmt = (h: (typeof activeHandoffs)[number]): string =>
             `${h.targetRepoLabel ?? h.targetRepoId} (${h.id})`
           let error: string
@@ -724,19 +768,75 @@ function handoffTools(notify: McpNotify): ToolDef[] {
       name: 'handoff_result',
       title: 'Poll handoff result',
       description:
-        'Poll a handoff by id. Returns { status, currentStep, stepUpdatedAt, summary, error }. While running, currentStep shows the child’s latest progress (set via handoff_progress). Keep polling until status=done (then read summary) or rejected/failed.',
+        'Poll a handoff by id. Returns { status, currentStep, stepUpdatedAt, pendingQuestion, summary, error } plus live child activity { liveStatus, lastActivityAt, lastText, tokens }. status=needs_input means the child asked a question (pendingQuestion) and is waiting — answer it with handoff_message(handoffId, text). liveStatus (working|waiting|idle|ended) reflects the child PTY in real time: use it to tell genuine progress from a stall. Keep polling until status=done (then read summary) or rejected/failed.',
       inputSchema: handoffResultSchema,
       handler: (args) => {
         const { handoffId } = handoffResultSchema.parse(args)
         const handoff = handoffStore.get(handoffId)
         if (!handoff) throw new Error(`handoff não encontrado: ${handoffId}`)
+
+        // Enriquecimento ao vivo: resolve childSessionId (sessions.id) → cc_session_id
+        // e cruza com a derivação do session-activity (índice de PIDs + tail do JSONL).
+        // Null quando a filha ainda não foi atrelada ou já não está no índice.
+        const activity = childActivity(handoff.childSessionId)
+
         return ok({
           status: handoff.status,
           currentStep: handoff.currentStep,
           stepUpdatedAt: handoff.stepUpdatedAt,
+          pendingQuestion: handoff.pendingQuestion,
           summary: handoff.summary,
           error: handoff.error,
+          liveStatus: activity?.status ?? null,
+          lastActivityAt: activity?.lastActivityAt ?? null,
+          lastText: activity?.lastText ?? null,
+          tokens: activity?.tokens ?? null,
         })
+      },
+    },
+    {
+      name: 'handoff_message',
+      title: 'Message the child session',
+      description:
+        'Called by the MOTHER to send a message into the running child session — typically to ANSWER a needs_input question, or to give mid-flight guidance. The text is pasted into the child’s REPL. Requires the handoff to be in-flight (running or needs_input) AND the child PTY alive. After this, the child resumes (status returns to running). Use handoff_result to read the child’s pendingQuestion first.',
+      inputSchema: handoffMessageSchema,
+      handler: (args) => {
+        const { handoffId, text } = handoffMessageSchema.parse(args)
+        const handoff = handoffStore.get(handoffId)
+        if (!handoff) throw new Error(`handoff não encontrado: ${handoffId}`)
+        if (handoff.status !== 'running' && handoff.status !== 'needs_input') {
+          throw new Error(
+            `handoff ${handoffId} não está em andamento (status: ${handoff.status}); só dá pra mandar mensagem a uma filha viva (running/needs_input).`,
+          )
+        }
+        if (!handoff.childSessionId) {
+          throw new Error(`handoff ${handoffId} ainda não tem sessão-filha atrelada.`)
+        }
+        if (!ptyManager.isRunning(handoff.childSessionId)) {
+          throw new Error(
+            `a sessão-filha do handoff ${handoffId} não está mais viva (PTY encerrada) — não dá pra entregar a mensagem.`,
+          )
+        }
+        injectIntoChild(handoff.childSessionId, text)
+        // A mãe respondeu: a filha retoma (needs_input → running, limpa a pergunta).
+        const updated = handoffStore.resume(handoffId)
+        notify.broadcast('handoff:updated', updated)
+        return ok({ status: updated.status, delivered: true })
+      },
+    },
+    {
+      name: 'handoff_ask',
+      title: 'Ask the mother a question',
+      description:
+        'Called by the CHILD session when it needs a decision or input from the mother/human before it can continue (architectural choice, ambiguity, missing credential). Records the question and moves the handoff to needs_input — the mother sees it via handoff_result(pendingQuestion) and replies with handoff_message. Do NOT use for routine progress (use handoff_progress) or to report completion (use handoff_report).',
+      inputSchema: handoffAskSchema,
+      handler: (args) => {
+        const { handoffId, question } = handoffAskSchema.parse(args)
+        const existing = handoffStore.get(handoffId)
+        if (!existing) throw new Error(`handoff não encontrado: ${handoffId}`)
+        const updated = handoffStore.ask(handoffId, question)
+        notify.broadcast('handoff:updated', updated)
+        return ok({ status: updated.status, pendingQuestion: updated.pendingQuestion })
       },
     },
     {

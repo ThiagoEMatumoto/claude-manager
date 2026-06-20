@@ -209,6 +209,7 @@ const api: Api = {
     markRunning: (input: { id: string; childSessionId: string }) =>
       invoke('handoffs:mark-running', input),
     fail: (input: { id: string; error: string }) => invoke('handoffs:fail', input),
+    sendMessage: (input: { id: string; text: string }) => invoke('handoffs:send-message', input),
     spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
     onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },

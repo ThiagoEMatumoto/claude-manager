@@ -85,10 +85,16 @@ export interface ConnectHubToAllInput {
 // Uma sessão-mãe (Claude) pede pra abrir uma sessão-filha noutro repo com um
 // prompt estruturado; passa por gate humano; a filha reporta um resumo de volta.
 // status app-level: pending → approved → running → done | rejected | failed.
+// needs_input é um estado VIVO (não-terminal) DENTRO de running: a filha
+// levantou uma pergunta (handoff_ask) e aguarda a mãe responder (handoff_message,
+// que a faz voltar pra running). Transições extras:
+//   running ⇄ needs_input  (handoff_ask / handoff_message ou handoff_progress).
+// needs_input conta como in-flight (teto/dedup/reconciliação) — NÃO é terminal.
 export type HandoffStatus =
   | 'pending'
   | 'approved'
   | 'running'
+  | 'needs_input'
   | 'done'
   | 'rejected'
   | 'failed'
@@ -121,6 +127,10 @@ export interface Handoff {
   // conclusão — done só vem de handoff_report.
   currentStep: string | null
   stepUpdatedAt: number | null
+  // Pergunta aberta levantada pela filha via handoff_ask. Não-null ⇒ status
+  // 'needs_input', aguardando a mãe responder (handoff_message limpa e retoma).
+  pendingQuestion: string | null
+  questionAskedAt: number | null
   summary: string | null
   error: string | null
   createdAt: number
@@ -1249,6 +1259,10 @@ export interface Api {
     reject(id: string): Promise<Handoff>
     markRunning(input: { id: string; childSessionId: string }): Promise<Handoff>
     fail(input: { id: string; error: string }): Promise<Handoff>
+    // Entrega uma mensagem do humano à sessão-filha (texto livre ou resposta a um
+    // handoff_ask). Resolve o childSessionId pelo handoffId; rejeita se a filha não
+    // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
+    sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
     onUpdated(handler: (payload: unknown) => void): () => void
   }

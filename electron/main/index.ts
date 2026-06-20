@@ -35,6 +35,7 @@ import {
 import { startMcpServer, stopMcpServer } from './services/mcp/server'
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
+import { calendarWatcher } from './services/calendar/calendar-watcher'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
 import { setMainWindow } from './services/notifications'
 
@@ -153,6 +154,10 @@ app.whenReady().then(async () => {
   initUpdater()
   startUsageMonitor()
   startFeatureWatcher()
+  // Ativação assistida por Google Calendar: poll da URL secreta iCal (pref
+  // meeting_calendar_ics_url). Inativo se a pref estiver vazia — sem erro nem
+  // rede. Inicia DEPOIS da janela porque o clique da notificação a foca.
+  calendarWatcher.start()
 
   // Self-heal periódico de handoffs presos em 'running' cuja filha já morreu em
   // runtime (PTY exit pode não ter disparado a reconciliação). Não bloqueia o
@@ -193,6 +198,7 @@ function runFinalShutdown(): void {
   void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
+  calendarWatcher.stop()
   if (handoffReconcileTimer) {
     clearInterval(handoffReconcileTimer)
     handoffReconcileTimer = null

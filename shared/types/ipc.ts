@@ -769,6 +769,18 @@ export interface MaterializeMeetingTaskInput {
   startMs?: number | null
 }
 
+// Ativação assistida por Google Calendar: quando o watcher detecta um evento do
+// Meet começando agora, o main emite este draft pro renderer (canal
+// 'meeting:calendar:activate') no clique da notificação nativa. A MeetingsArea
+// cria uma reunião pré-preenchida com title/attendees. meetUrl/startMs entram na
+// proveniência.
+export interface MeetingActivationDraft {
+  title: string
+  attendees: string[]
+  meetUrl: string | null
+  startMs: number | null
+}
+
 // ---- Dashboard / visão hierárquica (Fase 4) ----
 
 // Projeção enxuta de tarefa pros nós da árvore do dashboard.
@@ -1494,6 +1506,10 @@ export interface Api {
     onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
     onTranscriptPartial(handler: (partial: MeetingPartialEvent) => void): () => void
     onStatus(handler: (payload: MeetingStatusEvent) => void): () => void
+    // Ativação assistida por Google Calendar: emitido quando o usuário clica na
+    // notificação nativa de "reunião começando agora". O renderer vai pra área
+    // Reuniões e cria uma reunião pré-preenchida com o draft.
+    onCalendarActivate(handler: (draft: MeetingActivationDraft) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

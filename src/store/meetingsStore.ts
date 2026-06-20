@@ -4,6 +4,7 @@ import type {
   CreateMeetingInput,
   MaterializeMeetingTaskInput,
   Meeting,
+  MeetingActivationDraft,
   MeetingExtractResult,
   MeetingExtraction,
   MeetingListFilter,
@@ -45,6 +46,13 @@ interface MeetingsState {
   sidecarConfigured: boolean | null
   checkSidecarConfigured: () => Promise<void>
 
+  // Draft de ativação por Google Calendar pendente de consumo. Setado pelo
+  // watcher (via AppShell.onCalendarActivate) e consumido UMA vez pela
+  // MeetingsArea, que cria a reunião pré-preenchida e chama clearActivationDraft.
+  activationDraft: MeetingActivationDraft | null
+  setActivationDraft: (draft: MeetingActivationDraft | null) => void
+  clearActivationDraft: () => void
+
   load: () => Promise<void>
   refresh: () => Promise<void>
   setFilter: (filter: MeetingListFilter) => Promise<void>
@@ -76,6 +84,10 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   searchResults: [],
   searching: false,
   sidecarConfigured: null,
+  activationDraft: null,
+
+  setActivationDraft: (draft) => set({ activationDraft: draft }),
+  clearActivationDraft: () => set({ activationDraft: null }),
 
   setSearchQuery: (query) => {
     set({ searchQuery: query })

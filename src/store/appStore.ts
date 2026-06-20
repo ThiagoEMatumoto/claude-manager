@@ -10,6 +10,7 @@ export type Area =
   | 'overview'
   | 'objectives'
   | 'tasks'
+  | 'meetings'
   | 'architecture'
   | 'handoffs'
 

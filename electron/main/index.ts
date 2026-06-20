@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
 import { ptyManager } from './services/pty-manager'
+import { meetingSidecarManager } from './services/meeting-sidecar'
 import * as handoffStore from './services/handoff-store'
 import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
@@ -20,6 +21,7 @@ import { registerRepoDependenciesIpc } from './ipc/repo-dependencies'
 import { registerHandoffsIpc } from './ipc/handoffs'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerMeetingsIpc } from './ipc/meetings'
 import { registerMcpIpc } from './ipc/mcp'
 import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
 import { setSyncMutationHook, broadcast } from './services/notify'
@@ -104,6 +106,15 @@ app.whenReady().then(async () => {
   // colando via clipboard nativo do Chromium. Coerente com autoHideMenuBar.
   Menu.setApplicationMenu(null)
   getDb()
+  // Boot reconcile de reuniões presas em estados "vivos" após um crash/quit sujo:
+  // num processo fresco nenhum sidecar pode estar vivo, então qualquer reunião
+  // nesses estados é órfã → failed. Idempotente; ended_at preserva o existente.
+  getDb()
+    .prepare(
+      `UPDATE meetings SET status = 'failed', ended_at = COALESCE(ended_at, ?)
+       WHERE status IN ('capturing', 'recording', 'transcribing', 'diarizing')`,
+    )
+    .run(Date.now())
   // MCP server local (writes externos via Claude Code). Async e fire-and-forget:
   // EADDRINUSE etc. são logados dentro do start — nunca derrubam o boot.
   void startMcpServer()
@@ -126,6 +137,7 @@ app.whenReady().then(async () => {
   registerFeaturesIpc()
   registerObjectivesIpc()
   registerTasksIpc()
+  registerMeetingsIpc()
   registerMcpIpc()
   registerSyncIpc()
   // Wire o ponto único de mutação → coordinator (auto-sync on-idle). Cobre
@@ -188,6 +200,7 @@ function runFinalShutdown(): void {
   syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()
+  meetingSidecarManager.killAllSidecars()
   sessionActivityService.closeAll()
   getDb()
     .prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'")

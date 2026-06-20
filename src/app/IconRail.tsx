@@ -6,6 +6,7 @@ import {
   Home,
   Inbox,
   ListTodo,
+  Mic,
   Network,
   Settings,
   Target,
@@ -31,6 +32,7 @@ const AREAS: AreaDef[] = [
   { id: 'features', icon: ClipboardList, label: 'Features' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },
+  { id: 'meetings', icon: Mic, label: 'Reuniões' },
   { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },
   { id: 'metrics', icon: BarChart3, label: 'Métricas' },
 ]

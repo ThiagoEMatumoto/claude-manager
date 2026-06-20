@@ -252,6 +252,7 @@ const api: Api = {
     update: (input: UpdateMeetingInput) => invoke('meetings:update', input),
     delete: (id: string) => invoke('meetings:delete', id),
     listSegments: (meetingId: string) => invoke('meetings:list-segments', meetingId),
+    search: (query: string) => invoke('meetings:search', query),
     sidecarConfigured: () => invoke<boolean>('meetings:sidecar-configured'),
     startCapture: (meetingId: string) => invoke('meetings:start-capture', meetingId),
     stopCapture: (meetingId: string) => invoke('meetings:stop-capture', meetingId),

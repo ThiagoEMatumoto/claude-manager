@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Mic, Square, Sparkles, AlertTriangle } from 'lucide-react'
+import { Plus, Mic, Square, Sparkles, AlertTriangle, Search, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Lock } from 'lucide-react'
 import { useMeetingsStore } from '@/store/meetingsStore'
+import { useMeetingPrefsStore } from '@/lib/meeting-prefs-store'
 import { objectivesApi, featuresApi, meetingsApi } from '@/lib/ipc'
 import type {
   Feature,
@@ -10,6 +12,7 @@ import type {
   ObjectiveWithProgress,
 } from '../../../shared/types/ipc'
 import { MeetingList } from './MeetingList'
+import { MeetingSearchResults } from './MeetingSearchResults'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
 import { ExtractionReview } from './ExtractionReview'
 import { useMeetings } from './useMeetings'
@@ -49,6 +52,19 @@ export function MeetingsArea() {
   const sidecarConfigured = useMeetingsStore((s) => s.sidecarConfigured)
   const activationDraft = useMeetingsStore((s) => s.activationDraft)
   const clearActivationDraft = useMeetingsStore((s) => s.clearActivationDraft)
+  const searchQuery = useMeetingsStore((s) => s.searchQuery)
+  const searchResults = useMeetingsStore((s) => s.searchResults)
+  const searching = useMeetingsStore((s) => s.searching)
+  const setSearchQuery = useMeetingsStore((s) => s.setSearchQuery)
+
+  const isSearching = searchQuery.trim().length > 0
+
+  const privateMode = useMeetingPrefsStore((s) => s.privateMode)
+  const setPrivateMode = useMeetingPrefsStore((s) => s.setPrivateMode)
+  const loadMeetingPrefs = useMeetingPrefsStore((s) => s.load)
+  useEffect(() => {
+    void loadMeetingPrefs()
+  }, [loadMeetingPrefs])
 
   const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
   const [features, setFeatures] = useState<Feature[]>([])
@@ -200,8 +216,41 @@ export function MeetingsArea() {
             Nova
           </button>
         </div>
+        <div className="border-b border-[var(--color-border)] px-3 py-2.5">
+          <div className="relative">
+            <Icon
+              as={Search}
+              size={13}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-dim)]"
+            />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar nas reuniões…"
+              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] py-1.5 pl-8 pr-7 text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)] focus:border-[var(--color-accent)]"
+            />
+            {isSearching && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                title="Limpar busca"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+              >
+                <Icon as={X} size={13} />
+              </button>
+            )}
+          </div>
+        </div>
         <div className="flex-1 overflow-y-auto p-3">
-          {loading && meetings.length === 0 ? (
+          {isSearching ? (
+            <MeetingSearchResults
+              matches={searchResults}
+              selectedId={selectedId}
+              loading={searching}
+              onSelect={(id) => setSelectedId(id)}
+            />
+          ) : loading && meetings.length === 0 ? (
             <div className="py-12 text-center text-sm text-[var(--color-text-dim)]">
               Carregando…
             </div>
@@ -239,6 +288,26 @@ export function MeetingsArea() {
                 {selected.title}
               </h2>
               <div className="flex shrink-0 items-center gap-2">
+                {selected.extractor && (
+                  <span
+                    className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-dim)]"
+                    title="Provedor usado na última extração"
+                  >
+                    {selected.extractor}
+                  </span>
+                )}
+                <label
+                  className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+                  title="Modo privado: extrai 100% local via Ollama, sem chamar o processo claude"
+                >
+                  <input
+                    type="checkbox"
+                    checked={privateMode}
+                    onChange={(e) => void setPrivateMode(e.target.checked)}
+                  />
+                  <Icon as={Lock} size={12} />
+                  Modo privado (local)
+                </label>
                 {reviewForSelected ? (
                   <button
                     type="button"

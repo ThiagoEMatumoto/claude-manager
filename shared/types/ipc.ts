@@ -734,6 +734,19 @@ export interface MeetingPartialEvent {
   text: string
 }
 
+// Origem do trecho que casou na busca FTS5 (transcript, notas aumentadas ou
+// item extraído). Deixa a UI rotular de onde veio o match.
+export type MeetingSearchSource = 'segment' | 'notes' | 'extraction'
+
+// Um match de `meetings:search`: a reunião + o snippet (com <mark>…</mark> nos
+// termos) + de onde o trecho veio + um score (bm25, menor = mais relevante).
+export interface MeetingSearchMatch {
+  meeting: Meeting
+  snippet: string
+  source: MeetingSearchSource
+  score: number
+}
+
 // Resultado da extração (`meetings:extract`): notas aumentadas + resumo
 // persistidos + os itens já com grounding. A UI mostra pra revisão humana.
 export interface MeetingExtractResult {
@@ -1472,6 +1485,9 @@ export interface Api {
     update(input: UpdateMeetingInput): Promise<Meeting>
     delete(id: string): Promise<void>
     listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Busca full-text (FTS5) entre reuniões: casa transcript + notas aumentadas
+    // + itens extraídos e devolve as reuniões com snippet/origem do match.
+    search(query: string): Promise<MeetingSearchMatch[]>
     // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
     // python + sidecar.py existem). false → app cai no fake (dev) e a UI avisa.
     sidecarConfigured(): Promise<boolean>

@@ -293,6 +293,24 @@ export interface CreateDossierInput {
   status?: DossierStatus
 }
 
+// Input do front-door (renderer → IPC dossiers:create). Diferente de
+// CreateDossierInput (usado pelo store, que aceita id pré-gerado e status): aqui
+// o usuário só informa o que digita no form.
+export interface CreateDossierApiInput {
+  title: string
+  question: string
+  sourceClasses: SourceClass[]
+  budgetTokens?: number | null
+}
+
+// Plano editável passado no Gate A (renderer → IPC). Espelha DossierPlan do motor
+// sem acoplar o shared aos tipos internos do pipeline.
+export interface DossierPlanInput {
+  question: string
+  subQuestions: string[]
+  sourceClasses: SourceClass[]
+}
+
 export interface CreateDossierRunInput {
   id?: string
   dossierId: string
@@ -1434,6 +1452,28 @@ export interface Api {
     // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
     sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
+    onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  dossiers: {
+    create(input: CreateDossierApiInput): Promise<Dossier>
+    list(opts?: { status?: DossierStatus }): Promise<Dossier[]>
+    get(id: string): Promise<Dossier | null>
+    archive(id: string): Promise<Dossier>
+    // Arranca uma nova run: cria a run, monta o plano e PARA em awaiting_gate_a.
+    startRun(input: { dossierId: string }): Promise<DossierRun>
+    // Gate A aprovado: busca → fetch → extração, depois PARA em awaiting_gate_b.
+    // plan opcional = plano editado pelo humano antes de gastar.
+    approveGateA(input: { runId: string; plan?: DossierPlanInput }): Promise<DossierRun>
+    // Gate B aprovado: poda opcional → verificação roteada → síntese graduada.
+    approveGateB(input: { runId: string; keepEvidenceIds?: string[] }): Promise<DossierRun>
+    // Retoma uma run parada (ex: throttle) a partir do checkpoint, respeitando os gates.
+    resumeRun(input: { runId: string }): Promise<DossierRun>
+    listRuns(dossierId: string): Promise<DossierRun[]>
+    getRun(runId: string): Promise<DossierRun | null>
+    listEvidence(runId: string): Promise<EvidenceRecord[]>
+    listSources(runId: string): Promise<Source[]>
+    // Payload é a DossierRun atualizada; o renderer trata como sinal de recarga.
+    onRunUpdated(handler: (payload: unknown) => void): () => void
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   objectives: {

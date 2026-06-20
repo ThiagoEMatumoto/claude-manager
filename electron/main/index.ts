@@ -18,6 +18,7 @@ import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
 import { registerRepoDependenciesIpc } from './ipc/repo-dependencies'
 import { registerHandoffsIpc } from './ipc/handoffs'
+import { registerDossiersIpc } from './ipc/dossiers'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
 import { registerMcpIpc } from './ipc/mcp'
@@ -113,6 +114,7 @@ app.whenReady().then(async () => {
   registerProjectIpc()
   registerRepoDependenciesIpc()
   registerHandoffsIpc()
+  registerDossiersIpc()
   registerSessionIpc()
   registerShellIpc()
   registerDialogIpc()

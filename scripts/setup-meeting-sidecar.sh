@@ -14,7 +14,20 @@
 #     antigas o cu128 também funciona; em máquinas sem GPU, o torch CPU ainda é
 #     útil porque o sidecar faz fallback automático para CPU.
 #
-# NÃO roda nada do sidecar nem grava áudio — só prepara o ambiente.
+# DIARIZAÇÃO (quem falou) — pyannote.audio (instalado via requirements.txt):
+#   O pipeline `pyannote/speaker-diarization-3.1` é GATED no Hugging Face. Para
+#   habilitar a diarização (OPCIONAL — sem ela o transcript sai sem speaker):
+#     1) Aceite os termos em https://hf.co/pyannote/speaker-diarization-3.1
+#        E em https://hf.co/pyannote/segmentation-3.0 (dependência do pipeline).
+#     2) Gere um token de acesso (read) em https://hf.co/settings/tokens
+#     3) Exporte o token ANTES de iniciar a captura no app, p.ex.:
+#          export HF_TOKEN=hf_xxx            (o sidecar lê HF_TOKEN/HUGGINGFACE_TOKEN)
+#        ou faça login uma vez: `huggingface-cli login`
+#   SEM token/modelo o sidecar emite um `error` de diarização e cai no
+#   comportamento atual (segments sem speaker) — NÃO trava a transcrição.
+#
+# NÃO roda nada do sidecar nem grava áudio — só prepara o ambiente. NÃO baixa o
+# modelo de diarização (gated; exige o token acima).
 #
 # Após rodar: aponte a pref `meeting_sidecar_python` do app para o caminho do
 # python impresso no fim (veja instruções no final).
@@ -71,8 +84,10 @@ echo "==> instalando torch (cu128 / Blackwell)"
 # o ABI de CUDA/wheels.
 uv pip install --python "${VENV_PY}" --index-url "${TORCH_INDEX}" torch==2.11.0
 
-# --- faster-whisper + soundfile + numpy -----------------------------------
-echo "==> instalando faster-whisper + soundfile + numpy"
+# --- faster-whisper + soundfile + numpy + pyannote.audio ------------------
+# pyannote.audio (diarização) está no requirements.txt. Reusa o torch cu128 já
+# instalado acima (o pin de torch impede o resolver de trocar a build com CUDA).
+echo "==> instalando faster-whisper + soundfile + numpy + pyannote.audio"
 uv pip install --python "${VENV_PY}" -r "${REQUIREMENTS}"
 
 # --- modelo large-v3 -------------------------------------------------------
@@ -98,3 +113,11 @@ echo "       window.api.prefs.set('meeting_sidecar_python', '${VENV_PY}')"
 echo
 echo "O modelo large-v3 (~3GB) será baixado no 1º uso, salvo se você"
 echo "descomentar o bloco de pré-download acima."
+echo
+echo "Diarização (quem falou) — OPCIONAL, modelo GATED no Hugging Face:"
+echo "  1) Aceite os termos: https://hf.co/pyannote/speaker-diarization-3.1"
+echo "                   e:  https://hf.co/pyannote/segmentation-3.0"
+echo "  2) Gere um token (read): https://hf.co/settings/tokens"
+echo "  3) Exporte antes de capturar:  export HF_TOKEN=hf_xxx"
+echo "     (ou rode uma vez: ${VENV_DIR}/bin/huggingface-cli login)"
+echo "  Sem o token, a transcrição funciona normalmente — só sem speaker."

@@ -7,14 +7,30 @@ Diferenças vs o fake:
     (você) via `pw-record` + `wpctl`/`pw-cli` — SEM ffmpeg/pactl/parec.
   - Transcreve com faster-whisper large-v3, language='pt', VAD, em GPU (CUDA)
     com fallback automático para CPU se o CUDA estiver indisponível/incompatível.
-  - SEM diarização (é outra task): emite speaker=None nos segments.
+  - DIARIZAÇÃO (quem falou) PÓS-captura: roda pyannote.audio (speaker-diarization
+    -3.1) sobre o WAV completo e atribui um `speaker_label` (SPEAKER_00/01…) a
+    cada segment por maior overlap temporal segment↔turno. O speaker predominante
+    da TRILHA DO MIC é marcado `is_local_user` (a captura em 2 trilhas separadas
+    identifica "você" deterministicamente). Diarização é OPCIONAL: o modelo é
+    GATED no Hugging Face (exige aceitar os termos + um token HF_TOKEN). Sem o
+    token/modelo, o sidecar emite um `error` claro e cai no comportamento antigo
+    (segments sem speaker) — NÃO trava.
 
-Contrato NDJSON (stdout, 1 evento por linha, flush=True) — idêntico ao fake:
-  {"type":"status","state":"capturing"|"transcribing"|...}
-  {"type":"segment","idx":N,"start_ms":..,"end_ms":..,"speaker":null,
+Por que pyannote direto e não whisperX: whisperX empacota o próprio pipeline de
+STT (reimplementa a transcrição), o que arrastaria um 2º caminho de STT divergente
+do faster-whisper já validado aqui. pyannote sozinho + casamento por timestamp
+reutiliza a transcrição intocada e é o caminho mais simples.
+
+Contrato NDJSON (stdout, 1 evento por linha, flush=True) — superset do fake:
+  {"type":"status","state":"capturing"|"transcribing"|"diarizing"|...}
+  {"type":"speaker","label":"SPEAKER_00","is_local_user":true|false}
+  {"type":"segment","idx":N,"start_ms":..,"end_ms":..,"speaker":"SPEAKER_0X"|null,
    "text":"...","confidence":<float|null>}
   {"type":"done","segments":N,"duration_ms":...}
   {"type":"error","message":"..."}
+
+Os eventos `speaker` (quando a diarização roda) precedem os `segment` que os
+referenciam, pra que o consumidor já conheça o is_local_user de cada label.
 
 stderr = só log legível (device, VRAM, progresso). stdout = SÓ NDJSON.
 SIGINT/SIGTERM = stop graceful (para a captura, transcreve o que já gravou,
@@ -222,8 +238,10 @@ def _stop_proc(proc, grace=3.0):
 
 def capture_two_tracks(out_dir):
     """Grava monitor + mic em 2 WAVs temporários até `_stop` ser sinalizado.
-    Retorna a lista de caminhos efetivamente gravados (pode ser 1 se só um
-    device existir). Levanta RuntimeError se NENHUM device gravar."""
+    Retorna a lista de (path, kind) efetivamente gravados — kind ∈
+    {"monitor","mic"} — preservando QUAL trilha é o mic (necessário pro
+    is_local_user da diarização). Pode ter só 1 item se um device faltar.
+    Levanta RuntimeError se NENHUM device gravar."""
     monitor_target, mic_target = _resolve_capture_targets()
     log(f"targets de captura: monitor={monitor_target!r} mic={mic_target!r}")
 
@@ -283,14 +301,14 @@ def capture_two_tracks(out_dir):
         _stop.wait()
         log("stop sinalizado — encerrando as gravações")
 
-        paths = []
-        for proc, path, _kind in alive:
+        recorded = []  # (path, kind) — kind ∈ {"monitor","mic"}
+        for proc, path, kind in alive:
             _stop_proc(proc)
             if os.path.exists(path) and os.path.getsize(path) > 44:  # > header WAV
-                paths.append(path)
-        if not paths:
+                recorded.append((path, kind))
+        if not recorded:
             raise RuntimeError("captura encerrou sem produzir áudio")
-        return paths
+        return recorded
     finally:
         # Defesa final: nenhum pw-record sobrevive a esta função, mesmo se uma
         # exceção pular o _stop_proc acima. _stop_proc é no-op em proc já morto.
@@ -380,11 +398,16 @@ def _pick_device():
 
 
 def transcribe(wav_path):
-    """Transcreve `wav_path` com faster-whisper large-v3 (pt, VAD). Emite um
-    evento `segment` por Segment retornado e devolve (n_segments, duration_ms).
+    """Transcreve `wav_path` com faster-whisper large-v3 (pt, VAD). NÃO emite
+    eventos: devolve (segments, duration_ms), onde `segments` é uma lista de
+    dicts {idx,start_ms,end_ms,text,confidence}. A emissão acontece depois, já
+    com o speaker_label da diarização (quando houver), pra que cada `segment`
+    saia uma única vez no NDJSON.
 
     Robustez Blackwell: se a inicialização do modelo na GPU explodir (ex.: kernel
     incompatível em runtime, não pego pelo cuda.is_available), reinicia na CPU."""
+    import math
+
     from faster_whisper import WhisperModel
 
     device, compute_type = _pick_device()
@@ -405,7 +428,7 @@ def transcribe(wav_path):
 
     emit({"type": "status", "state": "transcribing"})
 
-    segments, info = model.transcribe(
+    segments_iter, info = model.transcribe(
         wav_path,
         language="pt",
         vad_filter=True,
@@ -414,29 +437,270 @@ def transcribe(wav_path):
     )
 
     duration_ms = int((getattr(info, "duration", 0.0) or 0.0) * 1000)
-    n = 0
-    for seg in segments:
+    segments = []
+    for seg in segments_iter:
         confidence = None
         if seg.avg_logprob is not None:
             # avg_logprob (log-prob) → ~[0,1] só pra UI; não é probabilidade real.
-            import math
-
             confidence = round(float(math.exp(seg.avg_logprob)), 4)
-        emit(
+        segments.append(
             {
-                "type": "segment",
-                "idx": n,
+                "idx": len(segments),
                 "start_ms": int(seg.start * 1000),
                 "end_ms": int(seg.end * 1000),
-                "speaker": None,  # diarização é outra task
                 "text": seg.text.strip(),
                 "confidence": confidence,
             }
         )
-        n += 1
 
-    log(f"transcrição concluída: {n} segments, {duration_ms}ms (device={device})")
-    return n, duration_ms
+    log(
+        f"transcrição concluída: {len(segments)} segments, {duration_ms}ms "
+        f"(device={device})"
+    )
+    return segments, duration_ms
+
+
+# ---------------------------------------------------------------------------
+# Diarização com pyannote.audio (quem falou) — OPCIONAL, modelo gated no HF
+# ---------------------------------------------------------------------------
+
+
+class DiarizationUnavailable(Exception):
+    """A diarização não pôde rodar (pyannote ausente, token HF faltando, ou
+    modelo gated não aceito). Sinaliza degradação graciosa: emitimos um `error`
+    de diarização e seguimos sem speaker — NÃO é fatal pra transcrição."""
+
+
+def _hf_token():
+    """Token do Hugging Face via env (HF_TOKEN / HUGGINGFACE_TOKEN /
+    HUGGING_FACE_HUB_TOKEN). None se nenhum estiver setado — nesse caso o
+    pyannote ainda pode achar credencial de um `huggingface-cli login` prévio,
+    então não falhamos aqui; deixamos o load do pipeline decidir."""
+    for key in ("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        val = os.environ.get(key)
+        if val:
+            return val.strip()
+    return None
+
+
+def _load_diar_pipeline():
+    """Carrega o pipeline pyannote speaker-diarization-3.1 (gated no HF). Move
+    pra GPU se torch tiver CUDA. Levanta DiarizationUnavailable com mensagem
+    acionável se a lib faltar ou o modelo/token não estiver disponível."""
+    try:
+        from pyannote.audio import Pipeline
+    except Exception as e:  # noqa: BLE001 — ImportError ou erro de import transitivo
+        raise DiarizationUnavailable(
+            f"pyannote.audio indisponível ({e}) — rode scripts/setup-meeting-sidecar.sh"
+        ) from e
+
+    token = _hf_token()
+    try:
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=token,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise DiarizationUnavailable(
+            "modelo de diarização indisponível — aceite os termos em "
+            "https://hf.co/pyannote/speaker-diarization-3.1 e forneça um token "
+            f"(env HF_TOKEN ou huggingface-cli login). Detalhe: {e}"
+        ) from e
+
+    # Pipeline.from_pretrained pode retornar None se o token não autorizar o
+    # download (sem levantar) — trate como indisponível.
+    if pipeline is None:
+        raise DiarizationUnavailable(
+            "pipeline de diarização não carregou (token HF ausente/sem acesso ao "
+            "modelo gated pyannote/speaker-diarization-3.1)"
+        )
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            pipeline.to(torch.device("cuda"))
+            log("diarização: pipeline movido para CUDA")
+    except Exception as e:  # noqa: BLE001
+        log(f"diarização: mantendo na CPU ({e})")
+
+    return pipeline
+
+
+def _diarize(wav_path):
+    """Roda a diarização sobre `wav_path`. Retorna uma lista de turnos
+    [(start_s, end_s, label), …] ordenada por start. Levanta
+    DiarizationUnavailable em qualquer falha de setup."""
+    pipeline = _load_diar_pipeline()
+    emit({"type": "status", "state": "diarizing"})
+    log(f"diarizando {wav_path}…")
+    try:
+        annotation = pipeline(wav_path)
+    except Exception as e:  # noqa: BLE001 — falha em runtime (áudio inválido, OOM)
+        raise DiarizationUnavailable(f"falha ao diarizar: {e}") from e
+
+    turns = [
+        (float(turn.start), float(turn.end), str(label))
+        for turn, _track, label in annotation.itertracks(yield_label=True)
+    ]
+    turns.sort(key=lambda t: t[0])
+    n_speakers = len({label for _s, _e, label in turns})
+    log(f"diarização: {len(turns)} turnos, {n_speakers} speaker(s)")
+    return turns
+
+
+def _overlap_ms(a_start, a_end, b_start, b_end):
+    """Sobreposição (em ms) de [a_start,a_end] com [b_start,b_end]; 0 se não há."""
+    return max(0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def assign_speakers(segments, turns):
+    """Atribui um speaker_label a cada segment por MAIOR overlap temporal com os
+    turnos da diarização. `turns` em segundos; `segments` com start_ms/end_ms.
+    Muta os dicts de `segments` adicionando 'speaker' (label ou None) e devolve
+    o conjunto ordenado de labels efetivamente usados. Segment sem nenhum overlap
+    fica com speaker=None (silêncio/ruído entre turnos)."""
+    used = set()
+    for seg in segments:
+        s_start, s_end = seg["start_ms"], seg["end_ms"]
+        best_label = None
+        best_overlap = 0
+        for t_start_s, t_end_s, label in turns:
+            ov = _overlap_ms(s_start, s_end, int(t_start_s * 1000), int(t_end_s * 1000))
+            if ov > best_overlap:
+                best_overlap = ov
+                best_label = label
+        seg["speaker"] = best_label
+        if best_label is not None:
+            used.add(best_label)
+    return sorted(used)
+
+
+def _voiced_intervals(wav_path, frame_s=0.05, energy_floor=1e-4):
+    """Detecta regiões com voz numa trilha mono 16kHz por energia RMS em janelas
+    de `frame_s`. Retorna [(start_s, end_s), …]. Heurística simples (sem VAD
+    pesado): basta pra localizar QUANDO o mic teve voz, e cruzar com os turnos da
+    diarização do mix pra achar o speaker 'você'."""
+    import numpy as np
+
+    audio = _read_mono_16k(wav_path)
+    if audio.size == 0:
+        return []
+    frame = max(1, int(frame_s * TARGET_SR))
+    n_frames = audio.size // frame
+    if n_frames == 0:
+        return []
+    trimmed = audio[: n_frames * frame].reshape(n_frames, frame)
+    rms = np.sqrt(np.mean(trimmed.astype(np.float32) ** 2, axis=1))
+    # Limiar adaptativo: piso fixo OU metade do RMS mediano das janelas ativas,
+    # o que for maior. Robusto a mic silencioso (tudo abaixo do piso → vazio).
+    active = rms[rms > energy_floor]
+    if active.size == 0:
+        return []
+    threshold = max(energy_floor, float(np.median(active)) * 0.5)
+    voiced_mask = rms > threshold
+
+    intervals = []
+    start = None
+    for i, on in enumerate(voiced_mask):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            intervals.append((start * frame_s, i * frame_s))
+            start = None
+    if start is not None:
+        intervals.append((start * frame_s, n_frames * frame_s))
+    return intervals
+
+
+def detect_local_user_label(turns, mic_wav_path):
+    """Descobre qual label da diarização é 'você' cruzando os turnos (diarizados
+    sobre o MIX) com as regiões em que o MIC teve voz. A trilha do mic capta
+    SOMENTE você (captura em 2 trilhas separadas), então o label com maior
+    overlap acumulado contra a voz do mic é o usuário local.
+
+    Retorna o label vencedor ou None (sem mic, sem voz no mic, ou empate zero)."""
+    if not mic_wav_path or not os.path.exists(mic_wav_path):
+        return None
+    try:
+        voiced = _voiced_intervals(mic_wav_path)
+    except Exception as e:  # noqa: BLE001
+        log(f"is_local_user: falha ao analisar o mic ({e}) — pulando")
+        return None
+    if not voiced:
+        log("is_local_user: mic sem voz detectada — pulando")
+        return None
+
+    overlap_by_label = {}
+    for t_start_s, t_end_s, label in turns:
+        t_start_ms, t_end_ms = int(t_start_s * 1000), int(t_end_s * 1000)
+        acc = 0
+        for v_start_s, v_end_s in voiced:
+            acc += _overlap_ms(
+                t_start_ms, t_end_ms, int(v_start_s * 1000), int(v_end_s * 1000)
+            )
+        if acc > 0:
+            overlap_by_label[label] = overlap_by_label.get(label, 0) + acc
+
+    if not overlap_by_label:
+        return None
+    winner = max(overlap_by_label, key=overlap_by_label.get)
+    log(
+        f"is_local_user: speaker do mic = {winner} (overlap_ms={overlap_by_label[winner]})"
+    )
+    return winner
+
+
+def emit_segments(segments):
+    """Emite cada segment já com speaker (label ou None). Idempotência de idx:
+    reindexamos sequencialmente na emissão."""
+    for n, seg in enumerate(segments):
+        emit(
+            {
+                "type": "segment",
+                "idx": n,
+                "start_ms": seg["start_ms"],
+                "end_ms": seg["end_ms"],
+                "speaker": seg.get("speaker"),
+                "text": seg["text"],
+                "confidence": seg.get("confidence"),
+            }
+        )
+
+
+def diarize_and_emit(segments, mix_wav_path, mic_wav_path=None):
+    """Pipeline de diarização pós-transcrição:
+      1. diariza o MIX → turnos;
+      2. casa cada segment ao turno de maior overlap (speaker_label);
+      3. acha o label 'você' via overlap com a voz do MIC e emite os eventos
+         `speaker` (is_local_user) ANTES dos segments;
+      4. emite os segments já rotulados.
+
+    Degrada com graça: se a diarização não estiver disponível (pyannote/token/
+    modelo), emite um `error` de diarização e os segments saem SEM speaker."""
+    try:
+        turns = _diarize(mix_wav_path)
+    except DiarizationUnavailable as e:
+        log(f"diarização indisponível — seguindo sem speaker: {e}")
+        emit({"type": "error", "message": f"diarização indisponível: {e}"})
+        emit_segments(segments)  # segments mantêm speaker=None
+        return
+
+    used_labels = assign_speakers(segments, turns)
+    local_label = detect_local_user_label(turns, mic_wav_path)
+
+    # Eventos `speaker` precedem os segments — o consumidor já conhece o
+    # is_local_user de cada label ao receber o 1º segment que o referencia.
+    for label in used_labels:
+        emit(
+            {
+                "type": "speaker",
+                "label": label,
+                "is_local_user": label == local_label,
+            }
+        )
+
+    emit_segments(segments)
 
 
 # ---------------------------------------------------------------------------
@@ -449,10 +713,13 @@ def run_audio_file(wav_path):
         emit({"type": "error", "message": f"arquivo não encontrado: {wav_path}"})
         return 1
     started = time.monotonic()
-    n, duration_ms = transcribe(wav_path)
+    segments, duration_ms = transcribe(wav_path)
+    # Modo offline: 1 trilha só, sem mic separado → diariza sobre o próprio WAV e
+    # não há como inferir is_local_user (mic_wav_path=None).
+    diarize_and_emit(segments, wav_path, mic_wav_path=None)
     if duration_ms <= 0:
         duration_ms = int((time.monotonic() - started) * 1000)
-    emit({"type": "done", "segments": n, "duration_ms": duration_ms})
+    emit({"type": "done", "segments": len(segments), "duration_ms": duration_ms})
     return 0
 
 
@@ -465,10 +732,14 @@ def run_capture(out_dir):
         os.makedirs(out_dir, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="meeting-cap-", dir=out_dir or None) as tmp:
         try:
-            paths = capture_two_tracks(tmp)
+            recorded = capture_two_tracks(tmp)
         except RuntimeError as e:
             emit({"type": "error", "message": str(e)})
             return 1
+
+        paths = [p for p, _kind in recorded]
+        # A trilha do mic identifica "você" — guardamos pra inferir is_local_user.
+        mic_path = next((p for p, kind in recorded if kind == "mic"), None)
 
         mix_path = os.path.join(tmp, "mix.wav")
         try:
@@ -477,11 +748,14 @@ def run_capture(out_dir):
             emit({"type": "error", "message": f"falha no mix de áudio: {e}"})
             return 1
 
-        n, duration_ms = transcribe(mix_path)
+        segments, duration_ms = transcribe(mix_path)
+        # Diariza DENTRO do `with`: os WAVs (mix + mic) ainda existem aqui; o
+        # TemporaryDirectory só some na saída do bloco.
+        diarize_and_emit(segments, mix_path, mic_wav_path=mic_path)
 
     if duration_ms <= 0:
         duration_ms = int((time.monotonic() - started) * 1000)
-    emit({"type": "done", "segments": n, "duration_ms": duration_ms})
+    emit({"type": "done", "segments": len(segments), "duration_ms": duration_ms})
     return 0
 
 

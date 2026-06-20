@@ -734,6 +734,19 @@ export interface MeetingPartialEvent {
   text: string
 }
 
+// Origem do trecho que casou na busca FTS5 (transcript, notas aumentadas ou
+// item extraído). Deixa a UI rotular de onde veio o match.
+export type MeetingSearchSource = 'segment' | 'notes' | 'extraction'
+
+// Um match de `meetings:search`: a reunião + o snippet (com <mark>…</mark> nos
+// termos) + de onde o trecho veio + um score (bm25, menor = mais relevante).
+export interface MeetingSearchMatch {
+  meeting: Meeting
+  snippet: string
+  source: MeetingSearchSource
+  score: number
+}
+
 // Resultado da extração (`meetings:extract`): notas aumentadas + resumo
 // persistidos + os itens já com grounding. A UI mostra pra revisão humana.
 export interface MeetingExtractResult {
@@ -763,6 +776,18 @@ export interface MaterializeMeetingTaskInput {
   quote?: string | null
   speakerLabel?: string | null
   startMs?: number | null
+}
+
+// Ativação assistida por Google Calendar: quando o watcher detecta um evento do
+// Meet começando agora, o main emite este draft pro renderer (canal
+// 'meeting:calendar:activate') no clique da notificação nativa. A MeetingsArea
+// cria uma reunião pré-preenchida com title/attendees. meetUrl/startMs entram na
+// proveniência.
+export interface MeetingActivationDraft {
+  title: string
+  attendees: string[]
+  meetUrl: string | null
+  startMs: number | null
 }
 
 // ---- Dashboard / visão hierárquica (Fase 4) ----
@@ -1473,6 +1498,9 @@ export interface Api {
     listSpeakers(meetingId: string): Promise<MeetingSpeaker[]>
     // Renomeia SPEAKER_0X → pessoa (persistido em display_name).
     setSpeakerName(input: SetSpeakerNameInput): Promise<MeetingSpeaker>
+    // Busca full-text (FTS5) entre reuniões: casa transcript + notas aumentadas
+    // + itens extraídos e devolve as reuniões com snippet/origem do match.
+    search(query: string): Promise<MeetingSearchMatch[]>
     // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
     // python + sidecar.py existem). false → app cai no fake (dev) e a UI avisa.
     sidecarConfigured(): Promise<boolean>
@@ -1494,6 +1522,10 @@ export interface Api {
     // Speaker descoberto/renomeado (diarização ou rename manual). A UI atualiza
     // o mapa label→nome sem recarregar tudo.
     onSpeaker(handler: (speaker: MeetingSpeaker) => void): () => void
+    // Ativação assistida por Google Calendar: emitido quando o usuário clica na
+    // notificação nativa de "reunião começando agora". O renderer vai pra área
+    // Reuniões e cria uma reunião pré-preenchida com o draft.
+    onCalendarActivate(handler: (draft: MeetingActivationDraft) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

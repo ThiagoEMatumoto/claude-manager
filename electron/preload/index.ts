@@ -44,6 +44,7 @@ import type {
   MeetingSpeaker,
   MeetingStatusEvent,
   MeetingPartialEvent,
+  MeetingActivationDraft,
   CreateMeetingInput,
   UpdateMeetingInput,
   MaterializeMeetingTaskInput,
@@ -255,6 +256,7 @@ const api: Api = {
     listSegments: (meetingId: string) => invoke('meetings:list-segments', meetingId),
     listSpeakers: (meetingId: string) => invoke('meetings:list-speakers', meetingId),
     setSpeakerName: (input: SetSpeakerNameInput) => invoke('meetings:set-speaker-name', input),
+    search: (query: string) => invoke('meetings:search', query),
     sidecarConfigured: () => invoke<boolean>('meetings:sidecar-configured'),
     startCapture: (meetingId: string) => invoke('meetings:start-capture', meetingId),
     stopCapture: (meetingId: string) => invoke('meetings:stop-capture', meetingId),
@@ -268,6 +270,8 @@ const api: Api = {
       subscribe<MeetingPartialEvent>('meeting:transcript:partial', handler),
     onStatus: (handler) => subscribe<MeetingStatusEvent>('meeting:status', handler),
     onSpeaker: (handler) => subscribe<MeetingSpeaker>('meeting:speaker', handler),
+    onCalendarActivate: (handler) =>
+      subscribe<MeetingActivationDraft>('meeting:calendar:activate', handler),
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),

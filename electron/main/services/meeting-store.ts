@@ -6,6 +6,8 @@ import type {
   Meeting,
   MeetingExtraction,
   MeetingListFilter,
+  MeetingSearchMatch,
+  MeetingSearchSource,
   MeetingSegment,
   MeetingSpeaker,
   MeetingStatus,
@@ -350,6 +352,73 @@ export function listSegments(meetingId: string): MeetingSegment[] {
     .prepare('SELECT * FROM meeting_segments WHERE meeting_id = ? ORDER BY idx ASC')
     .all(meetingId) as SegmentRow[]
   return rows.map(rowToSegment)
+}
+
+// ---- busca FTS5 entre reuniões ----
+
+// Transforma a query do usuário num MATCH seguro de FTS5. A sintaxe do FTS5
+// trata aspas, `*`, `:`, `-`, `^`, `()` etc como operadores — passar input cru
+// quebra a query (SqliteError: fts5: syntax error). Estratégia: quebrar em
+// tokens alfanuméricos (unicode), envolver cada um em aspas duplas (term literal)
+// e sufixar `*` p/ prefix-match (busca incremental enquanto digita). Tokens são
+// AND-ados implicitamente, que é o comportamento esperado de uma busca.
+function toFtsMatch(query: string): string | null {
+  const tokens = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length > 0)
+  if (tokens.length === 0) return null
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' ')
+}
+
+interface SearchRow {
+  meeting_id: string
+  source: string
+  snippet: string
+  score: number
+}
+
+// Busca full-text entre reuniões. Casa o índice FTS5 (transcript + notas
+// aumentadas + extrações), pega o MELHOR match por reunião (menor bm25) e devolve
+// a reunião + snippet com <mark>…</mark> nos termos. Limita p/ não explodir a UI.
+export function searchMeetings(query: string, limit = 50): MeetingSearchMatch[] {
+  const match = toFtsMatch(query)
+  if (!match) return []
+
+  // bm25() retorna score onde MENOR = mais relevante. snippet(table, col, open,
+  // close, ellipsis, tokens): col=3 é a coluna `text`. Agrupamos por reunião
+  // pegando a linha de menor score (MIN(bm25)) — uma reunião aparece uma vez,
+  // com o trecho mais relevante.
+  const rows = getDb()
+    .prepare(
+      `SELECT meeting_id,
+              source,
+              snippet(meeting_search, 3, '<mark>', '</mark>', '…', 12) AS snippet,
+              bm25(meeting_search) AS score
+       FROM meeting_search
+       WHERE meeting_search MATCH ?
+       ORDER BY score ASC`,
+    )
+    .all(match) as SearchRow[]
+
+  const best = new Map<string, SearchRow>()
+  for (const row of rows) {
+    if (!best.has(row.meeting_id)) best.set(row.meeting_id, row)
+  }
+
+  const matches: MeetingSearchMatch[] = []
+  for (const row of best.values()) {
+    const meeting = loadMeeting(row.meeting_id)
+    if (!meeting) continue
+    matches.push({
+      meeting,
+      snippet: row.snippet,
+      source: row.source as MeetingSearchSource,
+      score: row.score,
+    })
+  }
+  matches.sort((a, b) => a.score - b.score)
+  return matches.slice(0, limit)
 }
 
 // ---- speakers ----

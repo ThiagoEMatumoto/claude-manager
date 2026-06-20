@@ -4,9 +4,11 @@ import type {
   CreateMeetingInput,
   MaterializeMeetingTaskInput,
   Meeting,
+  MeetingActivationDraft,
   MeetingExtractResult,
   MeetingExtraction,
   MeetingListFilter,
+  MeetingSearchMatch,
   Task,
   UpdateMeetingInput,
 } from '../../shared/types/ipc'
@@ -16,6 +18,10 @@ import type {
 let offUpdated: (() => void) | null = null
 let offStatus: (() => void) | null = null
 let updatedStarted = false
+
+// Debounce da busca FTS5: digitar não dispara um IPC por tecla.
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const SEARCH_DEBOUNCE_MS = 250
 
 interface MeetingsState {
   meetings: Meeting[]
@@ -28,10 +34,24 @@ interface MeetingsState {
   extractingId: string | null
   extractError: string | null
 
+  // Busca FTS5 entre reuniões. searchQuery vazio = modo lista normal; preenchido
+  // = a sidebar mostra searchResults (com snippets) no lugar da lista.
+  searchQuery: string
+  searchResults: MeetingSearchMatch[]
+  searching: boolean
+  setSearchQuery: (query: string) => void
+
   // Sidecar REAL de transcrição configurado? null = ainda não checado. false =
   // app cai no fake (dev) e a UI mostra o aviso de 1ª classe.
   sidecarConfigured: boolean | null
   checkSidecarConfigured: () => Promise<void>
+
+  // Draft de ativação por Google Calendar pendente de consumo. Setado pelo
+  // watcher (via AppShell.onCalendarActivate) e consumido UMA vez pela
+  // MeetingsArea, que cria a reunião pré-preenchida e chama clearActivationDraft.
+  activationDraft: MeetingActivationDraft | null
+  setActivationDraft: (draft: MeetingActivationDraft | null) => void
+  clearActivationDraft: () => void
 
   load: () => Promise<void>
   refresh: () => Promise<void>
@@ -60,7 +80,40 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   extraction: null,
   extractingId: null,
   extractError: null,
+  searchQuery: '',
+  searchResults: [],
+  searching: false,
   sidecarConfigured: null,
+  activationDraft: null,
+
+  setActivationDraft: (draft) => set({ activationDraft: draft }),
+  clearActivationDraft: () => set({ activationDraft: null }),
+
+  setSearchQuery: (query) => {
+    set({ searchQuery: query })
+    if (searchTimer) clearTimeout(searchTimer)
+    const trimmed = query.trim()
+    if (!trimmed) {
+      set({ searchResults: [], searching: false })
+      return
+    }
+    set({ searching: true })
+    searchTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const results = await meetingsApi.search(trimmed)
+          // Ignora se a query mudou enquanto o IPC estava em voo (corrida).
+          if (get().searchQuery.trim() === trimmed) {
+            set({ searchResults: results, searching: false })
+          }
+        } catch {
+          if (get().searchQuery.trim() === trimmed) {
+            set({ searchResults: [], searching: false })
+          }
+        }
+      })()
+    }, SEARCH_DEBOUNCE_MS)
+  },
 
   checkSidecarConfigured: async () => {
     try {

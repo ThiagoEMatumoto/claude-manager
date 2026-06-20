@@ -55,7 +55,8 @@ export function composeHandoffPrompt(args: ComposeHandoffArgs): string {
 
   const reporte = [
     '## Reporte',
-    `- Chame \`handoff_progress\` com handoffId="${args.handoffId}" e um \`step\` curto ao longo do trabalho (ex.: "mapeando handlers", "rodando testes") — assim a mãe acompanha o andamento.`,
+    `- Chame \`handoff_progress\` com handoffId="${args.handoffId}" e um \`step\` curto em MARCOS reais do trabalho (ex.: "mapeei os handlers", "implementei o fix", "rodando testes") — assim a mãe acompanha o andamento sem precisar adivinhar. Reporte progresso de verdade, não a cada microação.`,
+    `- Se você precisar de uma DECISÃO da mãe/humano para continuar (escolha arquitetural, ambiguidade, credencial faltando, trade-off não-coberto na tarefa), chame \`handoff_ask\` com handoffId="${args.handoffId}" e uma \`question\` objetiva, e PARE de trabalhar até receber a resposta (ela chega como uma mensagem colada no seu terminal). NÃO improvise uma decisão arquitetural sozinho.`,
     `- Só chame \`handoff_report\` (handoffId="${args.handoffId}") quando o trabalho estiver REALMENTE concluído E verificado (testes/typecheck passando). "done" significa done — não reporte antes de terminar.`,
     '- O resumo do report: até 250 palavras (descoberta principal + arquivos tocados + próximo passo). NÃO cole código longo.',
   ]

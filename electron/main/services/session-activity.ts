@@ -4,6 +4,10 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
   open as openCb,
   fstat as fstatCb,
   read as readCb,
@@ -241,6 +245,77 @@ export function deriveEnrichment(tail: string): TranscriptEnrichment {
   // Modelo em uso: a última msg assistant carrega message.model (mesmo formato
   // que o metrics-service lê). Null até a primeira resposta do assistant no tail.
   return { title, lastText, tokens, model: lastAssistant?.message?.model ?? null }
+}
+
+// Versão síncrona de readTail: lê só os últimos TAIL_BYTES. Usada por consumidores
+// síncronos (handlers MCP, que retornam ToolResult sem await). Mesma semântica de
+// "primeira linha do tail pode estar partida" — o parser de deriveEnrichment ignora.
+export function readTailSync(path: string): string {
+  let fd: number
+  try {
+    fd = openSync(path, 'r')
+  } catch {
+    return ''
+  }
+  try {
+    const size = fstatSync(fd).size
+    const start = size > TAIL_BYTES ? size - TAIL_BYTES : 0
+    const length = size - start
+    if (length <= 0) return ''
+    const buf = Buffer.alloc(length)
+    const bytesRead = readSync(fd, buf, 0, length, start)
+    return buf.toString('utf8', 0, bytesRead)
+  } catch {
+    return ''
+  } finally {
+    closeSync(fd)
+  }
+}
+
+// Snapshot SÍNCRONO da atividade ao vivo de uma sessão por ccSessionId, reusando a
+// MESMA derivação do watcher (índice de sessions/<pid>.json → status; tail do JSONL
+// → lastText/tokens). É o getter que o handoff_result consome para enriquecer com o
+// estado real da filha. Retorna null se a sessão não está no índice (não nasceu ou
+// já encerrou e nem deixou transcript).
+export interface ActivitySnapshot {
+  status: SessionActivity['status']
+  lastActivityAt: number | null
+  lastText: string | null
+  tokens: SessionActivity['tokens']
+}
+
+export function getActivityFor(ccSessionId: string): ActivitySnapshot | null {
+  const index = buildSessionsFileIndex()
+  const indexed = index.get(ccSessionId)
+  const transcriptPath = findTranscriptPath(ccSessionId)
+
+  let status: SessionActivity['status']
+  let lastActivityAt: number | null = null
+  if (!indexed) {
+    // Sem arquivo de PID: ou ainda não nasceu (starting) ou já encerrou (ended,
+    // se já houve transcript). Sem transcript tampouco → nada a reportar.
+    if (!transcriptPath) return null
+    status = 'ended'
+  } else if (!isPidAlive(indexed.pid)) {
+    status = 'ended'
+    lastActivityAt = indexed.updatedAt
+  } else {
+    status = mapStatus(indexed.status)
+    lastActivityAt = indexed.updatedAt
+  }
+
+  let lastText: string | null = null
+  let tokens: SessionActivity['tokens']
+  if (transcriptPath) {
+    const tail = readTailSync(transcriptPath)
+    if (tail) {
+      const enrichment = deriveEnrichment(tail)
+      lastText = enrichment.lastText
+      tokens = enrichment.tokens
+    }
+  }
+
+  return { status, lastActivityAt, lastText, tokens }
 }
 
 interface WatchEntry {

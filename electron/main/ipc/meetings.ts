@@ -5,7 +5,8 @@ import * as objectiveStore from '../services/objective-store'
 import * as featureStore from '../services/feature-store'
 import { broadcast } from '../services/notify'
 import { meetingSidecarManager, isMeetingSidecarConfigured } from '../services/meeting-sidecar'
-import { extractMeeting } from '../services/meeting-extraction'
+import { extractMeeting, type ProviderPref } from '../services/meeting-extraction'
+import { getPref } from '../services/prefs-store'
 import type {
   CreateMeetingInput,
   Meeting,
@@ -88,6 +89,16 @@ export function registerMeetingsIpc(): void {
   ipcMain.handle('meetings:extract', async (_e, meetingId: string): Promise<MeetingExtractResult> => {
     const objectives = objectiveStore.list().map((o) => ({ id: o.id, title: o.title }))
     const features = featureStore.list().map((f) => ({ id: f.id, title: f.title }))
+    // Seleção de provedor via app_prefs (mesmo padrão de claude_command):
+    //  - meeting_private_mode (bool): força Ollama, zero saída de processo claude;
+    //  - meeting_extractor_provider ('claude'|'ollama'|'auto', default 'auto').
+    // Modo privado vence a pref de provedor.
+    const privateMode = getPref<boolean>('meeting_private_mode', false)
+    const providerPref: ProviderPref = privateMode
+      ? 'ollama'
+      : getPref<ProviderPref>('meeting_extractor_provider', 'auto')
+    const ollamaHost = getPref<string | null>('meeting_ollama_host', null)
+    const ollamaModel = getPref<string | null>('meeting_ollama_model', null)
     // DI: injeta o store real (este handler já roda em contexto Electron).
     // meeting-extraction NÃO importa meeting-store — evita o require lazy que o
     // electron-vite não inlina (Cannot find module './meeting-store' no build).
@@ -95,6 +106,11 @@ export function registerMeetingsIpc(): void {
       store: meetingStore,
       objectives,
       features,
+      providerPref,
+      ollama: {
+        host: ollamaHost ?? undefined,
+        model: ollamaModel ?? undefined,
+      },
     })
     const meeting = meetingStore.get(meetingId)
     if (meeting) broadcast('meeting:updated', meeting)

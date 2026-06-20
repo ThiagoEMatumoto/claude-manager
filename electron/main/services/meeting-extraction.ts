@@ -13,12 +13,22 @@ import {
   type PromptLinkable,
   type PromptSegment,
 } from './meeting/compose-extraction-prompt'
+import { chunkSegments } from './meeting/chunk-segments'
+import {
+  isOllamaAvailable,
+  ollamaGenerate,
+  type OllamaOptions,
+} from './meeting/ollama-client'
 
-// Coração da Meeting Intelligence: transcript + notas → claude -p → notas
+// Coração da Meeting Intelligence: transcript + notas → modelo → notas
 // aumentadas + itens (action items/decisões/feedbacks) com quote literal, cada
 // item validado por grounding (a quote tem que casar com o transcript real).
-// Só o caminho `claude -p` text-mode (provado em feature-memory.ts); o fallback
-// Ollama é OUTRA fatia.
+//
+// Dois provedores compartilham o MESMO prompt, schema zod, parse e grounding:
+//   - claude -p (text-mode) — caminho online padrão;
+//   - Ollama (localhost) — offline/privado, com JSON Schema enforçado.
+// A seleção (auto/claude/ollama + modo privado) e o chunking/map-reduce para
+// transcripts longos vivem aqui.
 
 const EXTRACTION_TIMEOUT_MS = 120_000
 
@@ -54,6 +64,10 @@ const resultSchema = z.object({
 
 export type ExtractionItem = z.infer<typeof itemSchema>
 export type ExtractionPayload = z.infer<typeof resultSchema>
+
+// JSON Schema (draft 2020-12) derivado do MESMO zod, para o `format` do Ollama
+// (structured outputs). Reusa a fonte de verdade do parse — sem schema paralelo.
+export const ollamaResultJsonSchema = z.toJSONSchema(resultSchema)
 
 // ---- grounding ----
 
@@ -153,11 +167,27 @@ export interface ExtractStore {
   runInTransaction?: <T>(fn: () => T) => T
 }
 
+// Como o transcript vira itens. Injetável (default real) e mockável nos testes
+// sem rede nem `claude`.
+export type ExtractProvider = 'claude' | 'ollama'
+
+// Preferência efetiva resolvida pela camada IPC: 'auto' decide aqui (claude com
+// fallback Ollama); 'claude'/'ollama' forçam um provedor; modo privado equivale
+// a 'ollama' sem nenhuma chamada ao processo `claude`.
+export type ProviderPref = 'claude' | 'ollama' | 'auto'
+
 export interface ExtractDeps {
   runClaude: (args: string[], opts?: { timeoutMs?: number }) => Promise<RunResult>
+  // I/O do Ollama injetável (default real). Os testes passam um fetch mockado via
+  // ollama.fetchImpl.
+  ollama?: OllamaOptions
+  // Override total da geração (usado por testes p/ não tocar claude nem ollama).
+  generate?: (prompt: string, provider: ExtractProvider) => Promise<RawGeneration>
+  isOllamaAvailable?: (opts?: OllamaOptions) => Promise<boolean>
   store: ExtractStore
   objectives?: PromptLinkable[]
   features?: PromptLinkable[]
+  providerPref?: ProviderPref
 }
 
 function toPromptSegments(segments: MeetingSegment[]): PromptSegment[] {
@@ -168,42 +198,145 @@ function toPromptSegments(segments: MeetingSegment[]): PromptSegment[] {
   }))
 }
 
-async function runOnce(
+// Resultado cru de um provedor: o texto bruto a ser parseado + o rótulo do
+// extractor pra carimbar a reunião.
+export interface RawGeneration {
+  stdout: string
+  extractorLabel: string
+}
+
+// ---- geração por provedor (claude -p / ollama) ----
+
+async function generateClaude(
   deps: Pick<ExtractDeps, 'runClaude'>,
   prompt: string,
-): Promise<{ result: RunResult; payload?: ExtractionPayload; parseError?: string }> {
+): Promise<RawGeneration> {
   const result = await deps.runClaude(['-p', prompt, '--output-format', 'text'], {
     timeoutMs: EXTRACTION_TIMEOUT_MS,
   })
-  if (result.code !== 0) return { result }
+  if (result.code !== 0) {
+    throw new Error(
+      `claude -p falhou (exit ${result.code}): ${result.stderr.slice(0, 300)}`,
+    )
+  }
+  return { stdout: result.stdout, extractorLabel: 'claude -p' }
+}
+
+async function generateOllama(
+  deps: Pick<ExtractDeps, 'ollama'>,
+  prompt: string,
+): Promise<RawGeneration> {
+  const res = await ollamaGenerate(prompt, ollamaResultJsonSchema, {
+    ...deps.ollama,
+    timeoutMs: deps.ollama?.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
+  })
+  return { stdout: res.response, extractorLabel: `ollama:${res.model}` }
+}
+
+// Resolve o provedor efetivo dado a pref e a disponibilidade do Ollama.
+// - 'ollama' / modo privado → ollama (sem tocar claude);
+// - 'claude' → claude (sem fallback automático aqui; erro do claude sobe);
+// - 'auto'  → claude, com fallback ollama quando o claude falha E o ollama está
+//   disponível.
+// Retorna a função de geração + se deve tentar fallback ollama em erro.
+interface ProviderPlan {
+  primary: ExtractProvider
+  fallbackToOllama: boolean
+}
+
+async function resolveProviderPlan(deps: ExtractDeps): Promise<ProviderPlan> {
+  const pref = deps.providerPref ?? 'auto'
+  if (pref === 'ollama') return { primary: 'ollama', fallbackToOllama: false }
+  if (pref === 'claude') return { primary: 'claude', fallbackToOllama: false }
+  // auto: claude primeiro; fallback ollama só se ele estiver no ar.
+  const check = deps.isOllamaAvailable ?? isOllamaAvailable
+  const ollamaUp = await check(deps.ollama)
+  return { primary: 'claude', fallbackToOllama: ollamaUp }
+}
+
+async function generateWith(deps: ExtractDeps, prompt: string, provider: ExtractProvider): Promise<RawGeneration> {
+  if (deps.generate) return deps.generate(prompt, provider)
+  return provider === 'ollama' ? generateOllama(deps, prompt) : generateClaude(deps, prompt)
+}
+
+// Gera + parseia 1 bloco, com retry 1x em erro de parse/schema (anexa o erro
+// como feedback). Aplica o plano de provedor: se o primário falha (na geração) e
+// há fallback ollama, tenta o ollama.
+async function extractBlock(
+  deps: ExtractDeps,
+  basePrompt: string,
+  plan: ProviderPlan,
+): Promise<{ payload: ExtractionPayload; extractorLabel: string }> {
+  const tryProvider = async (provider: ExtractProvider): Promise<{ payload: ExtractionPayload; extractorLabel: string }> => {
+    const gen = await generateWith(deps, basePrompt, provider)
+    try {
+      return { payload: parseAndValidate(gen.stdout), extractorLabel: gen.extractorLabel }
+    } catch (parseErr) {
+      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr)
+      const retryPrompt = `${basePrompt}\n\n## Correção\nSua resposta anterior foi rejeitada: ${msg}. Responda novamente APENAS com o bloco JSON válido do schema, sem texto fora do JSON.`
+      const retry = await generateWith(deps, retryPrompt, provider)
+      return { payload: parseAndValidate(retry.stdout), extractorLabel: retry.extractorLabel }
+    }
+  }
+
   try {
-    return { result, payload: parseAndValidate(result.stdout) }
-  } catch (err) {
-    return { result, parseError: err instanceof Error ? err.message : String(err) }
+    return await tryProvider(plan.primary)
+  } catch (primaryErr) {
+    if (plan.fallbackToOllama && plan.primary !== 'ollama') {
+      return tryProvider('ollama')
+    }
+    throw primaryErr
   }
 }
 
+// ---- map-reduce de chunks ----
+
+// Consolida itens de vários chunks: dedupe por (type, quote normalizada). O
+// overlap entre chunks naturalmente gera duplicatas — colapsamos mantendo a 1ª.
+function dedupeItems(items: ExtractionItem[]): ExtractionItem[] {
+  const seen = new Set<string>()
+  const out: ExtractionItem[] = []
+  for (const item of items) {
+    const key = `${item.type}::${normalizeForMatch(item.quote)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
 // `store` é obrigatório e SEMPRE injetado pelo caller (produção injeta o real;
-// testes/smoke injetam um stub). `runClaude` é opcional (default real).
+// testes/smoke injetam um stub). Todos os outros campos têm default real.
 export interface ExtractOptions {
   store: ExtractStore
   runClaude?: ExtractDeps['runClaude']
+  ollama?: OllamaOptions
+  generate?: ExtractDeps['generate']
+  isOllamaAvailable?: ExtractDeps['isOllamaAvailable']
   objectives?: PromptLinkable[]
   features?: PromptLinkable[]
+  providerPref?: ProviderPref
 }
 
-// Extrai uma reunião e persiste o resultado. Retry 1x em erro de parse/schema
-// (re-chama anexando a mensagem de erro). Erro do runClaude (claude ausente/
-// falha) sobe claro — sem inventar resultado (fallback Ollama é outra fatia).
+// Extrai uma reunião e persiste o resultado.
+// - Seleção de provedor: auto (claude→fallback ollama) | claude | ollama.
+// - Chunking/map-reduce: transcripts longos são fatiados (com overlap), extraídos
+//   por bloco e consolidados (dedupe por type+quote). O summary/augmented_notes
+//   vem do 1º chunk (o que tem as notas do usuário e o início da reunião).
+// - Grounding: cada quote é validada contra o transcript COMPLETO (não só o chunk).
 export async function extractMeeting(
   meetingId: string,
   options: ExtractOptions,
 ): Promise<ExtractResult> {
   const deps: ExtractDeps = {
     runClaude: options.runClaude ?? runClaude,
+    ollama: options.ollama,
+    generate: options.generate,
+    isOllamaAvailable: options.isOllamaAvailable,
     store: options.store,
     objectives: options.objectives,
     features: options.features,
+    providerPref: options.providerPref,
   }
   const store = deps.store
 
@@ -215,38 +348,35 @@ export async function extractMeeting(
     throw new Error('a reunião não tem transcript — nada para extrair')
   }
 
-  const basePrompt = composeExtractionPrompt({
-    rawNotes: meeting.rawNotes,
-    segments: toPromptSegments(segments),
-    objectives: deps.objectives,
-    features: deps.features,
-  })
+  const promptSegments = toPromptSegments(segments)
+  const chunks = chunkSegments(promptSegments)
+  const plan = await resolveProviderPlan(deps)
 
-  let attempt = await runOnce(deps, basePrompt)
-  if (attempt.result.code !== 0) {
-    throw new Error(
-      `claude -p falhou (exit ${attempt.result.code}): ${attempt.result.stderr.slice(0, 300)}`,
-    )
-  }
+  let summary: string | null = null
+  let augmentedNotes: string | null = null
+  let extractorLabel: string = plan.primary
+  const allItems: ExtractionItem[] = []
 
-  // Retry 1x só pra erro de parse/schema, anexando o erro como feedback.
-  if (!attempt.payload && attempt.parseError) {
-    const retryPrompt = `${basePrompt}\n\n## Correção\nSua resposta anterior foi rejeitada: ${attempt.parseError}. Responda novamente APENAS com o bloco JSON válido do schema, sem texto fora do JSON.`
-    attempt = await runOnce(deps, retryPrompt)
-    if (attempt.result.code !== 0) {
-      throw new Error(
-        `claude -p falhou no retry (exit ${attempt.result.code}): ${attempt.result.stderr.slice(0, 300)}`,
-      )
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]
+    const prompt = composeExtractionPrompt({
+      // As notas do usuário entram só no 1º chunk (evita repeti-las/duplicar
+      // augmented_notes em cada bloco).
+      rawNotes: i === 0 ? meeting.rawNotes : null,
+      segments: chunk,
+      objectives: deps.objectives,
+      features: deps.features,
+    })
+    const { payload, extractorLabel: label } = await extractBlock(deps, prompt, plan)
+    extractorLabel = label
+    if (i === 0) {
+      summary = payload.summary?.trim() || null
+      augmentedNotes = payload.augmented_notes?.trim() || null
     }
+    allItems.push(...payload.items)
   }
 
-  if (!attempt.payload) {
-    throw new Error(`não foi possível parsear a extração: ${attempt.parseError ?? 'desconhecido'}`)
-  }
-
-  const payload = attempt.payload
-  const summary = payload.summary?.trim() || null
-  const augmentedNotes = payload.augmented_notes?.trim() || null
+  const items = dedupeItems(allItems)
 
   // Persist atômico: status + limpeza das extrações antigas (não-materializadas) +
   // re-inserts numa única transação. Re-enriquecer não duplica itens nem orfana os
@@ -256,13 +386,14 @@ export async function extractMeeting(
       id: meetingId,
       summary,
       augmentedNotes,
-      extractor: 'claude -p',
+      extractor: extractorLabel,
       status: 'extracted',
     })
     store.deleteExtractions(meetingId)
 
     const out: MeetingExtraction[] = []
-    for (const item of payload.items) {
+    for (const item of items) {
+      // Grounding contra o transcript COMPLETO (não só o chunk de origem).
       const grounded = isGrounded(item.quote, segments)
       out.push(
         store.addExtraction({

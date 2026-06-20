@@ -4,6 +4,7 @@ import {
   isGrounded,
   normalizeForMatch,
   extractJsonBlock,
+  ollamaResultJsonSchema,
   type ExtractDeps,
 } from './meeting-extraction'
 import type {
@@ -186,7 +187,7 @@ describe('extractMeeting', () => {
       },
     )
 
-    const result = await extractMeeting('m1', { runClaude, store })
+    const result = await extractMeeting('m1', { runClaude, store, providerPref: 'claude' })
 
     // runClaude chamado em text-mode
     expect(runClaude).toHaveBeenCalledOnce()
@@ -221,13 +222,13 @@ describe('extractMeeting', () => {
     const runClaude = vi.fn(async (): Promise<RunResult> => okRun(JSON.stringify(MODEL_JSON)))
 
     // 1ª extração: 2 itens.
-    const first = await extractMeeting('m1', { runClaude, store })
+    const first = await extractMeeting('m1', { runClaude, store, providerPref: 'claude' })
     expect(first.extractions).toHaveLength(2)
     expect(captured).toHaveLength(2)
 
     // 2ª extração (re-enriquecer): deleteExtractions zera antes do loop, então o
     // total persistido continua 2 (não 4).
-    const second = await extractMeeting('m1', { runClaude, store })
+    const second = await extractMeeting('m1', { runClaude, store, providerPref: 'claude' })
     expect(store.deleteExtractions).toHaveBeenCalledTimes(2)
     expect(second.extractions).toHaveLength(2)
     expect(captured).toHaveLength(2)
@@ -245,7 +246,7 @@ describe('extractMeeting', () => {
     }
     const runClaude = vi.fn(async (): Promise<RunResult> => okRun(JSON.stringify(MODEL_JSON)))
 
-    await extractMeeting('m1', { runClaude, store })
+    await extractMeeting('m1', { runClaude, store, providerPref: 'claude' })
     expect(txCalls).toBe(1)
     // delete + inserts aconteceram dentro do wrapper.
     expect(store.deleteExtractions).toHaveBeenCalledOnce()
@@ -260,7 +261,7 @@ describe('extractMeeting', () => {
       .mockResolvedValueOnce(okRun('isso não é json'))
       .mockResolvedValueOnce(okRun(JSON.stringify(MODEL_JSON)))
 
-    await extractMeeting('m1', { runClaude, store })
+    await extractMeeting('m1', { runClaude, store, providerPref: 'claude' })
     expect(runClaude).toHaveBeenCalledTimes(2)
     expect(captured).toHaveLength(2)
   })
@@ -269,7 +270,7 @@ describe('extractMeeting', () => {
     const store = makeStore([], [])
     const runClaude = vi.fn(async (): Promise<RunResult> => ({ stdout: '', stderr: 'claude não encontrado', code: 127 }))
 
-    await expect(extractMeeting('m1', { runClaude, store })).rejects.toThrow(/exit 127/)
+    await expect(extractMeeting('m1', { runClaude, store, providerPref: 'claude' })).rejects.toThrow(/exit 127/)
     expect(store.update).not.toHaveBeenCalled()
   })
 
@@ -278,7 +279,168 @@ describe('extractMeeting', () => {
     const store = makeStore(captured, [])
     store.listSegments.mockReturnValue([])
     const runClaude = vi.fn()
-    await expect(extractMeeting('m1', { runClaude, store })).rejects.toThrow(/não tem transcript/)
+    await expect(extractMeeting('m1', { runClaude, store, providerPref: 'claude' })).rejects.toThrow(
+      /não tem transcript/,
+    )
     expect(runClaude).not.toHaveBeenCalled()
+  })
+})
+
+// JSON Ollama mockado: 1 item grounded (literal) + 1 inventado.
+function ollamaJson(): string {
+  return JSON.stringify(MODEL_JSON)
+}
+
+// fetch fake do Ollama: tags ok (disponível) + generate devolvendo o JSON.
+function makeOllamaFetch(opts: { available?: boolean; response?: string } = {}) {
+  const { available = true, response = ollamaJson() } = opts
+  return vi.fn(async (input: string, _init?: RequestInit) => {
+    void _init
+    if (input.endsWith('/api/tags')) {
+      return { ok: available, status: available ? 200 : 503, json: async () => ({ models: [] }), text: async () => '' }
+    }
+    if (input.endsWith('/api/generate')) {
+      return { ok: true, status: 200, json: async () => ({ response, model: 'qwen2.5:7b' }), text: async () => '' }
+    }
+    return { ok: false, status: 404, json: async () => ({}), text: async () => 'not found' }
+  })
+}
+
+describe('extractMeeting — seleção de provedor + fallback Ollama', () => {
+  it('providerPref=ollama gera via Ollama (sem tocar claude) e carimba extractor', async () => {
+    const captured: MeetingExtraction[] = []
+    const updates: UpdateMeetingInput[] = []
+    const store = makeStore(captured, updates)
+    const runClaude = vi.fn()
+    const fetchImpl = makeOllamaFetch()
+
+    const result = await extractMeeting('m1', {
+      runClaude,
+      store,
+      providerPref: 'ollama',
+      ollama: { fetchImpl },
+    })
+
+    // claude NUNCA chamado no modo ollama.
+    expect(runClaude).not.toHaveBeenCalled()
+    // generate foi pro /api/generate com format = JSON Schema do zod.
+    const genCall = fetchImpl.mock.calls.find((c) => c[0].endsWith('/api/generate'))
+    expect(genCall).toBeDefined()
+    const sentBody = JSON.parse(genCall![1]?.body as string)
+    expect(sentBody.format).toEqual(ollamaResultJsonSchema)
+    expect(sentBody.stream).toBe(false)
+    expect(sentBody.options.temperature).toBe(0)
+    // extractor carimbado como ollama:<model>.
+    expect(updates[0]?.extractor).toBe('ollama:qwen2.5:7b')
+    expect(result.extractions).toHaveLength(2)
+  })
+
+  it('auto: claude falha + Ollama disponível → fallback Ollama', async () => {
+    const captured: MeetingExtraction[] = []
+    const updates: UpdateMeetingInput[] = []
+    const store = makeStore(captured, updates)
+    // claude indisponível (127).
+    const runClaude = vi.fn(async (): Promise<RunResult> => ({ stdout: '', stderr: 'not found', code: 127 }))
+    const fetchImpl = makeOllamaFetch({ available: true })
+
+    const result = await extractMeeting('m1', {
+      runClaude,
+      store,
+      providerPref: 'auto',
+      ollama: { fetchImpl },
+    })
+
+    expect(runClaude).toHaveBeenCalledOnce() // tentou claude…
+    expect(updates[0]?.extractor).toBe('ollama:qwen2.5:7b') // …e caiu no ollama.
+    expect(result.extractions).toHaveLength(2)
+  })
+
+  it('auto: claude falha + Ollama indisponível → erro do claude sobe', async () => {
+    const store = makeStore([], [])
+    const runClaude = vi.fn(async (): Promise<RunResult> => ({ stdout: '', stderr: 'not found', code: 127 }))
+    const fetchImpl = makeOllamaFetch({ available: false })
+
+    await expect(
+      extractMeeting('m1', { runClaude, store, providerPref: 'auto', ollama: { fetchImpl } }),
+    ).rejects.toThrow(/exit 127/)
+  })
+
+  it('auto: claude OK → usa claude, sem fallback', async () => {
+    const captured: MeetingExtraction[] = []
+    const updates: UpdateMeetingInput[] = []
+    const store = makeStore(captured, updates)
+    const runClaude = vi.fn(async (): Promise<RunResult> => okRun(JSON.stringify(MODEL_JSON)))
+    const fetchImpl = makeOllamaFetch({ available: true })
+
+    await extractMeeting('m1', { runClaude, store, providerPref: 'auto', ollama: { fetchImpl } })
+
+    expect(runClaude).toHaveBeenCalledOnce()
+    expect(updates[0]?.extractor).toBe('claude -p')
+    // generate do ollama NÃO foi chamado (só o tags do availability check).
+    expect(fetchImpl.mock.calls.some((c) => c[0].endsWith('/api/generate'))).toBe(false)
+  })
+})
+
+describe('extractMeeting — chunking/map-reduce', () => {
+  // Transcript longo: muitos segments até estourar o threshold (~48k chars).
+  function longSegments(): MeetingSegment[] {
+    const filler = 'palavra '.repeat(120) // ~960 chars/segment
+    const segs: MeetingSegment[] = []
+    for (let i = 0; i < 80; i++) segs.push(seg(i, `${filler} item-${i}`))
+    return segs
+  }
+
+  it('fatia transcript longo em múltiplas chamadas e consolida com dedupe', async () => {
+    const captured: MeetingExtraction[] = []
+    const updates: UpdateMeetingInput[] = []
+    const store = makeStore(captured, updates)
+    store.listSegments.mockReturnValue(longSegments())
+
+    // generate injetado: conta chamadas e devolve SEMPRE o mesmo item (mesma
+    // type+quote) → o overlap/repetição deve colapsar para 1 via dedupe.
+    let calls = 0
+    const sameItem = {
+      summary: 'resumo',
+      augmented_notes: 'notas',
+      items: [
+        {
+          type: 'action_item',
+          text: 'fazer X',
+          assignee: null,
+          due_hint: null,
+          quote: 'item-1',
+          start_ms: null,
+          end_ms: null,
+          speaker_label: null,
+          confidence: 0.8,
+          suggested_link: null,
+        },
+      ],
+    }
+    const generate = vi.fn(async () => {
+      calls++
+      return { stdout: JSON.stringify(sameItem), extractorLabel: 'claude -p' }
+    })
+
+    const result = await extractMeeting('m1', { store, generate, providerPref: 'claude' })
+
+    // Múltiplos chunks → múltiplas chamadas de geração.
+    expect(calls).toBeGreaterThan(1)
+    // Dedupe por (type, quote): todos os chunks devolveram o MESMO item → 1 só.
+    expect(result.extractions).toHaveLength(1)
+    expect(captured).toHaveLength(1)
+  })
+
+  it('transcript curto não chunka (1 chamada só)', async () => {
+    const captured: MeetingExtraction[] = []
+    const store = makeStore(captured, [])
+    let calls = 0
+    const generate = vi.fn(async () => {
+      calls++
+      return { stdout: JSON.stringify(MODEL_JSON), extractorLabel: 'claude -p' }
+    })
+
+    await extractMeeting('m1', { store, generate, providerPref: 'claude' })
+    expect(calls).toBe(1)
   })
 })

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Mic, Square, Sparkles, AlertTriangle, Search, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Lock } from 'lucide-react'
 import { useMeetingsStore } from '@/store/meetingsStore'
+import { useMeetingPrefsStore } from '@/lib/meeting-prefs-store'
 import { objectivesApi, featuresApi, meetingsApi } from '@/lib/ipc'
 import type { Feature, Meeting, ObjectiveWithProgress } from '../../../shared/types/ipc'
 import { MeetingList } from './MeetingList'
@@ -40,6 +42,13 @@ export function MeetingsArea() {
   const setSearchQuery = useMeetingsStore((s) => s.setSearchQuery)
 
   const isSearching = searchQuery.trim().length > 0
+
+  const privateMode = useMeetingPrefsStore((s) => s.privateMode)
+  const setPrivateMode = useMeetingPrefsStore((s) => s.setPrivateMode)
+  const loadMeetingPrefs = useMeetingPrefsStore((s) => s.load)
+  useEffect(() => {
+    void loadMeetingPrefs()
+  }, [loadMeetingPrefs])
 
   const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
   const [features, setFeatures] = useState<Feature[]>([])
@@ -239,6 +248,26 @@ export function MeetingsArea() {
                 {selected.title}
               </h2>
               <div className="flex shrink-0 items-center gap-2">
+                {selected.extractor && (
+                  <span
+                    className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-dim)]"
+                    title="Provedor usado na última extração"
+                  >
+                    {selected.extractor}
+                  </span>
+                )}
+                <label
+                  className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+                  title="Modo privado: extrai 100% local via Ollama, sem chamar o processo claude"
+                >
+                  <input
+                    type="checkbox"
+                    checked={privateMode}
+                    onChange={(e) => void setPrivateMode(e.target.checked)}
+                  />
+                  <Icon as={Lock} size={12} />
+                  Modo privado (local)
+                </label>
                 {reviewForSelected ? (
                   <button
                     type="button"

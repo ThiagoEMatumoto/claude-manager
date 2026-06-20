@@ -237,6 +237,7 @@ export function updateRun(
   patch: {
     status?: DossierRunStatus
     stage?: string | null
+    planJson?: string | null
     summary?: string | null
     error?: string | null
     costTokens?: number
@@ -253,6 +254,10 @@ export function updateRun(
   if (patch.stage !== undefined) {
     sets.push('stage = @stage')
     params.stage = patch.stage
+  }
+  if (patch.planJson !== undefined) {
+    sets.push('plan_json = @plan_json')
+    params.plan_json = patch.planJson
   }
   if (patch.summary !== undefined) {
     sets.push('summary = @summary')
@@ -384,6 +389,49 @@ export function listSources(dossierRunId: string): Source[] {
   return rows.map(toSource)
 }
 
+// Promove uma source de 'snippet' para 'fetched' (ou 'failed') após a ingestão.
+// Carimba retrieved_at/content_ref quando a página/transcrição foi baixada.
+// Campos omitidos preservam o valor atual.
+export function updateSource(
+  id: string,
+  patch: {
+    title?: string | null
+    status?: SourceStatus
+    retrievedAt?: number | null
+    contentRef?: string | null
+  },
+): Source {
+  const sets: string[] = []
+  const params: Record<string, unknown> = { id }
+  if (patch.title !== undefined) {
+    sets.push('title = @title')
+    params.title = patch.title
+  }
+  if (patch.status !== undefined) {
+    sets.push('status = @status')
+    params.status = patch.status
+  }
+  if (patch.retrievedAt !== undefined) {
+    sets.push('retrieved_at = @retrieved_at')
+    params.retrieved_at = patch.retrievedAt
+  }
+  if (patch.contentRef !== undefined) {
+    sets.push('content_ref = @content_ref')
+    params.content_ref = patch.contentRef
+  }
+  if (sets.length === 0) {
+    const current = getSource(id)
+    if (!current) throw new Error(`source not found: ${id}`)
+    return current
+  }
+  getDb()
+    .prepare(`UPDATE sources SET ${sets.join(', ')} WHERE id = @id`)
+    .run(params)
+  const updated = getSource(id)
+  if (!updated) throw new Error(`source not found: ${id}`)
+  return updated
+}
+
 // ---- Evidence records ----
 
 interface EvidenceRow {
@@ -458,4 +506,19 @@ export function listEvidence(dossierRunId: string): EvidenceRecord[] {
     .prepare('SELECT * FROM evidence_records WHERE dossier_run_id = ? ORDER BY created_at ASC')
     .all(dossierRunId) as EvidenceRow[]
   return rows.map(toEvidence)
+}
+
+// Atualiza só o state de verificação de um record (estágio 4 do funil). Não toca
+// na proveniência (claim/quote/anchor permanecem imutáveis após a extração).
+export function updateEvidenceState(id: string, state: EvidenceState): EvidenceRecord {
+  getDb().prepare('UPDATE evidence_records SET state = ? WHERE id = ?').run(state, id)
+  const record = getEvidence(id)
+  if (!record) throw new Error(`evidence record not found: ${id}`)
+  return record
+}
+
+// Remove um record (poda no Gate B). Hard delete: o usuário decidiu que não entra
+// na síntese.
+export function deleteEvidence(id: string): void {
+  getDb().prepare('DELETE FROM evidence_records WHERE id = ?').run(id)
 }

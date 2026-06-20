@@ -145,6 +145,31 @@ describe('meeting-store', () => {
       expect(second.displayName).toBe('Thiago E.')
       expect(store.listSpeakers(m.id)).toHaveLength(1)
     })
+
+    it('registerSpeaker grava is_local_user e é idempotente por label', () => {
+      const m = store.create({ title: 'X' })
+      const local = store.registerSpeaker(m.id, 'SPEAKER_00', true)
+      const other = store.registerSpeaker(m.id, 'SPEAKER_01', false)
+      expect(local.isLocalUser).toBe(true)
+      expect(other.isLocalUser).toBe(false)
+      // Re-emitir o mesmo label só atualiza o flag (sem duplicar a linha).
+      const flipped = store.registerSpeaker(m.id, 'SPEAKER_00', false)
+      expect(flipped.isLocalUser).toBe(false)
+      expect(store.listSpeakers(m.id)).toHaveLength(2)
+    })
+
+    it('registerSpeaker e setSpeakerName não pisam um no outro (flag vs nome)', () => {
+      const m = store.create({ title: 'X' })
+      // diarização registra o flag; rename posterior não zera is_local_user.
+      store.registerSpeaker(m.id, 'SPEAKER_00', true)
+      const named = store.setSpeakerName(m.id, 'SPEAKER_00', 'Você')
+      expect(named.displayName).toBe('Você')
+      expect(named.isLocalUser).toBe(true)
+      // re-registrar o flag não apaga o display_name.
+      const reregistered = store.registerSpeaker(m.id, 'SPEAKER_00', true)
+      expect(reregistered.displayName).toBe('Você')
+      expect(reregistered.isLocalUser).toBe(true)
+    })
   })
 
   describe('extractions', () => {

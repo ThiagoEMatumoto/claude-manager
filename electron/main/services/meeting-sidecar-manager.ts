@@ -1,7 +1,7 @@
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { createInterface, Interface } from 'node:readline'
-import type { MeetingSegment, MeetingStatus } from '../../../shared/types/ipc'
+import type { MeetingSegment, MeetingSpeaker, MeetingStatus } from '../../../shared/types/ipc'
 
 // Supervisor do sidecar de captura/transcrição. Espelha a ESTRUTURA do
 // pty-manager (TypedEmitter + Map<id,proc> + killAll), mas o transporte é
@@ -15,6 +15,14 @@ import type { MeetingSegment, MeetingStatus } from '../../../shared/types/ipc'
 interface StatusEvent {
   type: 'status'
   state: MeetingStatus
+}
+
+// Diarização: o sidecar emite um `speaker` por label descoberto ANTES dos
+// segments que o referenciam, carregando o is_local_user (a trilha do mic = você).
+interface SpeakerEvent {
+  type: 'speaker'
+  label: string
+  is_local_user?: boolean
 }
 
 interface SegmentEvent {
@@ -47,7 +55,13 @@ interface ErrorEvent {
   message: string
 }
 
-type SidecarEvent = StatusEvent | SegmentEvent | PartialEvent | DoneEvent | ErrorEvent
+type SidecarEvent =
+  | StatusEvent
+  | SpeakerEvent
+  | SegmentEvent
+  | PartialEvent
+  | DoneEvent
+  | ErrorEvent
 
 // ---- dependências injetáveis (testabilidade) ----
 
@@ -71,6 +85,8 @@ export interface SidecarStore {
     confidence?: number | null
     isPartial?: boolean
   }): MeetingSegment
+  // Diarização: persiste um label descoberto + o flag is_local_user (mic = você).
+  registerSpeaker(meetingId: string, label: string, isLocalUser: boolean): MeetingSpeaker
 }
 
 export type SidecarBroadcast = (channel: string, payload: unknown) => void
@@ -227,6 +243,17 @@ export class MeetingSidecarManager extends TypedEmitter {
         if (tracked) tracked.status = event.state
         this.deps.store.update({ id: meetingId, status: event.state })
         this.deps.broadcast('meeting:status', { id: meetingId, status: event.state })
+        break
+      }
+      case 'speaker': {
+        // Diarização: registra o label + is_local_user. Chega ANTES dos segments
+        // que o referenciam, então a UI já sabe quem é "você" ao renderar.
+        const speaker = this.deps.store.registerSpeaker(
+          meetingId,
+          event.label,
+          event.is_local_user ?? false,
+        )
+        this.deps.broadcast('meeting:speaker', speaker)
         break
       }
       case 'segment': {

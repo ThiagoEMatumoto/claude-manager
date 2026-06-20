@@ -1460,6 +1460,9 @@ export interface Api {
     update(input: UpdateMeetingInput): Promise<Meeting>
     delete(id: string): Promise<void>
     listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
+    // python + sidecar.py existem). false → app cai no fake (dev) e a UI avisa.
+    sidecarConfigured(): Promise<boolean>
     // Inicia/encerra a captura do sidecar para a reunião (idle ⇄ capturing).
     startCapture(meetingId: string): Promise<void>
     stopCapture(meetingId: string): Promise<void>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Mic, Square, Sparkles } from 'lucide-react'
+import { Plus, Mic, Square, Sparkles, AlertTriangle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import { objectivesApi, featuresApi } from '@/lib/ipc'
@@ -29,6 +29,7 @@ export function MeetingsArea() {
   const extractError = useMeetingsStore((s) => s.extractError)
   const clearExtraction = useMeetingsStore((s) => s.clearExtraction)
   const materializeTask = useMeetingsStore((s) => s.materializeTask)
+  const sidecarConfigured = useMeetingsStore((s) => s.sidecarConfigured)
 
   const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
   const [features, setFeatures] = useState<Feature[]>([])
@@ -151,6 +152,21 @@ export function MeetingsArea() {
       </aside>
 
       <main className="flex flex-1 flex-col overflow-hidden">
+        {sidecarConfigured === false && (
+          <div className="flex items-start gap-2 border-b border-[var(--color-warning,#b8860b)]/40 bg-[var(--color-warning,#b8860b)]/10 px-5 py-2.5 text-xs text-[var(--color-text)]">
+            <Icon as={AlertTriangle} size={14} className="mt-0.5 shrink-0 text-[var(--color-warning,#b8860b)]" />
+            <div className="min-w-0">
+              <strong>Sidecar de transcrição não configurado.</strong> A captura usa
+              um stub de desenvolvimento (transcript falso). Para transcrição real
+              em pt-BR, rode{' '}
+              <code className="rounded bg-[var(--color-surface)] px-1 py-0.5">
+                scripts/setup-meeting-sidecar.sh
+              </code>{' '}
+              e configure a pref <code>meeting_sidecar_python</code> com o Python do
+              venv. Notas e extração seguem funcionando normalmente.
+            </div>
+          </div>
+        )}
         {selected ? (
           <>
             <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">

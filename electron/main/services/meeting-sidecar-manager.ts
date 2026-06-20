@@ -135,6 +135,11 @@ export interface SidecarManagerDeps {
   resolveCommand?: () => Promise<string>
   // Args default quando StartOptions.args não vier. Recebe o meetingId.
   defaultArgs?: (meetingId: string) => string[]
+  // Resolve command+args JUNTOS no momento do start (async). Tem precedência
+  // sobre resolveCommand/defaultArgs quando presente — necessário p/ o sidecar
+  // real, onde o interpretador (python do venv) e o script são decididos juntos
+  // a partir da pref, e não independentemente.
+  resolveStart?: (meetingId: string) => Promise<{ command: string; args: string[] }>
 }
 
 export class MeetingSidecarManager extends TypedEmitter {
@@ -159,10 +164,20 @@ export class MeetingSidecarManager extends TypedEmitter {
       throw new Error(`sidecar for meeting ${meetingId} already running`)
     }
 
-    const command =
-      opts.command ?? (this.deps.resolveCommand ? await this.deps.resolveCommand() : 'python3')
-    const args =
-      opts.args ?? (this.deps.defaultArgs ? this.deps.defaultArgs(meetingId) : [])
+    // resolveStart decide command+args juntos (sidecar real). StartOptions
+    // explícitos (testes) têm precedência sobre tudo.
+    let command: string
+    let args: string[]
+    if (opts.command !== undefined || opts.args !== undefined) {
+      command =
+        opts.command ?? (this.deps.resolveCommand ? await this.deps.resolveCommand() : 'python3')
+      args = opts.args ?? (this.deps.defaultArgs ? this.deps.defaultArgs(meetingId) : [])
+    } else if (this.deps.resolveStart) {
+      ;({ command, args } = await this.deps.resolveStart(meetingId))
+    } else {
+      command = this.deps.resolveCommand ? await this.deps.resolveCommand() : 'python3'
+      args = this.deps.defaultArgs ? this.deps.defaultArgs(meetingId) : []
+    }
 
     // stdin é mantido aberto (pipe) p/ o orphan-guard do sidecar: quando o main
     // morre, o pipe fecha e o sidecar se auto-encerra, liberando o device.

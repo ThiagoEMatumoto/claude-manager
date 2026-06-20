@@ -7,10 +7,12 @@ export function useMeetings() {
   const load = useMeetingsStore((s) => s.load)
   const startUpdatedWatch = useMeetingsStore((s) => s.startUpdatedWatch)
   const stopUpdatedWatch = useMeetingsStore((s) => s.stopUpdatedWatch)
+  const checkSidecarConfigured = useMeetingsStore((s) => s.checkSidecarConfigured)
 
   useEffect(() => {
     void load()
+    void checkSidecarConfigured()
     startUpdatedWatch()
     return () => stopUpdatedWatch()
-  }, [load, startUpdatedWatch, stopUpdatedWatch])
+  }, [load, checkSidecarConfigured, startUpdatedWatch, stopUpdatedWatch])
 }

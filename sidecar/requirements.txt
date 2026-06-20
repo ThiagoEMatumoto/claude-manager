@@ -1,0 +1,12 @@
+# Deps do sidecar REAL de transcrição (sidecar.py).
+#
+# torch NÃO está aqui: precisa do índice CUDA 12.8 (cu128) para a RTX 5070 Laptop
+# (Blackwell, sm_120) e é instalado separadamente pelo scripts/setup-meeting-sidecar.sh
+# via `--index-url https://download.pytorch.org/whl/cu128`. Pinar torch num
+# requirements comum quebraria o resolver para o índice cu128.
+#
+# faster-whisper traz ctranslate2 (runtime de inferência). Versão recente é
+# necessária para wheels compatíveis com CUDA 12.x.
+faster-whisper>=1.1.0
+soundfile>=0.12.1
+numpy>=1.26

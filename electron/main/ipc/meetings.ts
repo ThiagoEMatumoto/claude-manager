@@ -4,7 +4,7 @@ import * as taskStore from '../services/task-store'
 import * as objectiveStore from '../services/objective-store'
 import * as featureStore from '../services/feature-store'
 import { broadcast } from '../services/notify'
-import { meetingSidecarManager } from '../services/meeting-sidecar'
+import { meetingSidecarManager, isMeetingSidecarConfigured } from '../services/meeting-sidecar'
 import { extractMeeting } from '../services/meeting-extraction'
 import type {
   CreateMeetingInput,
@@ -48,6 +48,13 @@ export function registerMeetingsIpc(): void {
 
   ipcMain.handle('meetings:list-segments', (_e, meetingId: string): MeetingSegment[] => {
     return meetingStore.listSegments(meetingId)
+  })
+
+  // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
+  // python + sidecar.py existem). A UI usa pra mostrar o aviso de 1ª classe
+  // "rode scripts/setup-meeting-sidecar.sh" sem bloquear notas/extração.
+  ipcMain.handle('meetings:sidecar-configured', (): boolean => {
+    return isMeetingSidecarConfigured()
   })
 
   // Captura: o sidecar emite o `status: 'capturing'` ao subir; aqui só carimbamos

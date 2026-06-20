@@ -28,6 +28,11 @@ interface MeetingsState {
   extractingId: string | null
   extractError: string | null
 
+  // Sidecar REAL de transcrição configurado? null = ainda não checado. false =
+  // app cai no fake (dev) e a UI mostra o aviso de 1ª classe.
+  sidecarConfigured: boolean | null
+  checkSidecarConfigured: () => Promise<void>
+
   load: () => Promise<void>
   refresh: () => Promise<void>
   setFilter: (filter: MeetingListFilter) => Promise<void>
@@ -55,6 +60,16 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   extraction: null,
   extractingId: null,
   extractError: null,
+  sidecarConfigured: null,
+
+  checkSidecarConfigured: async () => {
+    try {
+      const configured = await meetingsApi.sidecarConfigured()
+      set({ sidecarConfigured: configured })
+    } catch {
+      set({ sidecarConfigured: false })
+    }
+  },
 
   load: async () => {
     set({ loading: true, error: null })

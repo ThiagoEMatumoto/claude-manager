@@ -40,6 +40,7 @@ import { FilesPanel } from '@/features/files/FilesPanel'
 import { HandoffApprovalDialog } from '@/features/handoffs/HandoffApprovalDialog'
 import { HandoffsPanel } from '@/features/handoffs/HandoffsPanel'
 import { useHandoffs } from '@/features/handoffs/useHandoffs'
+import { DossiersPanel } from '@/features/dossiers/DossiersPanel'
 
 interface PaneParams {
   pane: ActivePane
@@ -637,6 +638,8 @@ export function AppShell() {
       {area === 'architecture' && <ArchitectureArea />}
 
       {area === 'handoffs' && <HandoffsPanel />}
+
+      {area === 'dossiers' && <DossiersPanel />}
 
       {area === 'tasks' && <TasksArea />}
 

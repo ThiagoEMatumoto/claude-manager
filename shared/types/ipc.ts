@@ -161,6 +161,194 @@ export interface CreateHandoffInput {
   mode?: HandoffMode
 }
 
+// ---- Research Dossier (pesquisa profunda com proveniência) ----
+//
+// Hierarquia: Dossier (a pergunta persistente) → DossierRun (cada execução do
+// funil de 6 estágios + 2 gates) → Source (fonte ingerida) → EvidenceRecord (o
+// claim atômico amarrado a fonte + verbatim + anchor). É a fonte da verdade: nada
+// no relatório existe sem um EvidenceRecord por trás.
+
+// Classe da fonte, atribuída na ingestão. Deriva o trust_tier.
+export type SourceClass =
+  | 'primary_official'
+  | 'academic'
+  | 'reputable_press'
+  | 'practitioner_video'
+  | 'forum_ugc'
+  | 'vendor_marketing'
+  | 'blog_seo'
+
+// Confiabilidade derivada da classe: primary/academic=high; press=medium;
+// video=medium-com-contexto; forum=low-autêntico; vendor=biased.
+export type TrustTier = 'high' | 'medium' | 'low' | 'biased'
+
+// Estado de verificação de um claim. unverified ≠ refuted (a falha instrutiva da
+// skill deep-research foi colapsar não-checado em refutado).
+export type EvidenceState =
+  | 'primary_accepted'
+  | 'corroborated'
+  | 'single_source'
+  | 'contested'
+  | 'unverified'
+  | 'refuted'
+
+// Ciclo de vida do dossiê: active (vivo, re-rodável) → archived.
+export type DossierStatus = 'active' | 'archived'
+
+// Estágio/estado de uma run no funil semi-autônomo. awaiting_gate_a/b são as duas
+// pausas humanas; paused é checkpoint por throttle (retoma, não destrói).
+export type DossierRunStatus =
+  | 'planning'
+  | 'awaiting_gate_a'
+  | 'searching'
+  | 'fetching'
+  | 'extracting'
+  | 'awaiting_gate_b'
+  | 'verifying'
+  | 'synthesizing'
+  | 'done'
+  | 'failed'
+  | 'paused'
+
+// Estado de ingestão de uma fonte: snippet (só rankeada na busca) → fetched
+// (página/transcrição baixada) | failed.
+export type SourceStatus = 'snippet' | 'fetched' | 'failed'
+
+export interface Dossier {
+  id: string
+  title: string
+  question: string
+  // Classes de fonte escolhidas no plano (persistido como JSON array).
+  sourceClasses: SourceClass[]
+  // Budget de tokens por dossiê (Gate A); null = sem cap explícito.
+  budgetTokens: number | null
+  status: DossierStatus
+  createdAt: number
+  updatedAt: number
+}
+
+export interface DossierRun {
+  id: string
+  dossierId: string
+  status: DossierRunStatus
+  // Estágio textual livre pra UI (sub-passo dentro do status). Null no início.
+  stage: string | null
+  // Plano do estágio 0 (JSON serializado): decomposição + classes + budget.
+  planJson: string | null
+  // Checkpoint após cada estágio (JSON serializado): permite retomar após throttle.
+  checkpointJson: string | null
+  // Custo acumulado de tokens da run.
+  costTokens: number
+  summary: string | null
+  error: string | null
+  startedAt: number
+  updatedAt: number
+  // Preenchido nos estados terminais (done/failed).
+  finishedAt: number | null
+}
+
+export interface Source {
+  id: string
+  dossierRunId: string
+  url: string
+  title: string | null
+  publisher: string | null
+  sourceClass: SourceClass
+  trustTier: TrustTier
+  // Quando a página/transcrição foi baixada (null enquanto é só snippet).
+  retrievedAt: number | null
+  // Ponteiro pro conteúdo bruto ingerido (ex.: path/blob ref); null se não-fetched.
+  contentRef: string | null
+  status: SourceStatus
+  createdAt: number
+}
+
+export interface EvidenceRecord {
+  id: string
+  dossierRunId: string
+  sourceId: string
+  // Afirmação atômica e falsificável.
+  claim: string
+  // O trecho EXATO de onde o claim saiu (proveniência verbatim).
+  verbatimQuote: string
+  // Offset de char (texto) OU timestamp "12:34" (vídeo). Null se não amarrado.
+  anchor: string | null
+  state: EvidenceState
+  // importance × (1 − confiança) roteia a verificação cara; default 0.
+  importance: number
+  // Ids de outros EvidenceRecords que confirmam/contradizem (JSON array de string).
+  corroboratedByJson: string | null
+  contradictedByJson: string | null
+  createdAt: number
+}
+
+export interface CreateDossierInput {
+  // Id pré-gerado opcional; se omitido, o store gera.
+  id?: string
+  title: string
+  question: string
+  sourceClasses: SourceClass[]
+  budgetTokens?: number | null
+  // Omitido = 'active'.
+  status?: DossierStatus
+}
+
+// Input do front-door (renderer → IPC dossiers:create). Diferente de
+// CreateDossierInput (usado pelo store, que aceita id pré-gerado e status): aqui
+// o usuário só informa o que digita no form.
+export interface CreateDossierApiInput {
+  title: string
+  question: string
+  sourceClasses: SourceClass[]
+  budgetTokens?: number | null
+}
+
+// Plano editável passado no Gate A (renderer → IPC). Espelha DossierPlan do motor
+// sem acoplar o shared aos tipos internos do pipeline.
+export interface DossierPlanInput {
+  question: string
+  subQuestions: string[]
+  sourceClasses: SourceClass[]
+}
+
+export interface CreateDossierRunInput {
+  id?: string
+  dossierId: string
+  // Omitido = 'planning'.
+  status?: DossierRunStatus
+  stage?: string | null
+  planJson?: string | null
+  checkpointJson?: string | null
+}
+
+export interface AddSourceInput {
+  id?: string
+  dossierRunId: string
+  url: string
+  title?: string | null
+  publisher?: string | null
+  sourceClass: SourceClass
+  trustTier: TrustTier
+  retrievedAt?: number | null
+  contentRef?: string | null
+  // Omitido = 'snippet'.
+  status?: SourceStatus
+}
+
+export interface AddEvidenceInput {
+  id?: string
+  dossierRunId: string
+  sourceId: string
+  claim: string
+  verbatimQuote: string
+  anchor?: string | null
+  state: EvidenceState
+  importance?: number
+  // Ids de records corroborantes/contraditórios; o store serializa como JSON.
+  corroboratedBy?: string[] | null
+  contradictedBy?: string[] | null
+}
+
 // Pasta que existe fisicamente dentro do vault de um projeto mas ainda não foi
 // registrada como repo. Surge quando o usuário clona/cria a pasta por fora do app.
 export interface UntrackedFolder {
@@ -1457,6 +1645,28 @@ export interface Api {
     // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
     sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
+    onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  dossiers: {
+    create(input: CreateDossierApiInput): Promise<Dossier>
+    list(opts?: { status?: DossierStatus }): Promise<Dossier[]>
+    get(id: string): Promise<Dossier | null>
+    archive(id: string): Promise<Dossier>
+    // Arranca uma nova run: cria a run, monta o plano e PARA em awaiting_gate_a.
+    startRun(input: { dossierId: string }): Promise<DossierRun>
+    // Gate A aprovado: busca → fetch → extração, depois PARA em awaiting_gate_b.
+    // plan opcional = plano editado pelo humano antes de gastar.
+    approveGateA(input: { runId: string; plan?: DossierPlanInput }): Promise<DossierRun>
+    // Gate B aprovado: poda opcional → verificação roteada → síntese graduada.
+    approveGateB(input: { runId: string; keepEvidenceIds?: string[] }): Promise<DossierRun>
+    // Retoma uma run parada (ex: throttle) a partir do checkpoint, respeitando os gates.
+    resumeRun(input: { runId: string }): Promise<DossierRun>
+    listRuns(dossierId: string): Promise<DossierRun[]>
+    getRun(runId: string): Promise<DossierRun | null>
+    listEvidence(runId: string): Promise<EvidenceRecord[]>
+    listSources(runId: string): Promise<Source[]>
+    // Payload é a DossierRun atualizada; o renderer trata como sinal de recarga.
+    onRunUpdated(handler: (payload: unknown) => void): () => void
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   objectives: {

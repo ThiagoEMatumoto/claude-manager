@@ -8,6 +8,7 @@ import {
   ListTodo,
   Mic,
   Network,
+  ScrollText,
   Settings,
   Target,
 } from 'lucide-react'
@@ -29,6 +30,7 @@ const AREAS: AreaDef[] = [
   { id: 'projects', icon: Folder, label: 'Projetos' },
   { id: 'architecture', icon: Network, label: 'Arquitetura' },
   { id: 'handoffs', icon: Inbox, label: 'Handoffs' },
+  { id: 'dossiers', icon: ScrollText, label: 'Dossiês' },
   { id: 'features', icon: ClipboardList, label: 'Features' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },

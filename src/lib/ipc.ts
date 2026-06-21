@@ -22,6 +22,7 @@ export const metricsApi = api.metrics
 export const featuresApi = api.features
 export const objectivesApi = api.objectives
 export const handoffsApi = api.handoffs
+export const dossiersApi = api.dossiers
 export const architectureApi = api.repoDeps
 export const tasksApi = api.tasks
 export const meetingsApi = api.meetings

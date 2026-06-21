@@ -18,6 +18,7 @@ import {
 } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
@@ -106,6 +107,8 @@ function GeneralTab({ open }: { open: boolean }) {
   const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
+  const showHandoffsInline = useProjectsPrefsStore((s) => s.showHandoffsInline)
+  const setShowHandoffsInline = useProjectsPrefsStore((s) => s.setShowHandoffsInline)
   const [autoApproveHandoffs, setAutoApproveHandoffs] = useState(false)
   const [maxActiveHandoffs, setMaxActiveHandoffs] = useState(HANDOFFS_MAX_ACTIVE_DEFAULT)
   const [heartbeatTtlHours, setHeartbeatTtlHours] = useState(HANDOFFS_HEARTBEAT_TTL_DEFAULT)
@@ -130,6 +133,7 @@ function GeneralTab({ open }: { open: boolean }) {
     void mcpApi.status().then(setMcpStatus)
     setMcpCopied(false)
     void useTerminalPrefsStore.getState().load()
+    void useProjectsPrefsStore.getState().load()
   }, [open])
 
   function updateAutoApprove(v: boolean) {
@@ -310,6 +314,30 @@ function GeneralTab({ open }: { open: boolean }) {
             type="checkbox"
             checked={visualLineNav}
             onChange={(e) => void setVisualLineNav(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Projetos
+        </div>
+        <label className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">
+              Mostrar delegações nos projetos
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Exibe uma seção "Delegações" dentro de cada projeto na barra lateral, com os
+              handoffs cujo repo-alvo pertence ao projeto. Desligado por padrão — os handoffs
+              continuam na área dedicada.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={showHandoffsInline}
+            onChange={(e) => void setShowHandoffsInline(e.target.checked)}
             className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
           />
         </label>

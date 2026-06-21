@@ -100,7 +100,7 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
 
 // status → token de cor (texto + borda + fundo translúcido). interrupted usa o
 // tom de aviso (recuperável, não é erro real como failed).
-const STATUS_COLOR: Record<HandoffStatus, string> = {
+export const STATUS_COLOR: Record<HandoffStatus, string> = {
   pending: 'var(--color-warning)',
   running: 'var(--color-info)',
   needs_input: 'var(--color-warning)',
@@ -124,7 +124,7 @@ const STATUS_ORDER: HandoffStatus[] = [
   'rejected',
 ]
 
-function StatusBadge({ status }: { status: HandoffStatus }) {
+export function StatusBadge({ status }: { status: HandoffStatus }) {
   const color = STATUS_COLOR[status]
   return (
     <span

@@ -163,7 +163,7 @@ export function pendingHandoffs(handoffs: Handoff[]): Handoff[] {
 // pending/approved não têm filha ainda (childSessionId null), mas inclui-los é
 // inócuo; running e needs_input são os casos reais (filha viva: trabalhando ou
 // aguardando a mãe). done/failed/rejected liberam a sessão de volta.
-const ACTIVE_HANDOFF_STATUSES: ReadonlySet<Handoff['status']> = new Set([
+export const ACTIVE_HANDOFF_STATUSES: ReadonlySet<Handoff['status']> = new Set([
   'pending',
   'approved',
   'running',

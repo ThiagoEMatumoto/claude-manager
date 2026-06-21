@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowUpRight, FolderInput, GripVertical, Link2, MoreHorizontal } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
@@ -20,11 +20,38 @@ import { useRepos } from './useProjects'
 import { AddRepoDialog } from './AddRepoDialog'
 import { EditRepoDialog } from './EditRepoDialog'
 import { UntrackedFolders } from './UntrackedFolders'
+import { HandoffRow } from './HandoffRow'
 import { Menu } from '@/components/ui/Menu'
 import { Icon } from '@/components/ui/Icon'
 import { SessionsModal } from '@/features/sessions/SessionsModal'
 import { useAppStore } from '@/store/appStore'
-import type { LinkKind, Project, Repo, UpdateRepoInput } from '../../../shared/types/ipc'
+import { useHandoffsStore, ACTIVE_HANDOFF_STATUSES } from '@/store/handoffsStore'
+import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
+import type { Handoff, LinkKind, Project, Repo, UpdateRepoInput } from '../../../shared/types/ipc'
+
+// Quantos handoffs terminais (done/failed) recentes mostrar — os ativos sempre
+// aparecem; rejected é ocultado.
+const MAX_TERMINAL_HANDOFFS = 3
+
+// Deriva os handoffs deste projeto a partir da lista crua + os repos do projeto.
+// JOIN no componente (handoff pertence ao projeto se o repo-alvo é do projeto).
+// NÃO usar como selector zustand — filter/sort retornam array novo (loop no v5);
+// chamar dentro de useMemo. Ativos sempre; até N terminais recentes; rejected
+// oculto. Ordenado por updatedAt desc.
+function projectHandoffs(handoffs: Handoff[], repos: Repo[]): Handoff[] {
+  const repoIds = new Set(repos.map((r) => r.id))
+  const mine = handoffs.filter(
+    (h) => repoIds.has(h.targetRepoId) && h.status !== 'rejected',
+  )
+  const active = mine
+    .filter((h) => ACTIVE_HANDOFF_STATUSES.has(h.status))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const terminal = mine
+    .filter((h) => h.status === 'done' || h.status === 'failed')
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_TERMINAL_HANDOFFS)
+  return [...active, ...terminal]
+}
 
 interface Props {
   project: Project
@@ -39,6 +66,16 @@ const LINK_BADGE: Record<LinkKind, { icon: ComponentType<LucideProps>; title: st
 export function ProjectRepos({ project }: Props) {
   const { repos, untracked, create, adopt, update, remove, reorder } = useRepos(project.id)
   const [adding, setAdding] = useState(false)
+
+  // Watch/load dos handoffs já é montado globalmente (useHandoffs no AppShell);
+  // aqui só lemos a lista crua. O JOIN com repos é derivado em useMemo — selector
+  // que retorna array novo causa loop infinito no zustand v5.
+  const showHandoffsInline = useProjectsPrefsStore((s) => s.showHandoffsInline)
+  const handoffs = useHandoffsStore((s) => s.handoffs)
+  const projectHandoffsList = useMemo(
+    () => (showHandoffsInline ? projectHandoffs(handoffs, repos) : []),
+    [showHandoffsInline, handoffs, repos],
+  )
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
 
@@ -88,6 +125,19 @@ export function ProjectRepos({ project }: Props) {
             + repo
           </button>
         </>
+      )}
+
+      {showHandoffsInline && projectHandoffsList.length > 0 && (
+        <div className="mt-1 border-t border-[var(--color-border)]/40 pt-1">
+          <div className="px-1 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+            Delegações ({projectHandoffsList.length})
+          </div>
+          <div className="flex flex-col gap-px text-xs">
+            {projectHandoffsList.map((h) => (
+              <HandoffRow key={h.id} handoff={h} />
+            ))}
+          </div>
+        </div>
       )}
 
       <UntrackedFolders folders={untracked} onAdopt={adopt} />

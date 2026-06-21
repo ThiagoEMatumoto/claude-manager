@@ -259,4 +259,30 @@ describe('MeetingSidecarManager', () => {
       /already running/,
     )
   })
+
+  // O env devolvido por resolveStart chega ao subprocesso: o script lê
+  // process.env.CM_CUSTOM e o emite como texto de um segment.
+  it('injeta o env de resolveStart no subprocesso (vars customizadas)', async () => {
+    const rec = makeRecorder()
+    const ECHO_ENV_SCRIPT = `
+const emit = (o) => { process.stdout.write(JSON.stringify(o) + "\\n") }
+emit({ type: "status", state: "capturing" })
+emit({ type: "segment", idx: 0, text: process.env.CM_CUSTOM || "MISSING" })
+emit({ type: "done", segments: 1 })
+`
+    mgr = new MeetingSidecarManager({
+      store: rec.store,
+      broadcast: rec.broadcast,
+      resolveStart: async () => ({
+        command: NODE,
+        args: ['-e', ECHO_ENV_SCRIPT],
+        env: { ...process.env, CM_CUSTOM: 'injected-value' },
+      }),
+    })
+    const exited = waitForExit(mgr)
+    await mgr.start('menv')
+    await exited
+
+    expect(rec.segments.map((s) => s.text)).toEqual(['injected-value'])
+  })
 })

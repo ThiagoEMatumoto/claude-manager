@@ -15,6 +15,7 @@ import { MeetingList } from './MeetingList'
 import { MeetingSearchResults } from './MeetingSearchResults'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
 import { ExtractionReview } from './ExtractionReview'
+import { SidecarInstaller } from './SidecarInstaller'
 import { useMeetings } from './useMeetings'
 
 // status >= ready significa que há transcript fechado pronto pra enriquecer.
@@ -50,6 +51,7 @@ export function MeetingsArea() {
   const clearExtraction = useMeetingsStore((s) => s.clearExtraction)
   const materializeTask = useMeetingsStore((s) => s.materializeTask)
   const sidecarConfigured = useMeetingsStore((s) => s.sidecarConfigured)
+  const checkSidecarConfigured = useMeetingsStore((s) => s.checkSidecarConfigured)
   const activationDraft = useMeetingsStore((s) => s.activationDraft)
   const clearActivationDraft = useMeetingsStore((s) => s.clearActivationDraft)
   const searchQuery = useMeetingsStore((s) => s.searchQuery)
@@ -272,12 +274,9 @@ export function MeetingsArea() {
             <div className="min-w-0">
               <strong>Sidecar de transcrição não configurado.</strong> A captura usa
               um stub de desenvolvimento (transcript falso). Para transcrição real
-              em pt-BR, rode{' '}
-              <code className="rounded bg-[var(--color-surface)] px-1 py-0.5">
-                scripts/setup-meeting-sidecar.sh
-              </code>{' '}
-              e configure a pref <code>meeting_sidecar_python</code> com o Python do
-              venv. Notas e extração seguem funcionando normalmente.
+              em pt-BR, instale o sidecar com um clique abaixo. Notas e extração
+              seguem funcionando normalmente.
+              <SidecarInstaller onInstalled={() => void checkSidecarConfigured()} />
             </div>
           </div>
         )}

@@ -1,12 +1,19 @@
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
+import { spawn } from 'node:child_process'
+import { createInterface } from 'node:readline'
+import { existsSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import * as meetingStore from '../services/meeting-store'
 import * as taskStore from '../services/task-store'
 import * as objectiveStore from '../services/objective-store'
 import * as featureStore from '../services/feature-store'
 import { broadcast } from '../services/notify'
 import { meetingSidecarManager, isMeetingSidecarConfigured } from '../services/meeting-sidecar'
+import { resolveSetupScript } from '../services/sidecar-path'
 import { extractMeeting, type ProviderPref } from '../services/meeting-extraction'
 import { getPref } from '../services/prefs-store'
+import { spawnEnv } from '../services/custom-env'
 import type {
   CreateMeetingInput,
   Meeting,
@@ -20,6 +27,12 @@ import type {
   Task,
   UpdateMeetingInput,
 } from '../../../shared/types/ipc'
+
+const moduleDir = dirname(fileURLToPath(import.meta.url))
+
+// Guard contra instalações concorrentes do sidecar (o botão "Instalar
+// transcrição" da UI). Uma instalação por vez.
+let installing = false
 
 // CRUD + controle de captura da entidade Reuniões (Meeting Intelligence), molde
 // fino do ipc/tasks: handlers store→broadcast. start/stop-capture supervisionam
@@ -84,6 +97,53 @@ export function registerMeetingsIpc(): void {
   // "rode scripts/setup-meeting-sidecar.sh" sem bloquear notas/extração.
   ipcMain.handle('meetings:sidecar-configured', (): boolean => {
     return isMeetingSidecarConfigured()
+  })
+
+  // Instala o sidecar de transcrição rodando scripts/setup-meeting-sidecar.sh
+  // (cria o venv + baixa faster-whisper no path padrão), streamando stdout/stderr
+  // linha-a-linha pro renderer (`meeting:install:log`) e o resultado final
+  // (`meeting:install:done` { ok, code? }). Sem terminal: a UI mostra o progresso.
+  ipcMain.handle('meetings:install-sidecar', (): void => {
+    if (installing) {
+      broadcast('meeting:install:log', { line: 'Instalação já em andamento.' })
+      return
+    }
+    const script = resolveSetupScript({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleDir,
+    })
+    if (!existsSync(script)) {
+      broadcast('meeting:install:done', {
+        ok: false,
+        error: `Script de instalação não encontrado: ${script}`,
+      })
+      return
+    }
+
+    installing = true
+    broadcast('meeting:install:log', { line: `$ bash ${script}` })
+    // Env com as vars customizadas do usuário (ex.: HF_TOKEN p/ baixar modelos).
+    const child = spawn('bash', [script], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: spawnEnv(),
+    })
+
+    const emit = (line: string) => {
+      const trimmed = line.replace(/\r$/, '')
+      if (trimmed) broadcast('meeting:install:log', { line: trimmed })
+    }
+    createInterface({ input: child.stdout }).on('line', emit)
+    createInterface({ input: child.stderr }).on('line', emit)
+
+    child.on('error', (err) => {
+      installing = false
+      broadcast('meeting:install:done', { ok: false, error: String(err.message ?? err) })
+    })
+    child.on('exit', (code) => {
+      installing = false
+      broadcast('meeting:install:done', { ok: code === 0, code: code ?? null })
+    })
   })
 
   // Captura: o sidecar emite o `status: 'capturing'` ao subir; aqui só carimbamos

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,8 +11,10 @@ import {
   MEETING_SIDECAR_PYTHON_KEY,
   isMeetingSidecarConfigured as isConfiguredPure,
   resolveSidecar,
+  resolveSidecarPython,
 } from './meeting-sidecar-config'
 import { getPref } from './prefs-store'
+import { spawnEnv } from './custom-env'
 import * as meetingStore from './meeting-store'
 import { broadcast } from './notify'
 
@@ -73,8 +76,17 @@ function meetingsOutDir(): string {
 }
 
 function configEnv() {
-  return {
+  // Auto-detecção: pref vazia → tenta o venv no path padrão do setup
+  // (~/.claude-manager/meeting-sidecar/.venv/bin/python). O usuário não precisa
+  // setar a pref manualmente se rodou o setup no local padrão.
+  const pythonPref = resolveSidecarPython({
     pythonPref: getPref<string | null>(MEETING_SIDECAR_PYTHON_KEY, null),
+    home: homedir(),
+    exists: existsSync,
+    join,
+  })
+  return {
+    pythonPref,
     realScriptPath: sidecarScript('sidecar.py'),
     fakeScriptPath: sidecarScript('fake_sidecar.py'),
   }
@@ -91,11 +103,20 @@ export function isMeetingSidecarConfigured(): boolean {
 // (python do venv + sidecar.py + --out-dir durável). Senão → FAKE (python3
 // herdado + fake_sidecar.py). O swap é só de script/interpretador — o manager
 // não muda.
-async function resolveStart(meetingId: string): Promise<{ command: string; args: string[] }> {
+async function resolveStart(
+  meetingId: string,
+): Promise<{ command: string; args: string[]; env: NodeJS.ProcessEnv }> {
   const resolution = resolveSidecar(configEnv(), await resolvePython3())
+  // Vars customizadas do usuário (Configurações) mescladas sobre process.env —
+  // ex.: HF_TOKEN p/ o faster-whisper, proxies. Lidas a cada start (pref viva).
+  const env = spawnEnv()
 
   if (resolution.mode === 'fake') {
-    return { command: resolution.command, args: [resolution.script, '--meeting-id', meetingId] }
+    return {
+      command: resolution.command,
+      args: [resolution.script, '--meeting-id', meetingId],
+      env,
+    }
   }
 
   const args = [resolution.script, '--meeting-id', meetingId]
@@ -110,7 +131,7 @@ async function resolveStart(meetingId: string): Promise<{ command: string; args:
       console.error(`[meeting-sidecar] falha ao criar out-dir ${outDir}:`, err)
     }
   }
-  return { command: resolution.command, args }
+  return { command: resolution.command, args, env }
 }
 
 export const meetingSidecarManager = new MeetingSidecarManager({

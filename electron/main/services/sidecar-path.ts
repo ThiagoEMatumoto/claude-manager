@@ -26,3 +26,18 @@ export function resolveSidecarDir(env: SidecarPathEnv): string {
 export function resolveSidecarScript(env: SidecarPathEnv, scriptName: string): string {
   return join(resolveSidecarDir(env), scriptName)
 }
+
+// Resolve o diretório `scripts/` (onde vive setup-meeting-sidecar.sh). Em
+// PACKAGED: ao lado do sidecar, sob resourcesPath. Em DEV/BUILD/e2e: a raiz do
+// repo é `<moduleDir>/../..` (out/main → repoRoot) e `scripts/` fica nela. Pura
+// para ser testável sem mockar `electron`.
+export function resolveScriptsDir(env: SidecarPathEnv): string {
+  if (env.isPackaged) {
+    return join(env.resourcesPath, 'scripts')
+  }
+  return join(env.moduleDir, '..', '..', 'scripts')
+}
+
+export function resolveSetupScript(env: SidecarPathEnv): string {
+  return join(resolveScriptsDir(env), 'setup-meeting-sidecar.sh')
+}

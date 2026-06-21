@@ -922,6 +922,19 @@ export interface MeetingPartialEvent {
   text: string
 }
 
+// Stream da instalação do sidecar (botão "Instalar transcrição"): uma linha de
+// stdout/stderr do setup-meeting-sidecar.sh por evento.
+export interface MeetingInstallLogEvent {
+  line: string
+}
+
+// Fim da instalação do sidecar: ok=true quando o script saiu com código 0.
+export interface MeetingInstallDoneEvent {
+  ok: boolean
+  code?: number | null
+  error?: string
+}
+
 // Origem do trecho que casou na busca FTS5 (transcript, notas aumentadas ou
 // item extraído). Deixa a UI rotular de onde veio o match.
 export type MeetingSearchSource = 'segment' | 'notes' | 'extraction'
@@ -1714,6 +1727,9 @@ export interface Api {
     // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
     // python + sidecar.py existem). false → app cai no fake (dev) e a UI avisa.
     sidecarConfigured(): Promise<boolean>
+    // Instala o sidecar (roda setup-meeting-sidecar.sh). Progresso via
+    // onInstallLog; resultado via onInstallDone. Não bloqueia (stream).
+    installSidecar(): Promise<void>
     // Inicia/encerra a captura do sidecar para a reunião (idle ⇄ capturing).
     startCapture(meetingId: string): Promise<void>
     stopCapture(meetingId: string): Promise<void>
@@ -1729,6 +1745,9 @@ export interface Api {
     onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
     onTranscriptPartial(handler: (partial: MeetingPartialEvent) => void): () => void
     onStatus(handler: (payload: MeetingStatusEvent) => void): () => void
+    // Stream da instalação do sidecar (uma linha por evento) e o resultado final.
+    onInstallLog(handler: (event: MeetingInstallLogEvent) => void): () => void
+    onInstallDone(handler: (event: MeetingInstallDoneEvent) => void): () => void
     // Speaker descoberto/renomeado (diarização ou rename manual). A UI atualiza
     // o mapa label→nome sem recarregar tudo.
     onSpeaker(handler: (speaker: MeetingSpeaker) => void): () => void

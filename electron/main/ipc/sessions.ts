@@ -503,6 +503,87 @@ export function registerSessionIpc(): void {
     return findTranscriptPath(ccSessionId) !== null
   })
 
+  // Gate de UI: um handoff interrompido só é retomável se o transcript da filha
+  // ainda existe no disco. Resolve o cc_session_id internamente (o renderer só tem
+  // o childSessionId interno) e reusa findTranscriptPath — mesmo gate do resume.
+  ipcMain.handle('handoffs:is-resumable', (_e, id: string): boolean => {
+    const handoff = handoffStore.get(id)
+    if (!handoff || handoff.status !== 'interrupted' || !handoff.childSessionId) return false
+    const childRow = getDb()
+      .prepare('SELECT cc_session_id FROM sessions WHERE id = ?')
+      .get(handoff.childSessionId) as { cc_session_id: string | null } | undefined
+    const ccSessionId = childRow?.cc_session_id
+    if (!ccSessionId || !UUID_RE.test(ccSessionId)) return false
+    return findTranscriptPath(ccSessionId) !== null
+  })
+
+  // Retomar um handoff INTERROMPIDO: re-spawna a sessão-filha via `claude --resume`
+  // (recupera o histórico do transcript), re-injeta o kickoff e devolve o handoff
+  // a 'running'. Vive aqui (não em ipc/handoffs.ts) porque reusa os helpers de
+  // spawn deste módulo (resolveClaudeCommand, mcpConfigArg, startSession,
+  // findTranscriptPath, injectInitialCommandOnFirstData) — mesmo caminho do
+  // sessions:resume + kickoff do approve. Só age sobre status 'interrupted'.
+  ipcMain.handle('handoffs:resume', (_e, id: string) => {
+    const db = getDb()
+    const handoff = handoffStore.get(id)
+    if (!handoff) throw new Error(`Handoff não encontrado: ${id}`)
+    if (handoff.status !== 'interrupted') {
+      throw new Error(
+        `Só dá pra retomar um handoff interrompido (status atual: ${handoff.status}).`,
+      )
+    }
+    if (!handoff.childSessionId) {
+      throw new Error('Handoff interrompido não tem sessão-filha registrada para retomar.')
+    }
+
+    // childSessionId é o sessions.id interno; o --resume precisa do cc_session_id
+    // (o session-id do Claude, gravado no spawn original).
+    const childRow = db
+      .prepare('SELECT cc_session_id FROM sessions WHERE id = ?')
+      .get(handoff.childSessionId) as { cc_session_id: string | null } | undefined
+    const ccSessionId = childRow?.cc_session_id
+    if (!ccSessionId || !UUID_RE.test(ccSessionId)) {
+      throw new Error('Sessão-filha do handoff sem cc_session_id válido — não há o que retomar.')
+    }
+
+    // Gate de resumibilidade: o transcript JSONL precisa existir no disco.
+    const transcript = findTranscriptPath(ccSessionId)
+    if (!transcript) {
+      throw new Error(
+        'O transcript da sessão-filha não foi encontrado — não é possível retomá-la.',
+      )
+    }
+
+    const repoId = handoff.targetRepoId
+    const repo = db
+      .prepare('SELECT path, label FROM repos WHERE id = ?')
+      .get(repoId) as RepoPathRow | undefined
+    if (!repo) throw new Error(`repo-alvo do handoff não encontrado: ${repoId}`)
+
+    const name = readTranscriptTitle(transcript) || `handoff: ${repo.label}`
+    const claudeCmd = resolveClaudeCommand()
+    const innerCmd = `${claudeCmd} --resume ${ccSessionId} -n ${shquote(name)}${mcpConfigArg()}`
+
+    // Mesma instrução de kickoff do approve: re-injetada após o resume subir, pra
+    // a filha retomar a tarefa e reportar via MCP ao terminar.
+    const kickoff = `Retome a tarefa do handoff (handoffId="${id}") de onde parou. Ao terminar, chame a MCP tool handoff_report com handoffId="${id}".`
+
+    const session = startSession({
+      ccSessionId,
+      repoId,
+      cwd: repo.path,
+      innerCmd,
+      featureId: handoff.featureId,
+      initialCommand: kickoff,
+    })
+
+    // Volta a running com a NOVA sessão-filha (startSession criou um novo
+    // sessions.id). markRunning loga a transição via logEvent.
+    const updated = handoffStore.markRunning(id, session.id)
+    broadcast('handoff:updated', updated)
+    return updated
+  })
+
   ipcMain.handle('sessions:list-by-repo', (_e, repoId: string): SessionSummary[] => {
     const db = getDb()
     const rows = db

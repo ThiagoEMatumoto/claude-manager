@@ -228,6 +228,8 @@ const api: Api = {
     sendMessage: (input: { id: string; text: string }) => invoke('handoffs:send-message', input),
     setOutcome: (input: { id: string; outcome: HandoffOutcome }) =>
       invoke('handoffs:set-outcome', input),
+    resume: (id: string) => invoke('handoffs:resume', id),
+    isResumable: (id: string) => invoke('handoffs:is-resumable', id),
     spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
     onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },

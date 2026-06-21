@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CircleSlash,
   CornerDownLeft,
+  Play,
   RefreshCw,
   Send,
   TerminalSquare,
@@ -154,13 +155,16 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [rating, setRating] = useState(false)
+  const [resumable, setResumable] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const liveSessions = useAppStore((s) => s.liveSessions)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const load = useHandoffsStore((s) => s.load)
   const repoLabel = handoff.targetRepoLabel ?? handoff.targetRepoId
   const hasDetail =
     (handoff.status === 'done' && !!handoff.summary) ||
-    (handoff.status === 'failed' && !!handoff.error)
+    (handoff.status === 'failed' && !!handoff.error) ||
+    (handoff.status === 'interrupted' && !!handoff.error)
 
   // Sem heartbeat: só faz sentido pra running. Calculado no render — a lista
   // recarrega periodicamente via watch, mantendo o "há Xh" razoavelmente fresco.
@@ -174,6 +178,43 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
   // Feedback de utilidade: só faz sentido pra handoffs concluídos. Persiste via
   // IPC e recarrega pra refletir o outcome marcado. Idempotente no backend.
   const canRate = handoff.status === 'done'
+
+  // Retomar: só pra handoffs interrompidos (filha morreu sem erro real). O botão
+  // só aparece se o backend confirma que o transcript da filha ainda existe
+  // (is-resumable) — senão não há de onde retomar via `claude --resume`.
+  const isInterrupted = handoff.status === 'interrupted'
+
+  useEffect(() => {
+    if (!isInterrupted) {
+      setResumable(false)
+      return
+    }
+    let cancelled = false
+    void handoffsApi
+      .isResumable(handoff.id)
+      .then((ok) => {
+        if (!cancelled) setResumable(ok)
+      })
+      .catch(() => {
+        if (!cancelled) setResumable(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isInterrupted, handoff.id])
+
+  async function resume() {
+    if (resuming) return
+    setResuming(true)
+    try {
+      await handoffsApi.resume(handoff.id)
+      await load()
+    } catch {
+      // O load() seguinte ressincroniza o status. Mantém o botão habilitável pra
+      // nova tentativa (a filha pode ter ficado não-resumível nesse meio-tempo).
+      setResuming(false)
+    }
+  }
 
   async function rate(outcome: HandoffOutcome) {
     if (rating) return
@@ -332,6 +373,18 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
               {failing ? 'Falhando…' : 'Forçar falha'}
             </button>
           )}
+          {isInterrupted && resumable && (
+            <button
+              type="button"
+              onClick={() => void resume()}
+              disabled={resuming}
+              title="Re-spawnar a sessão-filha e retomar de onde parou"
+              className="flex items-center gap-1 rounded border border-[var(--color-accent)]/50 px-2 py-0.5 text-[11px] text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-50"
+            >
+              <Icon as={Play} size={12} />
+              {resuming ? 'Retomando…' : 'Retomar'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -402,7 +455,9 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
               ? 'Ocultar'
               : handoff.status === 'done'
                 ? 'Ver resumo'
-                : 'Ver erro'}
+                : handoff.status === 'interrupted'
+                  ? 'Ver motivo'
+                  : 'Ver erro'}
           </button>
           {expanded && (
             <pre
@@ -411,10 +466,12 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
                 color:
                   handoff.status === 'failed'
                     ? 'var(--color-danger)'
-                    : 'var(--color-text)',
+                    : handoff.status === 'interrupted'
+                      ? 'var(--color-warning)'
+                      : 'var(--color-text)',
               }}
             >
-              {handoff.status === 'failed' ? handoff.error : handoff.summary}
+              {handoff.status === 'done' ? handoff.summary : handoff.error}
             </pre>
           )}
         </div>

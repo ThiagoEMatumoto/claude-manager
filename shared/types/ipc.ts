@@ -1683,6 +1683,13 @@ export interface Api {
     spawnContext(id: string): Promise<HandoffSpawnContext>
     // Feedback humano sobre a utilidade de um handoff concluído (instrumentação).
     setOutcome(input: { id: string; outcome: HandoffOutcome }): Promise<Handoff>
+    // Retoma um handoff INTERROMPIDO: re-spawna a filha via `claude --resume`,
+    // re-injeta o kickoff e devolve o handoff a 'running'. Rejeita se o status não
+    // for 'interrupted' ou se o transcript da filha não existir mais.
+    resume(id: string): Promise<Handoff>
+    // Gate de UI do "Retomar": true só se o handoff está interrompido E o
+    // transcript da filha ainda existe (mesma checagem do resume).
+    isResumable(id: string): Promise<boolean>
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   dossiers: {

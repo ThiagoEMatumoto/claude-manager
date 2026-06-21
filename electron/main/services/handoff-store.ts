@@ -278,28 +278,35 @@ export function fail(id: string, error: string): Handoff {
 }
 
 // Reconciliação: a sessão-filha morreu (PTY exit/crash). Só transiciona para
-// failed se ainda estava VIVA (running OU needs_input) — NÃO sobrescreve um
-// done/rejected já gravado. Uma filha que perguntou (needs_input) e cuja PTY
-// morreu de fato também precisa falhar (senão trava o teto pra sempre).
+// 'interrupted' (estado RECUPERÁVEL, NÃO 'failed') se ainda estava VIVA (running
+// OU needs_input) — NÃO sobrescreve um done/rejected já gravado. Uma filha que
+// perguntou (needs_input) e cuja PTY morreu de fato também é interrompida (senão
+// trava o teto pra sempre). 'interrupted' não conta como ativo (libera o teto) e
+// pode ser RETOMADO pelo humano. 'failed' fica reservado a erro REAL reportado
+// pela própria filha (handoff_report de falha / fail()).
 // Retorna o handoff atualizado, ou null se nada foi alterado (não estava vivo).
 export function failIfRunning(id: string, error: string): Handoff | null {
   const from = currentStatus(id)
   const res = getDb()
     .prepare(
-      "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status IN ('running','needs_input')",
+      "UPDATE handoffs SET status = 'interrupted', error = ?, updated_at = ? WHERE id = ? AND status IN ('running','needs_input')",
     )
     .run(error, Date.now(), id)
   if (res.changes === 0) return null
-  logEvent(id, 'failIfRunning', 'failed', from, error)
+  logEvent(id, 'interrupt', 'interrupted', from, error)
   return fresh(id)
 }
 
 // Reconciliação em runtime, independente do evento PTY exit: pega filhas
 // fechadas/crashadas (ou nunca atreladas) sem esperar o exit. SEGURA por design —
-// só falha handoffs cuja session-filha NÃO está 'running' na tabela sessions. Um
-// filho VIVO em trabalho longo OU aguardando a mãe (needs_input) NÃO pode ser
+// só interrompe handoffs cuja session-filha NÃO está 'running' na tabela sessions.
+// Um filho VIVO em trabalho longo OU aguardando a mãe (needs_input) NÃO pode ser
 // morto enquanto a session-filha segue 'running'. Cobre tanto running quanto
-// needs_input (ambos in-flight). Retorna o nº de handoffs reconciliados.
+// needs_input (ambos in-flight). Marca 'interrupted' (RECUPERÁVEL, não 'failed'):
+// a filha morreu sem reportar erro real, então o handoff sai do ativo (libera o
+// teto) mas fica retomável. Como 'interrupted' não entra no predicado
+// ('running','needs_input'), passadas seguintes NÃO o re-reconciliam.
+// Retorna o nº de handoffs reconciliados.
 export function reconcileStuck(): number {
   const db = getDb()
   const error = 'Sessão-filha encerrada sem reportar conclusão'
@@ -316,14 +323,14 @@ export function reconcileStuck(): number {
     .all() as Array<{ id: string; status: string }>
   const res = db
     .prepare(
-      `UPDATE handoffs SET status = 'failed', error = ?, updated_at = ?
+      `UPDATE handoffs SET status = 'interrupted', error = ?, updated_at = ?
        WHERE status IN ('running','needs_input')
          AND (child_session_id IS NULL
               OR child_session_id NOT IN (SELECT id FROM sessions WHERE status = 'running'))`,
     )
     .run(error, Date.now())
   for (const h of stuck) {
-    logEvent(h.id, 'reconcileStuck', 'failed', h.status, error)
+    logEvent(h.id, 'reconcileStuck', 'interrupted', h.status, error)
   }
   return res.changes
 }

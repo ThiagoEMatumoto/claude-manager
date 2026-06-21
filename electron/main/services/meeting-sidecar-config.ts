@@ -10,6 +10,26 @@ import { existsSync } from 'node:fs'
 
 export const MEETING_SIDECAR_PYTHON_KEY = 'meeting_sidecar_python'
 
+// Caminho do python do venv quando o setup roda no path padrão do
+// scripts/setup-meeting-sidecar.sh. Relativo ao home do usuário.
+export const DEFAULT_VENV_PYTHON_REL = '.claude-manager/meeting-sidecar/.venv/bin/python'
+
+// Resolve o python a usar: a pref tem precedência; vazia → tenta o venv no path
+// padrão (auto-detecção, p/ quem rodou o setup sem setar a pref manualmente).
+// Puro/testável: home + existsSync injetáveis. Retorna null se nenhum vale.
+export function resolveSidecarPython(opts: {
+  pythonPref: string | null | undefined
+  home: string
+  exists?: (p: string) => boolean
+  join: (...parts: string[]) => string
+}): string | null {
+  const pref = (opts.pythonPref ?? '').trim()
+  if (pref) return pref
+  const exists = opts.exists ?? existsSync
+  const candidate = opts.join(opts.home, DEFAULT_VENV_PYTHON_REL)
+  return exists(candidate) ? candidate : null
+}
+
 export interface SidecarConfigEnv {
   // Caminho do python do venv (pref `meeting_sidecar_python`), ou null/'' se
   // não configurado.

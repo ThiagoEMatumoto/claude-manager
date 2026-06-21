@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,7 @@ import {
   MEETING_SIDECAR_PYTHON_KEY,
   isMeetingSidecarConfigured as isConfiguredPure,
   resolveSidecar,
+  resolveSidecarPython,
 } from './meeting-sidecar-config'
 import { getPref } from './prefs-store'
 import * as meetingStore from './meeting-store'
@@ -73,8 +75,17 @@ function meetingsOutDir(): string {
 }
 
 function configEnv() {
-  return {
+  // Auto-detecção: pref vazia → tenta o venv no path padrão do setup
+  // (~/.claude-manager/meeting-sidecar/.venv/bin/python). O usuário não precisa
+  // setar a pref manualmente se rodou o setup no local padrão.
+  const pythonPref = resolveSidecarPython({
     pythonPref: getPref<string | null>(MEETING_SIDECAR_PYTHON_KEY, null),
+    home: homedir(),
+    exists: existsSync,
+    join,
+  })
+  return {
+    pythonPref,
     realScriptPath: sidecarScript('sidecar.py'),
     fakeScriptPath: sidecarScript('fake_sidecar.py'),
   }

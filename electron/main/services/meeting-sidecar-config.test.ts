@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
+import { join } from 'node:path'
 import {
   isMeetingSidecarConfigured,
   resolveSidecar,
+  resolveSidecarPython,
+  DEFAULT_VENV_PYTHON_REL,
   type SidecarConfigEnv,
 } from './meeting-sidecar-config'
 
@@ -80,5 +83,50 @@ describe('resolveSidecar', () => {
     // trim acontece: o caminho com espaços trimado existe no set → real.
     expect(r.mode).toBe('real')
     expect(r.command).toBe(VENV_PY)
+  })
+})
+
+describe('resolveSidecarPython (auto-detecção do venv)', () => {
+  const HOME = '/home/u'
+  const AUTO = join(HOME, DEFAULT_VENV_PYTHON_REL)
+
+  it('pref preenchida tem precedência (não auto-detecta)', () => {
+    const r = resolveSidecarPython({
+      pythonPref: '/custom/python',
+      home: HOME,
+      exists: existsFrom([AUTO]),
+      join,
+    })
+    expect(r).toBe('/custom/python')
+  })
+
+  it('pref vazia + venv no path padrão existe → auto-detecta', () => {
+    const r = resolveSidecarPython({
+      pythonPref: null,
+      home: HOME,
+      exists: existsFrom([AUTO]),
+      join,
+    })
+    expect(r).toBe(AUTO)
+  })
+
+  it('pref vazia + venv ausente → null (cai no fake)', () => {
+    const r = resolveSidecarPython({
+      pythonPref: '',
+      home: HOME,
+      exists: existsFrom([]),
+      join,
+    })
+    expect(r).toBeNull()
+  })
+
+  it('pref só com espaços → tenta auto-detectar', () => {
+    const r = resolveSidecarPython({
+      pythonPref: '   ',
+      home: HOME,
+      exists: existsFrom([AUTO]),
+      join,
+    })
+    expect(r).toBe(AUTO)
   })
 })

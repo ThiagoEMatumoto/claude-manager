@@ -21,6 +21,7 @@ import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
 import { ArchitectureArea } from '@/features/architecture/ArchitectureArea'
 import { OverviewArea } from '@/features/overview/OverviewArea'
 import { TasksArea } from '@/features/tasks/TasksArea'
+import { MeetingsArea } from '@/features/meetings/MeetingsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
@@ -29,7 +30,8 @@ import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
-import { projectsApi, workspaceApi } from '@/lib/ipc'
+import { meetingsApi, projectsApi, workspaceApi } from '@/lib/ipc'
+import { useMeetingsStore } from '@/store/meetingsStore'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
@@ -111,6 +113,7 @@ const tabComponents = { terminal: TerminalTab }
 
 export function AppShell() {
   const area = useAppStore((s) => s.area)
+  const setArea = useAppStore((s) => s.setArea)
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
   const panes = useAppStore((s) => s.panes)
@@ -458,6 +461,17 @@ export function AppShell() {
     return () => stopLiveWatch()
   }, [startLiveWatch, stopLiveWatch])
 
+  // Ativação assistida por Google Calendar: o clique na notificação nativa (main)
+  // emite o draft. Vamos pra área Reuniões e guardamos o draft no store — a
+  // MeetingsArea o consome (cria a reunião pré-preenchida) ao montar/atualizar.
+  // Assinado no nível do shell pra funcionar mesmo com a área Reuniões fechada.
+  useEffect(() => {
+    return meetingsApi.onCalendarActivate((draft) => {
+      useMeetingsStore.getState().setActivationDraft(draft)
+      setArea('meetings')
+    })
+  }, [setArea])
+
   // Popula as raízes do painel de arquivos a partir do projeto ativo: um repo por
   // vez (o usuário escolhe no seletor). O vaultPath entra só como fallback quando o
   // projeto não tem repos registrados. Re-busca quando o projeto ativo muda.
@@ -628,6 +642,8 @@ export function AppShell() {
       {area === 'dossiers' && <DossiersPanel />}
 
       {area === 'tasks' && <TasksArea />}
+
+      {area === 'meetings' && <MeetingsArea />}
 
       {area === 'cc-configs' && <CcConfigsArea />}
 

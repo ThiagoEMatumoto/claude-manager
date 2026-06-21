@@ -785,6 +785,199 @@ export interface TaskListFilter {
   parentId?: string
 }
 
+// ---- Reuniões (Meeting Intelligence) ----
+
+export type MeetingStatus =
+  | 'idle'
+  | 'capturing'
+  | 'recording'
+  | 'transcribing'
+  | 'diarizing'
+  | 'ready'
+  | 'extracted'
+  | 'failed'
+
+export type ExtractionKind =
+  | 'action_item'
+  | 'decision'
+  | 'feedback'
+  | 'risk'
+  | 'question'
+
+// Cabeçalho da reunião + proveniência (stt/diar/extractor) + notas livres.
+// Persistência SQLite-only (molde de Task): segments/speakers/extractions vivem
+// em tabelas filhas (CASCADE) e são carregados sob demanda, não embutidos aqui.
+export interface Meeting {
+  id: string
+  title: string
+  startedAt: number | null
+  endedAt: number | null
+  source: string | null
+  audioPath: string | null
+  durationMs: number | null
+  lang: string
+  sttModel: string | null
+  diarModel: string | null
+  extractor: string | null
+  status: MeetingStatus
+  rawNotes: string | null
+  augmentedNotes: string | null
+  summary: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+// label→pessoa: o sidecar emite labels anônimos (SPEAKER_00…); a UI resolve o
+// nome e marca o canal do mic como o usuário local ("você").
+export interface MeetingSpeaker {
+  meetingId: string
+  label: string
+  displayName: string | null
+  isLocalUser: boolean
+}
+
+// Trecho do transcript. is_partial=true = provisório (janela ao vivo); o
+// fechamento reconcilia speaker_label e marca is_partial=false. words_json
+// guarda timestamps por palavra p/ citação fina.
+export interface MeetingSegment {
+  id: string
+  meetingId: string
+  idx: number
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  text: string
+  wordsJson: string | null
+  avgLogprob: number | null
+  noSpeechProb: number | null
+  isPartial: boolean
+}
+
+// Item extraído (action item/decisão/feedback…) com quote literal + grounded;
+// materializedTaskId dá idempotência na virada pra task real.
+export interface MeetingExtraction {
+  id: string
+  meetingId: string
+  type: ExtractionKind
+  text: string
+  assignee: string | null
+  dueHint: string | null
+  quote: string | null
+  quoteSegmentId: string | null
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  confidence: number | null
+  grounded: boolean
+  materializedTaskId: string | null
+  createdAt: number
+}
+
+export interface CreateMeetingInput {
+  title: string
+  source?: string | null
+  lang?: string
+  status?: MeetingStatus
+  rawNotes?: string | null
+}
+
+export interface UpdateMeetingInput {
+  id: string
+  title?: string
+  startedAt?: number | null
+  endedAt?: number | null
+  source?: string | null
+  audioPath?: string | null
+  durationMs?: number | null
+  lang?: string
+  sttModel?: string | null
+  diarModel?: string | null
+  extractor?: string | null
+  status?: MeetingStatus
+  rawNotes?: string | null
+  augmentedNotes?: string | null
+  summary?: string | null
+}
+
+export interface MeetingListFilter {
+  status?: MeetingStatus
+  search?: string
+}
+
+// Eventos do sidecar broadcastados ao renderer durante a captura.
+export interface MeetingStatusEvent {
+  id: string
+  status: MeetingStatus
+}
+
+// Segmento provisório (NDJSON `partial`): efêmero, NÃO persiste. Renderizado e
+// substituído pelo `segment` final que carrega o mesmo idx. Diferente de
+// MeetingSegment (persistido) por não ter id de banco.
+export interface MeetingPartialEvent {
+  meetingId: string
+  idx: number
+  startMs: number | null
+  endMs: number | null
+  speakerLabel: string | null
+  text: string
+}
+
+// Origem do trecho que casou na busca FTS5 (transcript, notas aumentadas ou
+// item extraído). Deixa a UI rotular de onde veio o match.
+export type MeetingSearchSource = 'segment' | 'notes' | 'extraction'
+
+// Um match de `meetings:search`: a reunião + o snippet (com <mark>…</mark> nos
+// termos) + de onde o trecho veio + um score (bm25, menor = mais relevante).
+export interface MeetingSearchMatch {
+  meeting: Meeting
+  snippet: string
+  source: MeetingSearchSource
+  score: number
+}
+
+// Resultado da extração (`meetings:extract`): notas aumentadas + resumo
+// persistidos + os itens já com grounding. A UI mostra pra revisão humana.
+export interface MeetingExtractResult {
+  summary: string | null
+  augmentedNotes: string | null
+  extractions: MeetingExtraction[]
+}
+
+// Renomear um speaker da reunião (SPEAKER_0X → pessoa). O label é o gerado pela
+// diarização; displayName é persistido em meeting_speakers.display_name e
+// substitui o label na UI.
+export interface SetSpeakerNameInput {
+  meetingId: string
+  label: string
+  displayName: string
+}
+
+// Materialização de UMA extração revisada como task real. O vínculo (objective/
+// feature) é o conjunto reusado do TaskDialog; quote/speaker/timestamp viram
+// proveniência na descrição. extractionId dá idempotência (markMaterialized).
+export interface MaterializeMeetingTaskInput {
+  extractionId?: string
+  title: string
+  description?: string | null
+  priority?: TaskPriority | null
+  link?: TaskLink | null
+  quote?: string | null
+  speakerLabel?: string | null
+  startMs?: number | null
+}
+
+// Ativação assistida por Google Calendar: quando o watcher detecta um evento do
+// Meet começando agora, o main emite este draft pro renderer (canal
+// 'meeting:calendar:activate') no clique da notificação nativa. A MeetingsArea
+// cria uma reunião pré-preenchida com title/attendees. meetUrl/startMs entram na
+// proveniência.
+export interface MeetingActivationDraft {
+  title: string
+  attendees: string[]
+  meetUrl: string | null
+  startMs: number | null
+}
+
 // ---- Dashboard / visão hierárquica (Fase 4) ----
 
 // Projeção enxuta de tarefa pros nós da árvore do dashboard.
@@ -1503,6 +1696,46 @@ export interface Api {
     // o renderer trata como sinal de recarga. Mutações com parent
     // objective/key_result também emitem 'objective:updated' com {id}.
     onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  meetings: {
+    list(filter?: MeetingListFilter): Promise<Meeting[]>
+    get(id: string): Promise<Meeting | null>
+    create(input: CreateMeetingInput): Promise<Meeting>
+    update(input: UpdateMeetingInput): Promise<Meeting>
+    delete(id: string): Promise<void>
+    listSegments(meetingId: string): Promise<MeetingSegment[]>
+    // Speakers da reunião (label→pessoa + is_local_user da diarização).
+    listSpeakers(meetingId: string): Promise<MeetingSpeaker[]>
+    // Renomeia SPEAKER_0X → pessoa (persistido em display_name).
+    setSpeakerName(input: SetSpeakerNameInput): Promise<MeetingSpeaker>
+    // Busca full-text (FTS5) entre reuniões: casa transcript + notas aumentadas
+    // + itens extraídos e devolve as reuniões com snippet/origem do match.
+    search(query: string): Promise<MeetingSearchMatch[]>
+    // Sidecar REAL de transcrição configurado? (pref `meeting_sidecar_python` +
+    // python + sidecar.py existem). false → app cai no fake (dev) e a UI avisa.
+    sidecarConfigured(): Promise<boolean>
+    // Inicia/encerra a captura do sidecar para a reunião (idle ⇄ capturing).
+    startCapture(meetingId: string): Promise<void>
+    stopCapture(meetingId: string): Promise<void>
+    // Extração via claude -p (notas aumentadas + itens com grounding) e
+    // materialização de um item revisado como task linkada.
+    extract(meetingId: string): Promise<MeetingExtractResult>
+    materializeTask(input: MaterializeMeetingTaskInput): Promise<Task>
+    // Payload varia por mutação (Meeting completa ou marcador {id, deleted}) —
+    // o renderer trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
+    // Streams do sidecar: `segment` persistido (final) e `status` do ciclo de
+    // captura. `partial` é provisório/efêmero (não persiste).
+    onTranscriptSegment(handler: (segment: MeetingSegment) => void): () => void
+    onTranscriptPartial(handler: (partial: MeetingPartialEvent) => void): () => void
+    onStatus(handler: (payload: MeetingStatusEvent) => void): () => void
+    // Speaker descoberto/renomeado (diarização ou rename manual). A UI atualiza
+    // o mapa label→nome sem recarregar tudo.
+    onSpeaker(handler: (speaker: MeetingSpeaker) => void): () => void
+    // Ativação assistida por Google Calendar: emitido quando o usuário clica na
+    // notificação nativa de "reunião começando agora". O renderer vai pra área
+    // Reuniões e cria uma reunião pré-preenchida com o draft.
+    onCalendarActivate(handler: (draft: MeetingActivationDraft) => void): () => void
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void

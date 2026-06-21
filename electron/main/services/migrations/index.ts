@@ -20,6 +20,9 @@ import * as handoffs from './018_handoffs'
 import * as repoHub from './019_repo_hub'
 import * as handoffModeProgress from './020_handoff_mode_progress'
 import * as handoffPendingQuestion from './021_handoff_pending_question'
+import * as meetings from './022_meetings'
+import * as meetingsCaptureStatus from './023_meetings_capture_status'
+import * as meetingsFts from './024_meetings_fts'
 import * as dossiers from './025_dossiers'
 
 interface Migration {
@@ -56,6 +59,9 @@ export const migrations: Migration[] = [
   repoHub,
   handoffModeProgress,
   handoffPendingQuestion,
+  meetings,
+  meetingsCaptureStatus,
+  meetingsFts,
   dossiers,
 ]
 

@@ -1,0 +1,27 @@
+# Deps do sidecar REAL de transcrição (sidecar.py).
+#
+# torch NÃO está aqui: precisa do índice CUDA 12.8 (cu128) para a RTX 5070 Laptop
+# (Blackwell, sm_120) e é instalado separadamente pelo scripts/setup-meeting-sidecar.sh
+# via `--index-url https://download.pytorch.org/whl/cu128`. Pinar torch num
+# requirements comum quebraria o resolver para o índice cu128.
+#
+# faster-whisper traz ctranslate2 (runtime de inferência). Versão recente é
+# necessária para wheels compatíveis com CUDA 12.x.
+# Versões EXATAS testadas (reprodutibilidade — pisos >= deixavam o resolver
+# puxar builds não-validadas).
+faster-whisper==1.2.1
+soundfile==0.14.0
+numpy==2.4.6
+#
+# pyannote.audio = diarização (quem falou). NÃO usamos whisperX: ele empacota um
+# pipeline próprio (align + diarize + assign) que reimplementa a transcrição e
+# arrastaria um 2º caminho de STT divergente do faster-whisper já validado aqui.
+# pyannote direto + casamento por timestamp (maior overlap segment↔turno) é o
+# caminho mais simples e reutiliza a transcrição existente intocada.
+#
+# IMPORTANTE — modelo GATED no Hugging Face: o pipeline `pyannote/speaker-
+# diarization-3.1` exige (1) aceitar os termos do modelo na página do HF e (2) um
+# token de acesso (env HF_TOKEN ou `huggingface-cli login`). SEM o token/modelo,
+# o sidecar NÃO trava: emite um `error` claro de diarização e cai no comportamento
+# atual (segments sem speaker). Diarização é OPCIONAL.
+pyannote.audio==3.4.0

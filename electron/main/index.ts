@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
 import { ptyManager } from './services/pty-manager'
+import { meetingSidecarManager } from './services/meeting-sidecar'
 import * as handoffStore from './services/handoff-store'
 import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
@@ -21,6 +22,7 @@ import { registerHandoffsIpc } from './ipc/handoffs'
 import { registerDossiersIpc } from './ipc/dossiers'
 import { registerObjectivesIpc } from './ipc/objectives'
 import { registerTasksIpc } from './ipc/tasks'
+import { registerMeetingsIpc } from './ipc/meetings'
 import { registerMcpIpc } from './ipc/mcp'
 import { registerSyncIpc, syncOnBoot, syncCoordinator, notifySyncMutation } from './ipc/sync'
 import { setSyncMutationHook, broadcast } from './services/notify'
@@ -34,6 +36,7 @@ import {
 import { startMcpServer, stopMcpServer } from './services/mcp/server'
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
+import { calendarWatcher } from './services/calendar/calendar-watcher'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
 import { setMainWindow } from './services/notifications'
 
@@ -105,6 +108,15 @@ app.whenReady().then(async () => {
   // colando via clipboard nativo do Chromium. Coerente com autoHideMenuBar.
   Menu.setApplicationMenu(null)
   getDb()
+  // Boot reconcile de reuniões presas em estados "vivos" após um crash/quit sujo:
+  // num processo fresco nenhum sidecar pode estar vivo, então qualquer reunião
+  // nesses estados é órfã → failed. Idempotente; ended_at preserva o existente.
+  getDb()
+    .prepare(
+      `UPDATE meetings SET status = 'failed', ended_at = COALESCE(ended_at, ?)
+       WHERE status IN ('capturing', 'recording', 'transcribing', 'diarizing')`,
+    )
+    .run(Date.now())
   // MCP server local (writes externos via Claude Code). Async e fire-and-forget:
   // EADDRINUSE etc. são logados dentro do start — nunca derrubam o boot.
   void startMcpServer()
@@ -128,6 +140,7 @@ app.whenReady().then(async () => {
   registerFeaturesIpc()
   registerObjectivesIpc()
   registerTasksIpc()
+  registerMeetingsIpc()
   registerMcpIpc()
   registerSyncIpc()
   // Wire o ponto único de mutação → coordinator (auto-sync on-idle). Cobre
@@ -143,6 +156,10 @@ app.whenReady().then(async () => {
   initUpdater()
   startUsageMonitor()
   startFeatureWatcher()
+  // Ativação assistida por Google Calendar: poll da URL secreta iCal (pref
+  // meeting_calendar_ics_url). Inativo se a pref estiver vazia — sem erro nem
+  // rede. Inicia DEPOIS da janela porque o clique da notificação a foca.
+  calendarWatcher.start()
 
   // Self-heal periódico de handoffs presos em 'running' cuja filha já morreu em
   // runtime (PTY exit pode não ter disparado a reconciliação). Não bloqueia o
@@ -183,6 +200,7 @@ function runFinalShutdown(): void {
   void stopMcpServer()
   stopUsageMonitor()
   stopFeatureWatcher()
+  calendarWatcher.stop()
   if (handoffReconcileTimer) {
     clearInterval(handoffReconcileTimer)
     handoffReconcileTimer = null
@@ -190,6 +208,7 @@ function runFinalShutdown(): void {
   syncCoordinator.stop()
   featureMemory.close()
   ptyManager.killAll()
+  meetingSidecarManager.killAllSidecars()
   sessionActivityService.closeAll()
   getDb()
     .prepare("UPDATE sessions SET status = 'exited', ended_at = ? WHERE status = 'running'")

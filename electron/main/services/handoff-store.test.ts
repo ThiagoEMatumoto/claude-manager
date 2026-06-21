@@ -312,6 +312,169 @@ describe('handoff-store', () => {
     })
   })
 
+  // Helpers de leitura da trilha de eventos (migration 026).
+  function events(handoffId: string): Array<{
+    event: string
+    from_status: string | null
+    to_status: string
+    detail: string | null
+  }> {
+    return testDb
+      .prepare(
+        'SELECT event, from_status, to_status, detail FROM handoff_events WHERE handoff_id = ? ORDER BY at ASC, rowid ASC',
+      )
+      .all(handoffId) as Array<{
+      event: string
+      from_status: string | null
+      to_status: string
+      detail: string | null
+    }>
+  }
+
+  describe('instrumentação: handoff_events (trilha de transições)', () => {
+    it('create loga 1 evento create (from null → to pending)', () => {
+      const h = newHandoff()
+      const ev = events(h.id)
+      expect(ev).toHaveLength(1)
+      expect(ev[0]).toMatchObject({ event: 'create', from_status: null, to_status: 'pending' })
+    })
+
+    it('cada mutador de status grava 1 linha com from/to corretos', () => {
+      const h = newHandoff() // create → pending
+      store.approve(h.id, {}) // pending → approved
+      store.markRunning(h.id, 's-child') // approved → running
+      store.progress(h.id, 'rodando testes') // running → running (progress)
+      store.ask(h.id, 'qual versão?') // running → needs_input
+      store.resume(h.id) // needs_input → running
+      store.report(h.id, 'feito') // running → done
+
+      const ev = events(h.id)
+      expect(ev.map((e) => e.event)).toEqual([
+        'create',
+        'approve',
+        'markRunning',
+        'progress',
+        'ask',
+        'resume',
+        'report',
+      ])
+      // Confere os pares from→to dos mutadores de status.
+      expect(ev[1]).toMatchObject({ from_status: 'pending', to_status: 'approved' })
+      expect(ev[2]).toMatchObject({ from_status: 'approved', to_status: 'running' })
+      expect(ev[3]).toMatchObject({ from_status: 'running', to_status: 'running', detail: 'rodando testes' })
+      expect(ev[4]).toMatchObject({ from_status: 'running', to_status: 'needs_input', detail: 'qual versão?' })
+      expect(ev[5]).toMatchObject({ from_status: 'needs_input', to_status: 'running' })
+      expect(ev[6]).toMatchObject({ from_status: 'running', to_status: 'done' })
+    })
+
+    it('NÃO loga quando a transição condicional não ocorre (progress em pending)', () => {
+      const h = newHandoff() // pending
+      store.progress(h.id, 'cedo demais') // no-op (não está running)
+      const ev = events(h.id)
+      expect(ev.map((e) => e.event)).toEqual(['create'])
+    })
+
+    it('reconcileStuck loga uma linha por handoff reconciliado', () => {
+      const a = newHandoff('r1')
+      store.approve(a.id, {})
+      testDb.prepare("UPDATE handoffs SET status = 'running' WHERE id = ?").run(a.id) // child null
+      const b = newHandoff('r2')
+      store.approve(b.id, {})
+      testDb.prepare("UPDATE handoffs SET status = 'running' WHERE id = ?").run(b.id)
+
+      const n = store.reconcileStuck()
+      expect(n).toBe(2)
+      expect(events(a.id).at(-1)).toMatchObject({
+        event: 'reconcileStuck',
+        from_status: 'running',
+        to_status: 'failed',
+      })
+      expect(events(b.id).at(-1)).toMatchObject({ event: 'reconcileStuck', to_status: 'failed' })
+    })
+  })
+
+  describe('create + fromRepoId', () => {
+    it('persiste from_repo_id quando passado', () => {
+      const h = store.create({
+        targetRepoId: 'r1',
+        fromRepoId: 'r2',
+        task: 't',
+        composedPrompt: 'p',
+      })
+      expect(h.fromRepoId).toBe('r2')
+    })
+
+    it('from_repo_id = null quando omitido', () => {
+      const h = newHandoff()
+      expect(h.fromRepoId).toBeNull()
+    })
+  })
+
+  describe('markConsumed (proxy de consumo pela mãe)', () => {
+    it('marca consumed_at + loga consume só quando done', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's')
+      store.report(h.id, 'ok')
+
+      const after = store.markConsumed(h.id)
+      expect(after.consumedAt).not.toBeNull()
+      expect(events(h.id).at(-1)).toMatchObject({ event: 'consume', to_status: 'done' })
+    })
+
+    it('idempotente: 2ª chamada não muda consumed_at nem duplica evento', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's')
+      store.report(h.id, 'ok')
+
+      const first = store.markConsumed(h.id)
+      const second = store.markConsumed(h.id)
+      expect(second.consumedAt).toBe(first.consumedAt)
+      const consumeEvents = events(h.id).filter((e) => e.event === 'consume')
+      expect(consumeEvents).toHaveLength(1)
+    })
+
+    it('não marca quando NÃO está done (ex.: running)', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's')
+      const after = store.markConsumed(h.id)
+      expect(after.consumedAt).toBeNull()
+      expect(events(h.id).some((e) => e.event === 'consume')).toBe(false)
+    })
+  })
+
+  describe('setOutcome (feedback humano)', () => {
+    it('persiste o outcome e loga feedback com o status corrente', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's')
+      store.report(h.id, 'ok')
+
+      const after = store.setOutcome(h.id, 'useful')
+      expect(after.outcome).toBe('useful')
+      expect(events(h.id).at(-1)).toMatchObject({
+        event: 'feedback',
+        from_status: 'done',
+        to_status: 'done',
+        detail: 'useful',
+      })
+    })
+
+    it('permite revisar o outcome (sobrescreve)', () => {
+      const h = newHandoff()
+      store.approve(h.id, {})
+      store.markRunning(h.id, 's')
+      store.report(h.id, 'ok')
+      store.setOutcome(h.id, 'wrong')
+      const after = store.setOutcome(h.id, 'partial')
+      expect(after.outcome).toBe('partial')
+      const feedback = events(h.id).filter((e) => e.event === 'feedback')
+      expect(feedback).toHaveLength(2)
+    })
+  })
+
   describe('findActiveByTarget (dedup por alvo)', () => {
     it('acha handoff ativo pro mesmo repo-alvo', () => {
       const h = newHandoff('r1')

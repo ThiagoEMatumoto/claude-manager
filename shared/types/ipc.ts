@@ -105,6 +105,11 @@ export type HandoffStatus =
 //  'interactive' → comportamento legado (pergunta cada ação).
 export type HandoffMode = 'plan' | 'auto-edits' | 'interactive'
 
+// Feedback humano sobre a utilidade de um handoff concluído (instrumentação
+// Fase 2): foi 'useful' (acertou), 'wrong' (errou o alvo) ou 'partial' (ajudou
+// em parte). NULL = ainda sem avaliação.
+export type HandoffOutcome = 'useful' | 'wrong' | 'partial'
+
 export interface Handoff {
   id: string
   // NULLABLE: a MCP tool pode não saber o id da própria sessão.
@@ -135,6 +140,13 @@ export interface Handoff {
   error: string | null
   createdAt: number
   updatedAt: number
+  // Instrumentação (Fase 2). consumedAt: quando a mãe consumiu o resultado (leu o
+  // done via handoff_result); NULL = nunca consumido. fromRepoId: repo de ORIGEM
+  // (a mãe que delegou); NULL para handoffs legados/sem origem. outcome: feedback
+  // humano sobre a utilidade; NULL = sem avaliação.
+  consumedAt: number | null
+  fromRepoId: string | null
+  outcome: HandoffOutcome | null
 }
 
 // Resolve o repo-alvo de um handoff + metadados do projeto, pra UI poder spawnar
@@ -153,6 +165,9 @@ export interface CreateHandoffInput {
   id?: string
   motherSessionId?: string | null
   targetRepoId: string
+  // Repo de ORIGEM (a mãe que delegou). Persistido pra instrumentação cross-repo
+  // (de onde→pra onde). Opcional: a MCP pode não ter o fromRepo resolvido.
+  fromRepoId?: string | null
   featureId?: string | null
   task: string
   contextJson?: string | null
@@ -1658,6 +1673,8 @@ export interface Api {
     // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
     sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
+    // Feedback humano sobre a utilidade de um handoff concluído (instrumentação).
+    setOutcome(input: { id: string; outcome: HandoffOutcome }): Promise<Handoff>
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   dossiers: {

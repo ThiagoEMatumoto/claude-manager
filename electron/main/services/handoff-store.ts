@@ -4,6 +4,7 @@ import type {
   CreateHandoffInput,
   Handoff,
   HandoffMode,
+  HandoffOutcome,
   HandoffStatus,
 } from '../../../shared/types/ipc'
 
@@ -26,6 +27,11 @@ interface HandoffRow {
   error: string | null
   created_at: number
   updated_at: number
+  // Instrumentação (migration 026). consumed_at: quando a mãe consumiu o
+  // resultado; from_repo_id: repo de origem; outcome: feedback humano.
+  consumed_at: number | null
+  from_repo_id: string | null
+  outcome: string | null
   // Resolvido via LEFT JOIN repos (null se o repo-alvo foi removido).
   target_repo_label: string | null
 }
@@ -56,6 +62,9 @@ function toEntity(row: HandoffRow): Handoff {
     error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    consumedAt: row.consumed_at,
+    fromRepoId: row.from_repo_id,
+    outcome: (row.outcome as HandoffOutcome | null) ?? null,
   }
 }
 
@@ -70,16 +79,44 @@ function fresh(id: string): Handoff {
   return toEntity(row)
 }
 
+// Status corrente sem o JOIN do label — barato pra capturar o from_status ANTES
+// de uma mutação. NULL se o handoff não existe (não loga nada nesse caso).
+function currentStatus(id: string): string | null {
+  const row = getDb().prepare('SELECT status FROM handoffs WHERE id = ?').get(id) as
+    | { status: string }
+    | undefined
+  return row?.status ?? null
+}
+
+// Trilha imutável: grava uma linha em handoff_events por transição/evento. É o
+// ponto CENTRAL da instrumentação — todos os mutadores de status chamam aqui em
+// vez de cada handler logar por conta própria. from_status é o estado ANTES da
+// mutação (capturado pelo chamador); to_status é o estado resultante.
+function logEvent(
+  handoffId: string,
+  event: string,
+  toStatus: string,
+  fromStatus: string | null,
+  detail?: string | null,
+): void {
+  getDb()
+    .prepare(
+      `INSERT INTO handoff_events (id, handoff_id, from_status, to_status, event, detail, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(randomUUID(), handoffId, fromStatus, toStatus, event, detail ?? null, Date.now())
+}
+
 export function create(input: CreateHandoffInput): Handoff {
   const now = Date.now()
   const id = input.id ?? randomUUID()
   getDb()
     .prepare(
       `INSERT INTO handoffs
-         (id, mother_session_id, target_repo_id, child_session_id, feature_id, task,
+         (id, mother_session_id, target_repo_id, from_repo_id, child_session_id, feature_id, task,
           context_json, composed_prompt, status, mode, current_step, step_updated_at,
           summary, error, created_at, updated_at)
-       VALUES (@id, @mother_session_id, @target_repo_id, @child_session_id, @feature_id, @task,
+       VALUES (@id, @mother_session_id, @target_repo_id, @from_repo_id, @child_session_id, @feature_id, @task,
                @context_json, @composed_prompt, @status, @mode, @current_step, @step_updated_at,
                @summary, @error, @created_at, @updated_at)`,
     )
@@ -87,6 +124,7 @@ export function create(input: CreateHandoffInput): Handoff {
       id,
       mother_session_id: input.motherSessionId ?? null,
       target_repo_id: input.targetRepoId,
+      from_repo_id: input.fromRepoId ?? null,
       child_session_id: null,
       feature_id: input.featureId ?? null,
       task: input.task,
@@ -101,6 +139,8 @@ export function create(input: CreateHandoffInput): Handoff {
       created_at: now,
       updated_at: now,
     })
+  // Nascimento do handoff: from_status null (não existia antes), to pending.
+  logEvent(id, 'create', 'pending', null)
   // Re-lê via JOIN pra preencher target_repo_label.
   return fresh(id)
 }
@@ -131,6 +171,7 @@ export function list(opts?: { status?: HandoffStatus | HandoffStatus[] }): Hando
 // gate. A transição para running + child_session_id vem numa wave posterior.
 export function approve(id: string, opts: { composedPrompt?: string }): Handoff {
   const db = getDb()
+  const from = currentStatus(id)
   if (opts.composedPrompt !== undefined) {
     db.prepare(
       'UPDATE handoffs SET status = ?, composed_prompt = ?, updated_at = ? WHERE id = ?',
@@ -142,27 +183,34 @@ export function approve(id: string, opts: { composedPrompt?: string }): Handoff 
       id,
     )
   }
+  logEvent(id, 'approve', 'approved', from)
   return fresh(id)
 }
 
 export function reject(id: string): Handoff {
+  const from = currentStatus(id)
   getDb()
     .prepare('UPDATE handoffs SET status = ?, updated_at = ? WHERE id = ?')
     .run('rejected', Date.now(), id)
+  logEvent(id, 'reject', 'rejected', from)
   return fresh(id)
 }
 
 export function markRunning(id: string, childSessionId: string): Handoff {
+  const from = currentStatus(id)
   getDb()
     .prepare('UPDATE handoffs SET status = ?, child_session_id = ?, updated_at = ? WHERE id = ?')
     .run('running', childSessionId, Date.now(), id)
+  logEvent(id, 'markRunning', 'running', from)
   return fresh(id)
 }
 
 export function report(id: string, summary: string): Handoff {
+  const from = currentStatus(id)
   getDb()
     .prepare('UPDATE handoffs SET status = ?, summary = ?, updated_at = ? WHERE id = ?')
     .run('done', summary, Date.now(), id)
+  logEvent(id, 'report', 'done', from)
   return fresh(id)
 }
 
@@ -173,7 +221,8 @@ export function report(id: string, summary: string): Handoff {
 // segue exclusivo de report.
 export function progress(id: string, step: string): Handoff {
   const now = Date.now()
-  getDb()
+  const from = currentStatus(id)
+  const res = getDb()
     .prepare(
       `UPDATE handoffs
          SET current_step = ?, step_updated_at = ?, updated_at = ?,
@@ -181,6 +230,8 @@ export function progress(id: string, step: string): Handoff {
        WHERE id = ? AND status IN ('running','needs_input')`,
     )
     .run(step, now, now, id)
+  // Só loga se a transição valeu (estava vivo). detail = o passo reportado.
+  if (res.changes > 0) logEvent(id, 'progress', 'running', from, step)
   return fresh(id)
 }
 
@@ -189,13 +240,15 @@ export function progress(id: string, step: string): Handoff {
 // por cima de uma needs_input já aberta nem fora do estado vivo (pending/done/...).
 export function ask(id: string, question: string): Handoff {
   const now = Date.now()
-  getDb()
+  const from = currentStatus(id)
+  const res = getDb()
     .prepare(
       `UPDATE handoffs
          SET status = 'needs_input', pending_question = ?, question_asked_at = ?, updated_at = ?
        WHERE id = ? AND status = 'running'`,
     )
     .run(question, now, now, id)
+  if (res.changes > 0) logEvent(id, 'ask', 'needs_input', from, question)
   return fresh(id)
 }
 
@@ -203,20 +256,24 @@ export function ask(id: string, question: string): Handoff {
 // limpa a pergunta pendente. Só age se estava needs_input (idempotente fora dele).
 export function resume(id: string): Handoff {
   const now = Date.now()
-  getDb()
+  const from = currentStatus(id)
+  const res = getDb()
     .prepare(
       `UPDATE handoffs
          SET status = 'running', pending_question = NULL, question_asked_at = NULL, updated_at = ?
        WHERE id = ? AND status = 'needs_input'`,
     )
     .run(now, id)
+  if (res.changes > 0) logEvent(id, 'resume', 'running', from)
   return fresh(id)
 }
 
 export function fail(id: string, error: string): Handoff {
+  const from = currentStatus(id)
   getDb()
     .prepare('UPDATE handoffs SET status = ?, error = ?, updated_at = ? WHERE id = ?')
     .run('failed', error, Date.now(), id)
+  logEvent(id, 'fail', 'failed', from, error)
   return fresh(id)
 }
 
@@ -226,12 +283,15 @@ export function fail(id: string, error: string): Handoff {
 // morreu de fato também precisa falhar (senão trava o teto pra sempre).
 // Retorna o handoff atualizado, ou null se nada foi alterado (não estava vivo).
 export function failIfRunning(id: string, error: string): Handoff | null {
+  const from = currentStatus(id)
   const res = getDb()
     .prepare(
       "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status IN ('running','needs_input')",
     )
     .run(error, Date.now(), id)
-  return res.changes > 0 ? fresh(id) : null
+  if (res.changes === 0) return null
+  logEvent(id, 'failIfRunning', 'failed', from, error)
+  return fresh(id)
 }
 
 // Reconciliação em runtime, independente do evento PTY exit: pega filhas
@@ -241,14 +301,30 @@ export function failIfRunning(id: string, error: string): Handoff | null {
 // morto enquanto a session-filha segue 'running'. Cobre tanto running quanto
 // needs_input (ambos in-flight). Retorna o nº de handoffs reconciliados.
 export function reconcileStuck(): number {
-  const res = getDb()
+  const db = getDb()
+  const error = 'Sessão-filha encerrada sem reportar conclusão'
+  // UPDATE em lote: SELECionar os ids + status ANTES, pra capturar o from_status
+  // de cada um e logar uma linha por handoff reconciliado (o lote em si não diz
+  // quem mudou). O predicado é idêntico ao do UPDATE.
+  const stuck = db
+    .prepare(
+      `SELECT id, status FROM handoffs
+       WHERE status IN ('running','needs_input')
+         AND (child_session_id IS NULL
+              OR child_session_id NOT IN (SELECT id FROM sessions WHERE status = 'running'))`,
+    )
+    .all() as Array<{ id: string; status: string }>
+  const res = db
     .prepare(
       `UPDATE handoffs SET status = 'failed', error = ?, updated_at = ?
        WHERE status IN ('running','needs_input')
          AND (child_session_id IS NULL
               OR child_session_id NOT IN (SELECT id FROM sessions WHERE status = 'running'))`,
     )
-    .run('Sessão-filha encerrada sem reportar conclusão', Date.now())
+    .run(error, Date.now())
+  for (const h of stuck) {
+    logEvent(h.id, 'reconcileStuck', 'failed', h.status, error)
+  }
   return res.changes
 }
 
@@ -259,6 +335,32 @@ export function getByChildSession(childSessionId: string): Handoff | null {
     .prepare(`${SELECT_HANDOFF} WHERE h.child_session_id = ?`)
     .get(childSessionId) as HandoffRow | undefined
   return row ? toEntity(row) : null
+}
+
+// A mãe consumiu o resultado: proxy = leu via handoff_result com status='done'.
+// Idempotente: o WHERE consumed_at IS NULL garante uma única marcação (e um único
+// evento 'consume'), mesmo com polling repetido. Só conta pra handoffs done.
+export function markConsumed(id: string): Handoff {
+  const res = getDb()
+    .prepare(
+      "UPDATE handoffs SET consumed_at = ?, updated_at = ? WHERE id = ? AND consumed_at IS NULL AND status = 'done'",
+    )
+    .run(Date.now(), Date.now(), id)
+  if (res.changes > 0) logEvent(id, 'consume', 'done', 'done')
+  return fresh(id)
+}
+
+// Feedback humano sobre a utilidade do handoff: useful | wrong | partial. Persiste
+// o outcome e loga um evento 'feedback' (to_status = status corrente, detail =
+// outcome). Permite revisão (sobrescreve outcome anterior).
+export function setOutcome(id: string, outcome: HandoffOutcome): Handoff {
+  const status = currentStatus(id)
+  if (status === null) throw new Error(`handoff not found: ${id}`)
+  getDb()
+    .prepare('UPDATE handoffs SET outcome = ?, updated_at = ? WHERE id = ?')
+    .run(outcome, Date.now(), id)
+  logEvent(id, 'feedback', status, status, outcome)
+  return fresh(id)
 }
 
 // Dedup por alvo: handoff ativo (pending/approved/running/needs_input) pro mesmo

@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CornerDownLeft, RefreshCw, Send, TerminalSquare } from 'lucide-react'
+import {
+  AlertTriangle,
+  CircleSlash,
+  CornerDownLeft,
+  RefreshCw,
+  Send,
+  TerminalSquare,
+  ThumbsDown,
+  ThumbsUp,
+} from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { handoffsApi, prefsApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore } from '@/store/handoffsStore'
-import type { Handoff, HandoffStatus, LiveSessionInfo } from '../../../shared/types/ipc'
+import type { Handoff, HandoffOutcome, HandoffStatus, LiveSessionInfo } from '../../../shared/types/ipc'
 
 const HEARTBEAT_TTL_KEY = 'handoffs.heartbeatTtlHours'
 const HEARTBEAT_TTL_DEFAULT = 2
@@ -139,6 +148,7 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
   const [failing, setFailing] = useState(false)
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [rating, setRating] = useState(false)
   const liveSessions = useAppStore((s) => s.liveSessions)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const load = useHandoffsStore((s) => s.load)
@@ -155,6 +165,23 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
   // pra approved travado (aprovado mas a filha nunca subiu). Confirmação evita
   // matar uma filha viva em trabalho longo por engano.
   const canForceFail = handoff.status === 'running' || handoff.status === 'approved'
+
+  // Feedback de utilidade: só faz sentido pra handoffs concluídos. Persiste via
+  // IPC e recarrega pra refletir o outcome marcado. Idempotente no backend.
+  const canRate = handoff.status === 'done'
+
+  async function rate(outcome: HandoffOutcome) {
+    if (rating) return
+    setRating(true)
+    try {
+      await handoffsApi.setOutcome({ id: handoff.id, outcome })
+      await load()
+    } catch {
+      // Falha silenciosa: o load() seguinte ressincroniza. Não bloqueia a UI.
+    } finally {
+      setRating(false)
+    }
+  }
 
   async function forceFail() {
     if (failing) return
@@ -387,7 +414,71 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
           )}
         </div>
       )}
+
+      {canRate && (
+        <div className="mt-2 flex items-center gap-2 border-t border-[var(--color-border)] pt-2">
+          <span className="text-[11px] text-[var(--color-text-dim)]">Foi útil?</span>
+          <OutcomeButton
+            active={handoff.outcome === 'useful'}
+            disabled={rating}
+            onClick={() => void rate('useful')}
+            icon={ThumbsUp}
+            label="Útil"
+            color="var(--color-success)"
+          />
+          <OutcomeButton
+            active={handoff.outcome === 'partial'}
+            disabled={rating}
+            onClick={() => void rate('partial')}
+            icon={CircleSlash}
+            label="Parcial"
+            color="var(--color-warning)"
+          />
+          <OutcomeButton
+            active={handoff.outcome === 'wrong'}
+            disabled={rating}
+            onClick={() => void rate('wrong')}
+            icon={ThumbsDown}
+            label="Errou"
+            color="var(--color-danger)"
+          />
+        </div>
+      )}
     </div>
+  )
+}
+
+function OutcomeButton({
+  active,
+  disabled,
+  onClick,
+  icon,
+  label,
+  color,
+}: {
+  active: boolean
+  disabled: boolean
+  onClick: () => void
+  icon: typeof ThumbsUp
+  label: string
+  color: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className="flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium transition disabled:opacity-50"
+      style={{
+        color: active ? color : 'var(--color-text-dim)',
+        borderColor: active ? color : 'var(--color-border)',
+        background: active ? `${color}1a` : undefined,
+      }}
+    >
+      <Icon as={icon} size={12} />
+      {label}
+    </button>
   )
 }
 

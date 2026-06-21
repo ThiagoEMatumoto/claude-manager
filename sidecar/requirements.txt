@@ -1,9 +1,15 @@
-# Deps do sidecar REAL de transcrição (sidecar.py).
+# Deps do sidecar REAL de transcrição + diarização (sidecar.py).
 #
 # torch NÃO está aqui: precisa do índice CUDA 12.8 (cu128) para a RTX 5070 Laptop
 # (Blackwell, sm_120) e é instalado separadamente pelo scripts/setup-meeting-sidecar.sh
 # via `--index-url https://download.pytorch.org/whl/cu128`. Pinar torch num
 # requirements comum quebraria o resolver para o índice cu128.
+#
+# torchaudio NÃO é mais instalado: o faster-whisper não precisa dele (usa
+# ctranslate2 + soundfile), e a diarização migrou de pyannote.audio para
+# sherpa-onnx (ONNX Runtime puro, sem torch/torchaudio). torchaudio 2.11 (exigido
+# pela GPU Blackwell/cu128) é incompatível com pyannote.audio 3.4 — esse conflito
+# foi o motivo da migração.
 #
 # faster-whisper traz ctranslate2 (runtime de inferência). Versão recente é
 # necessária para wheels compatíveis com CUDA 12.x.
@@ -13,15 +19,14 @@ faster-whisper==1.2.1
 soundfile==0.14.0
 numpy==2.4.6
 #
-# pyannote.audio = diarização (quem falou). NÃO usamos whisperX: ele empacota um
-# pipeline próprio (align + diarize + assign) que reimplementa a transcrição e
-# arrastaria um 2º caminho de STT divergente do faster-whisper já validado aqui.
-# pyannote direto + casamento por timestamp (maior overlap segment↔turno) é o
-# caminho mais simples e reutiliza a transcrição existente intocada.
+# sherpa-onnx = diarização (quem falou) via OfflineSpeakerDiarization. Lib
+# ISOLADA (ONNX Runtime, sem torch/torchaudio) → não conflita com o torch cu128
+# do faster-whisper. Substituiu pyannote.audio, que (1) quebra com torchaudio
+# 2.11 (removeu AudioMetaData) e (2) é GATED no Hugging Face (exige token).
 #
-# IMPORTANTE — modelo GATED no Hugging Face: o pipeline `pyannote/speaker-
-# diarization-3.1` exige (1) aceitar os termos do modelo na página do HF e (2) um
-# token de acesso (env HF_TOKEN ou `huggingface-cli login`). SEM o token/modelo,
-# o sidecar NÃO trava: emite um `error` claro de diarização e cai no comportamento
-# atual (segments sem speaker). Diarização é OPCIONAL.
-pyannote.audio==3.4.0
+# Os 2 modelos ONNX da diarização (segmentation pyannote-3.0 + embedding TitaNet)
+# são LIVRES (sem token) e baixados pelo scripts/setup-meeting-sidecar.sh para
+# ~/.claude-manager/meeting-sidecar/models/. SEM os modelos, o sidecar NÃO trava:
+# emite um `error` claro de diarização e cai no comportamento sem speaker.
+# Diarização é OPCIONAL.
+sherpa-onnx==1.13.3

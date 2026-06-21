@@ -749,6 +749,9 @@ function handoffTools(notify: McpNotify): ToolDef[] {
           id: handoffId,
           motherSessionId: null,
           targetRepoId: target.id,
+          // Origem da delegação (a mãe), pra instrumentação cross-repo. Null se a
+          // MCP não passou fromRepo.
+          fromRepoId: from?.id ?? null,
           featureId: input.featureId ?? null,
           task: input.task,
           contextJson: input.context ?? null,
@@ -774,6 +777,10 @@ function handoffTools(notify: McpNotify): ToolDef[] {
         const { handoffId } = handoffResultSchema.parse(args)
         const handoff = handoffStore.get(handoffId)
         if (!handoff) throw new Error(`handoff não encontrado: ${handoffId}`)
+
+        // A mãe está lendo o resultado: se já está done, marca como consumido
+        // (proxy de "a mãe consumiu o resultado"). Idempotente no store.
+        if (handoff.status === 'done') handoffStore.markConsumed(handoffId)
 
         // Enriquecimento ao vivo: resolve childSessionId (sessions.id) → cc_session_id
         // e cruza com a derivação do session-activity (índice de PIDs + tail do JSONL).

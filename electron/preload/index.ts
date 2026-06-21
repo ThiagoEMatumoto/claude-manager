@@ -28,6 +28,7 @@ import type {
   UpdateRepoDependencyInput,
   SetRepoHubInput,
   ConnectHubToAllInput,
+  HandoffOutcome,
   HandoffStatus,
   CreateDossierApiInput,
   DossierPlanInput,
@@ -225,6 +226,8 @@ const api: Api = {
       invoke('handoffs:mark-running', input),
     fail: (input: { id: string; error: string }) => invoke('handoffs:fail', input),
     sendMessage: (input: { id: string; text: string }) => invoke('handoffs:send-message', input),
+    setOutcome: (input: { id: string; outcome: HandoffOutcome }) =>
+      invoke('handoffs:set-outcome', input),
     spawnContext: (id: string) => invoke('handoffs:spawn-context', id),
     onUpdated: (handler) => subscribe<unknown>('handoff:updated', handler),
   },

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { resolveSidecarDir, resolveSidecarScript } from './sidecar-path'
+import {
+  resolveSidecarDir,
+  resolveSidecarScript,
+  resolveScriptsDir,
+  resolveSetupScript,
+} from './sidecar-path'
 
 describe('resolveSidecarDir', () => {
   it('packaged: resolve a partir de resourcesPath (fora do asar)', () => {
@@ -41,5 +46,34 @@ describe('resolveSidecarScript', () => {
       'fake_sidecar.py',
     )
     expect(script).toBe('/home/user/repo/sidecar/fake_sidecar.py')
+  })
+})
+
+describe('resolveSetupScript', () => {
+  it('dev/build: <repoRoot>/out/main → <repoRoot>/scripts/setup-meeting-sidecar.sh', () => {
+    const script = resolveSetupScript({
+      isPackaged: false,
+      resourcesPath: '/ignored',
+      moduleDir: '/home/user/repo/out/main',
+    })
+    expect(script).toBe('/home/user/repo/scripts/setup-meeting-sidecar.sh')
+  })
+
+  it('packaged: resourcesPath/scripts/setup-meeting-sidecar.sh', () => {
+    const script = resolveSetupScript({
+      isPackaged: true,
+      resourcesPath: '/opt/Claude Manager/resources',
+      moduleDir: '/opt/Claude Manager/resources/app.asar/out/main',
+    })
+    expect(script).toBe('/opt/Claude Manager/resources/scripts/setup-meeting-sidecar.sh')
+  })
+
+  it('resolveScriptsDir packaged vs dev', () => {
+    expect(
+      resolveScriptsDir({ isPackaged: true, resourcesPath: '/r', moduleDir: '/x/out/main' }),
+    ).toBe('/r/scripts')
+    expect(
+      resolveScriptsDir({ isPackaged: false, resourcesPath: '/r', moduleDir: '/x/out/main' }),
+    ).toBe('/x/scripts')
   })
 })

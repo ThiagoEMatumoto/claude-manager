@@ -47,6 +47,8 @@ import type {
   MeetingSpeaker,
   MeetingStatusEvent,
   MeetingPartialEvent,
+  MeetingInstallLogEvent,
+  MeetingInstallDoneEvent,
   MeetingActivationDraft,
   CreateMeetingInput,
   UpdateMeetingInput,
@@ -279,6 +281,7 @@ const api: Api = {
     setSpeakerName: (input: SetSpeakerNameInput) => invoke('meetings:set-speaker-name', input),
     search: (query: string) => invoke('meetings:search', query),
     sidecarConfigured: () => invoke<boolean>('meetings:sidecar-configured'),
+    installSidecar: () => invoke('meetings:install-sidecar'),
     startCapture: (meetingId: string) => invoke('meetings:start-capture', meetingId),
     stopCapture: (meetingId: string) => invoke('meetings:stop-capture', meetingId),
     extract: (meetingId: string) => invoke('meetings:extract', meetingId),
@@ -290,6 +293,9 @@ const api: Api = {
     onTranscriptPartial: (handler) =>
       subscribe<MeetingPartialEvent>('meeting:transcript:partial', handler),
     onStatus: (handler) => subscribe<MeetingStatusEvent>('meeting:status', handler),
+    onInstallLog: (handler) => subscribe<MeetingInstallLogEvent>('meeting:install:log', handler),
+    onInstallDone: (handler) =>
+      subscribe<MeetingInstallDoneEvent>('meeting:install:done', handler),
     onSpeaker: (handler) => subscribe<MeetingSpeaker>('meeting:speaker', handler),
     onCalendarActivate: (handler) =>
       subscribe<MeetingActivationDraft>('meeting:calendar:activate', handler),

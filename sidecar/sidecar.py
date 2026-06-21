@@ -7,19 +7,24 @@ Diferenças vs o fake:
     (você) via `pw-record` + `wpctl`/`pw-cli` — SEM ffmpeg/pactl/parec.
   - Transcreve com faster-whisper large-v3, language='pt', VAD, em GPU (CUDA)
     com fallback automático para CPU se o CUDA estiver indisponível/incompatível.
-  - DIARIZAÇÃO (quem falou) PÓS-captura: roda pyannote.audio (speaker-diarization
-    -3.1) sobre o WAV completo e atribui um `speaker_label` (SPEAKER_00/01…) a
-    cada segment por maior overlap temporal segment↔turno. O speaker predominante
-    da TRILHA DO MIC é marcado `is_local_user` (a captura em 2 trilhas separadas
-    identifica "você" deterministicamente). Diarização é OPCIONAL: o modelo é
-    GATED no Hugging Face (exige aceitar os termos + um token HF_TOKEN). Sem o
-    token/modelo, o sidecar emite um `error` claro e cai no comportamento antigo
-    (segments sem speaker) — NÃO trava.
+  - DIARIZAÇÃO (quem falou) PÓS-captura: roda sherpa-onnx
+    (OfflineSpeakerDiarization) sobre o WAV completo e atribui um `speaker_label`
+    (SPEAKER_00/01…) a cada segment por maior overlap temporal segment↔turno. O
+    speaker predominante da TRILHA DO MIC é marcado `is_local_user` (a captura em
+    2 trilhas separadas identifica "você" deterministicamente). Diarização é
+    OPCIONAL: precisa de 2 modelos ONNX locais (segmentation pyannote-3.0 +
+    embedding TitaNet). Sem a lib/modelos, o sidecar emite um `error` claro e cai
+    no comportamento antigo (segments sem speaker) — NÃO trava. NÃO há token HF
+    nem modelo gated: os modelos ONNX são livres (k2-fsa/sherpa-onnx releases),
+    rodam em CPU e são isolados (sem torch/torchaudio).
 
-Por que pyannote direto e não whisperX: whisperX empacota o próprio pipeline de
-STT (reimplementa a transcrição), o que arrastaria um 2º caminho de STT divergente
-do faster-whisper já validado aqui. pyannote sozinho + casamento por timestamp
-reutiliza a transcrição intocada e é o caminho mais simples.
+Por que sherpa-onnx e não pyannote.audio/whisperX: pyannote.audio 3.4 quebra com
+torchaudio 2.11 (exigido pela GPU Blackwell/cu128 — removeu AudioMetaData) e é
+gated no HF. whisperX empacota o próprio pipeline de STT (reimplementa a
+transcrição), arrastando um 2º caminho de STT divergente do faster-whisper. O
+sherpa-onnx é uma lib isolada (ONNX Runtime, sem torch), com modelos livres, e
+seu resultado (turnos start/end/speaker) casa por timestamp com a transcrição
+do faster-whisper intocada — o caminho mais simples e robusto.
 
 Contrato NDJSON (stdout, 1 evento por linha, flush=True) — superset do fake:
   {"type":"status","state":"capturing"|"transcribing"|"diarizing"|...}
@@ -324,22 +329,27 @@ def stop_capture_tracks(tracks):
 # ---------------------------------------------------------------------------
 
 
-def _read_mono_16k(path):
-    """Lê um WAV via soundfile, downmixa pra mono e reamostra pra 16kHz com
+def _read_mono(path, target_sr):
+    """Lê um WAV via soundfile, downmixa pra mono e reamostra pra `target_sr` com
     interpolação linear (numpy puro, sem scipy/ffmpeg). Retorna float32 [-1,1]."""
     import numpy as np
     import soundfile as sf
 
     data, sr = sf.read(path, dtype="float32", always_2d=True)
     mono = data.mean(axis=1)  # downmix
-    if sr != TARGET_SR and mono.size > 0:
+    if sr != target_sr and mono.size > 0:
         # Reamostragem linear: suficiente p/ STT (whisper é robusto). Evita scipy.
         duration = mono.size / float(sr)
-        n_out = max(1, int(round(duration * TARGET_SR)))
+        n_out = max(1, int(round(duration * target_sr)))
         x_old = np.linspace(0.0, duration, num=mono.size, endpoint=False)
         x_new = np.linspace(0.0, duration, num=n_out, endpoint=False)
         mono = np.interp(x_new, x_old, mono).astype(np.float32)
     return mono
+
+
+def _read_mono_16k(path):
+    """Lê um WAV em mono float32 16kHz (taxa-alvo do STT). Atalho de _read_mono."""
+    return _read_mono(path, TARGET_SR)
 
 
 def _mix_arrays(tracks):
@@ -523,87 +533,101 @@ def collect_segments(model, audio):
 
 
 # ---------------------------------------------------------------------------
-# Diarização com pyannote.audio (quem falou) — OPCIONAL, modelo gated no HF
+# Diarização com sherpa-onnx (quem falou) — OPCIONAL, modelos ONNX locais livres
 # ---------------------------------------------------------------------------
+
+# Diretório dos modelos ONNX de diarização (baixados por
+# scripts/setup-meeting-sidecar.sh). Override via env MEETING_SIDECAR_MODELS_DIR.
+DEFAULT_MODELS_DIR = os.path.join(
+    os.path.expanduser("~"), ".claude-manager", "meeting-sidecar", "models"
+)
+# Segmentation: pyannote-3.0 exportado p/ ONNX (livre, k2-fsa/sherpa-onnx).
+SEG_MODEL_REL = os.path.join("sherpa-onnx-pyannote-segmentation-3-0", "model.onnx")
+# Embedding de locutor: NeMo TitaNet small (livre).
+EMB_MODEL_REL = "nemo_en_titanet_small.onnx"
 
 
 class DiarizationUnavailable(Exception):
-    """A diarização não pôde rodar (pyannote ausente, token HF faltando, ou
-    modelo gated não aceito). Sinaliza degradação graciosa: emitimos um `error`
-    de diarização e seguimos sem speaker — NÃO é fatal pra transcrição."""
+    """A diarização não pôde rodar (sherpa-onnx ausente ou modelos ONNX não
+    baixados). Sinaliza degradação graciosa: emitimos um `error` de diarização e
+    seguimos sem speaker — NÃO é fatal pra transcrição."""
 
 
-def _hf_token():
-    """Token do Hugging Face via env (HF_TOKEN / HUGGINGFACE_TOKEN /
-    HUGGING_FACE_HUB_TOKEN). None se nenhum estiver setado — nesse caso o
-    pyannote ainda pode achar credencial de um `huggingface-cli login` prévio,
-    então não falhamos aqui; deixamos o load do pipeline decidir."""
-    for key in ("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
-        val = os.environ.get(key)
-        if val:
-            return val.strip()
-    return None
+def _models_dir():
+    return os.environ.get("MEETING_SIDECAR_MODELS_DIR", DEFAULT_MODELS_DIR)
 
 
-def _load_diar_pipeline():
-    """Carrega o pipeline pyannote speaker-diarization-3.1 (gated no HF). Move
-    pra GPU se torch tiver CUDA. Levanta DiarizationUnavailable com mensagem
-    acionável se a lib faltar ou o modelo/token não estiver disponível."""
+def _build_diarizer():
+    """Constrói o OfflineSpeakerDiarization do sherpa-onnx (CPU, ONNX Runtime).
+    Levanta DiarizationUnavailable com mensagem acionável se a lib faltar ou os
+    modelos ONNX não estiverem em disco — NÃO usa torch nem token HF."""
     try:
-        from pyannote.audio import Pipeline
+        import sherpa_onnx
     except Exception as e:  # noqa: BLE001 — ImportError ou erro de import transitivo
         raise DiarizationUnavailable(
-            f"pyannote.audio indisponível ({e}) — rode scripts/setup-meeting-sidecar.sh"
+            f"sherpa-onnx indisponível ({e}) — rode scripts/setup-meeting-sidecar.sh"
         ) from e
 
-    token = _hf_token()
-    try:
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=token,
-        )
-    except Exception as e:  # noqa: BLE001
+    models_dir = _models_dir()
+    seg_model = os.path.join(models_dir, SEG_MODEL_REL)
+    emb_model = os.path.join(models_dir, EMB_MODEL_REL)
+    missing = [p for p in (seg_model, emb_model) if not os.path.exists(p)]
+    if missing:
         raise DiarizationUnavailable(
-            "modelo de diarização indisponível — aceite os termos em "
-            "https://hf.co/pyannote/speaker-diarization-3.1 e forneça um token "
-            f"(env HF_TOKEN ou huggingface-cli login). Detalhe: {e}"
-        ) from e
-
-    # Pipeline.from_pretrained pode retornar None se o token não autorizar o
-    # download (sem levantar) — trate como indisponível.
-    if pipeline is None:
-        raise DiarizationUnavailable(
-            "pipeline de diarização não carregou (token HF ausente/sem acesso ao "
-            "modelo gated pyannote/speaker-diarization-3.1)"
+            "modelos de diarização ausentes ("
+            + ", ".join(missing)
+            + ") — rode scripts/setup-meeting-sidecar.sh para baixá-los"
         )
 
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            pipeline.to(torch.device("cuda"))
-            log("diarização: pipeline movido para CUDA")
-    except Exception as e:  # noqa: BLE001
-        log(f"diarização: mantendo na CPU ({e})")
-
-    return pipeline
+    config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+        segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+            pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
+                model=seg_model
+            ),
+        ),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=emb_model),
+        # num_clusters=-1 + threshold: o nº de speakers é INFERIDO (não fixamos),
+        # via clustering aglomerativo. threshold maior = menos splits (mais
+        # conservador ao criar speakers novos).
+        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.5),
+        min_duration_on=0.3,
+        min_duration_off=0.5,
+    )
+    if not config.validate():
+        raise DiarizationUnavailable(
+            "config de diarização inválida (modelos corrompidos? rode o setup)"
+        )
+    return sherpa_onnx.OfflineSpeakerDiarization(config)
 
 
 def _diarize(wav_path):
     """Roda a diarização sobre `wav_path`. Retorna uma lista de turnos
     [(start_s, end_s, label), …] ordenada por start. Levanta
-    DiarizationUnavailable em qualquer falha de setup."""
-    pipeline = _load_diar_pipeline()
+    DiarizationUnavailable em qualquer falha de setup.
+
+    O sherpa-onnx processa um array float32 mono — reamostramos o WAV pra a taxa
+    esperada pelo diarizer (`sd.sample_rate`, tipicamente 16k). Os speakers vêm
+    como inteiros (0,1,2…); convertemos pro mesmo formato SPEAKER_0N do resto do
+    pipeline pra não mudar o contrato externo."""
+    import numpy as np
+
+    sd = _build_diarizer()
     emit({"type": "status", "state": "diarizing"})
     log(f"diarizando {wav_path}…")
+
+    audio = _read_mono(wav_path, int(sd.sample_rate))
+    if audio.size == 0:
+        log("diarização: áudio vazio — sem turnos")
+        return []
+
     try:
-        annotation = pipeline(wav_path)
+        result = sd.process(np.ascontiguousarray(audio, dtype=np.float32))
     except Exception as e:  # noqa: BLE001 — falha em runtime (áudio inválido, OOM)
         raise DiarizationUnavailable(f"falha ao diarizar: {e}") from e
 
     turns = [
-        (float(turn.start), float(turn.end), str(label))
-        for turn, _track, label in annotation.itertracks(yield_label=True)
+        (float(seg.start), float(seg.end), f"SPEAKER_{int(seg.speaker):02d}")
+        for seg in result.sort_by_start_time()
     ]
     turns.sort(key=lambda t: t[0])
     n_speakers = len({label for _s, _e, label in turns})
@@ -738,8 +762,9 @@ def diarize_and_emit(segments, mix_wav_path, mic_wav_path=None):
          `speaker` (is_local_user) ANTES dos segments;
       4. emite os segments já rotulados.
 
-    Degrada com graça: se a diarização não estiver disponível (pyannote/token/
-    modelo), emite um `error` de diarização e os segments saem SEM speaker."""
+    Degrada com graça: se a diarização não estiver disponível (sherpa-onnx ou
+    modelos ONNX ausentes), emite um `error` de diarização e os segments saem
+    SEM speaker."""
     try:
         turns = _diarize(mix_wav_path)
     except DiarizationUnavailable as e:

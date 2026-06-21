@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
 # setup-meeting-sidecar.sh — provisiona o venv Python do sidecar REAL de
-# transcrição (captura de áudio PipeWire + faster-whisper STT pt-BR).
+# transcrição (captura de áudio PipeWire + faster-whisper STT pt-BR) e baixa os
+# modelos ONNX da diarização (sherpa-onnx).
 #
-# IDEMPOTENTE: reexecutar reaproveita o venv existente e só reinstala o que falta.
+# IDEMPOTENTE: reexecutar reaproveita o venv existente, só reinstala o que falta
+# e pula os modelos já baixados.
 #
 # Por que um venv dedicado (e não o Python do sistema):
 #   - O Python do SISTEMA aqui é 3.14.x → INCOMPATÍVEL com torch/faster-whisper
@@ -14,20 +16,16 @@
 #     antigas o cu128 também funciona; em máquinas sem GPU, o torch CPU ainda é
 #     útil porque o sidecar faz fallback automático para CPU.
 #
-# DIARIZAÇÃO (quem falou) — pyannote.audio (instalado via requirements.txt):
-#   O pipeline `pyannote/speaker-diarization-3.1` é GATED no Hugging Face. Para
-#   habilitar a diarização (OPCIONAL — sem ela o transcript sai sem speaker):
-#     1) Aceite os termos em https://hf.co/pyannote/speaker-diarization-3.1
-#        E em https://hf.co/pyannote/segmentation-3.0 (dependência do pipeline).
-#     2) Gere um token de acesso (read) em https://hf.co/settings/tokens
-#     3) Exporte o token ANTES de iniciar a captura no app, p.ex.:
-#          export HF_TOKEN=hf_xxx            (o sidecar lê HF_TOKEN/HUGGINGFACE_TOKEN)
-#        ou faça login uma vez: `huggingface-cli login`
-#   SEM token/modelo o sidecar emite um `error` de diarização e cai no
-#   comportamento atual (segments sem speaker) — NÃO trava a transcrição.
+# DIARIZAÇÃO (quem falou) — sherpa-onnx (instalado via requirements.txt):
+#   A diarização usa OfflineSpeakerDiarization do sherpa-onnx (ONNX Runtime puro,
+#   sem torch/torchaudio, roda em CPU). Substituiu o pyannote.audio, que (1)
+#   quebra com torchaudio 2.11 e (2) era GATED no Hugging Face (exigia token).
+#   Os 2 modelos ONNX são LIVRES (sem token), baixados abaixo para
+#   ${HOME}/.claude-manager/meeting-sidecar/models/. SEM os modelos, o sidecar
+#   NÃO trava: emite um `error` de diarização e cai no comportamento sem speaker.
+#   NÃO é mais necessário token HF, login no Hugging Face, nem aceitar termos.
 #
-# NÃO roda nada do sidecar nem grava áudio — só prepara o ambiente. NÃO baixa o
-# modelo de diarização (gated; exige o token acima).
+# NÃO grava áudio nem roda o sidecar — só prepara o ambiente (venv + modelos).
 #
 # Após rodar: aponte a pref `meeting_sidecar_python` do app para o caminho do
 # python impresso no fim (veja instruções no final).
@@ -35,8 +33,15 @@
 set -euo pipefail
 
 VENV_DIR="${HOME}/.claude-manager/meeting-sidecar/.venv"
+MODELS_DIR="${HOME}/.claude-manager/meeting-sidecar/models"
 PY_VERSION="3.12"
 TORCH_INDEX="https://download.pytorch.org/whl/cu128"
+
+# Modelos ONNX da diarização (livres — k2-fsa/sherpa-onnx releases).
+SEG_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
+EMB_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx"
+SEG_MODEL="${MODELS_DIR}/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
+EMB_MODEL="${MODELS_DIR}/nemo_en_titanet_small.onnx"
 
 # Diretório deste script → raiz do repo (para achar sidecar/requirements.txt).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +50,7 @@ REQUIREMENTS="${REPO_ROOT}/sidecar/requirements.txt"
 
 echo "==> Meeting sidecar setup"
 echo "    venv:        ${VENV_DIR}"
+echo "    models:      ${MODELS_DIR}"
 echo "    python:      ${PY_VERSION} (baixado pelo uv)"
 echo "    torch index: ${TORCH_INDEX} (CUDA 12.8 / Blackwell)"
 echo
@@ -77,18 +83,40 @@ VENV_PY="${VENV_DIR}/bin/python"
 
 # --- torch (índice CUDA 12.8) ---------------------------------------------
 # Instalado ANTES do faster-whisper para fixar a build cu128 (evita o resolver
-# do faster-whisper puxar um torch do PyPI sem CUDA).
+# do faster-whisper puxar um torch do PyPI sem CUDA). torchaudio NÃO é instalado:
+# o faster-whisper não precisa dele e a diarização agora é sherpa-onnx (sem torch).
 echo "==> instalando torch (cu128 / Blackwell)"
 # torch==2.11.0: versão validada na RTX 5070 Laptop (Blackwell, sm_120) com o
 # índice cu128. Pin exato p/ reprodutibilidade — versões mais novas podem mudar
 # o ABI de CUDA/wheels.
 uv pip install --python "${VENV_PY}" --index-url "${TORCH_INDEX}" torch==2.11.0
 
-# --- faster-whisper + soundfile + numpy + pyannote.audio ------------------
-# pyannote.audio (diarização) está no requirements.txt. Reusa o torch cu128 já
-# instalado acima (o pin de torch impede o resolver de trocar a build com CUDA).
-echo "==> instalando faster-whisper + soundfile + numpy + pyannote.audio"
+# --- faster-whisper + soundfile + numpy + sherpa-onnx ----------------------
+# sherpa-onnx (diarização) está no requirements.txt — lib isolada (ONNX Runtime),
+# não puxa torch. Reusa o torch cu128 já instalado acima para o faster-whisper.
+echo "==> instalando faster-whisper + soundfile + numpy + sherpa-onnx"
 uv pip install --python "${VENV_PY}" -r "${REQUIREMENTS}"
+
+# --- modelos ONNX da diarização (livres, sem token) ------------------------
+# Idempotente: pula se já existem. A segmentation vem num .tar.bz2 que expande
+# para uma pasta com model.onnx; a embedding é um .onnx único.
+mkdir -p "${MODELS_DIR}"
+
+if [ -f "${SEG_MODEL}" ]; then
+  echo "==> modelo de segmentation já existe — pulando"
+else
+  echo "==> baixando modelo de segmentation (pyannote-3.0, ~6.6MB)"
+  curl -fL --retry 3 -o "${MODELS_DIR}/segmentation.tar.bz2" "${SEG_URL}"
+  tar -xjf "${MODELS_DIR}/segmentation.tar.bz2" -C "${MODELS_DIR}"
+  rm -f "${MODELS_DIR}/segmentation.tar.bz2"
+fi
+
+if [ -f "${EMB_MODEL}" ]; then
+  echo "==> modelo de embedding já existe — pulando"
+else
+  echo "==> baixando modelo de embedding (NeMo TitaNet small, ~38MB)"
+  curl -fL --retry 3 -o "${EMB_MODEL}" "${EMB_URL}"
+fi
 
 # --- modelo large-v3 -------------------------------------------------------
 # O faster-whisper baixa o large-v3 (~3GB) sob demanda no 1º uso e cacheia em
@@ -114,10 +142,7 @@ echo
 echo "O modelo large-v3 (~3GB) será baixado no 1º uso, salvo se você"
 echo "descomentar o bloco de pré-download acima."
 echo
-echo "Diarização (quem falou) — OPCIONAL, modelo GATED no Hugging Face:"
-echo "  1) Aceite os termos: https://hf.co/pyannote/speaker-diarization-3.1"
-echo "                   e:  https://hf.co/pyannote/segmentation-3.0"
-echo "  2) Gere um token (read): https://hf.co/settings/tokens"
-echo "  3) Exporte antes de capturar:  export HF_TOKEN=hf_xxx"
-echo "     (ou rode uma vez: ${VENV_DIR}/bin/huggingface-cli login)"
-echo "  Sem o token, a transcrição funciona normalmente — só sem speaker."
+echo "Diarização (quem falou): modelos ONNX livres baixados em:"
+echo "  ${MODELS_DIR}"
+echo "NÃO é necessário token do Hugging Face nem aceitar termos. Se os modelos"
+echo "faltarem, a transcrição funciona normalmente — só sem speaker."

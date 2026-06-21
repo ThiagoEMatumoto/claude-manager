@@ -94,9 +94,11 @@ const STATUS_LABEL: Record<HandoffStatus, string> = {
   done: 'Concluído',
   rejected: 'Rejeitado',
   failed: 'Falhou',
+  interrupted: 'Interrompido',
 }
 
-// status → token de cor (texto + borda + fundo translúcido).
+// status → token de cor (texto + borda + fundo translúcido). interrupted usa o
+// tom de aviso (recuperável, não é erro real como failed).
 const STATUS_COLOR: Record<HandoffStatus, string> = {
   pending: 'var(--color-warning)',
   running: 'var(--color-info)',
@@ -105,14 +107,17 @@ const STATUS_COLOR: Record<HandoffStatus, string> = {
   failed: 'var(--color-danger)',
   rejected: 'var(--color-text-dim)',
   approved: 'var(--color-accent)',
+  interrupted: 'var(--color-warning)',
 }
 
-// Ordem de agrupamento/exibição: ativos primeiro, terminais depois.
+// Ordem de agrupamento/exibição: ativos primeiro, recuperáveis no meio, terminais
+// depois. interrupted fica antes dos terminais (pede ação: retomar).
 const STATUS_ORDER: HandoffStatus[] = [
   'pending',
   'approved',
   'running',
   'needs_input',
+  'interrupted',
   'done',
   'failed',
   'rejected',

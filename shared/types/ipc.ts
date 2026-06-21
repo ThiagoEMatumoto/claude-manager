@@ -90,6 +90,13 @@ export interface ConnectHubToAllInput {
 // que a faz voltar pra running). Transições extras:
 //   running ⇄ needs_input  (handoff_ask / handoff_message ou handoff_progress).
 // needs_input conta como in-flight (teto/dedup/reconciliação) — NÃO é terminal.
+//
+// 'interrupted' é um estado RECUPERÁVEL: a sessão-filha morreu (PTY exit no boot
+// ou na reconciliação periódica) SEM ter reportado erro real. Distinto de
+// 'failed' (a filha reportou um erro de tarefa). NÃO conta como ativo (libera o
+// teto/dedup) mas permanece visível/listável e pode ser RETOMADO (re-spawn da
+// filha → markRunning de volta pra running). A reconciliação (failIfRunning,
+// reconcileStuck, boot sweep) passa a marcar 'interrupted' em vez de 'failed'.
 export type HandoffStatus =
   | 'pending'
   | 'approved'
@@ -98,6 +105,7 @@ export type HandoffStatus =
   | 'done'
   | 'rejected'
   | 'failed'
+  | 'interrupted'
 
 // Modo de permissão com que a sessão-filha sobe:
 //  'plan'        → read-only (--permission-mode plan): explora mas não edita.

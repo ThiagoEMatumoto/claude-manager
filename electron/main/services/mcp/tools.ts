@@ -569,7 +569,8 @@ const sessionHandoffSchema = z.object({
 
 const handoffResultSchema = z.object({ handoffId: z.string().min(1) })
 
-// Espelha HandoffStatus em shared/types/ipc.ts. needs_input é in-flight (vivo).
+// Espelha HandoffStatus em shared/types/ipc.ts. needs_input é in-flight (vivo);
+// interrupted é recuperável (filha morreu sem erro real, NÃO conta como ativo).
 const handoffStatusEnum = z.enum([
   'pending',
   'approved',
@@ -578,6 +579,7 @@ const handoffStatusEnum = z.enum([
   'done',
   'rejected',
   'failed',
+  'interrupted',
 ])
 
 const handoffListSchema = z.object({

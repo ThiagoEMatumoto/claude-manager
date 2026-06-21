@@ -50,6 +50,7 @@ const handoffStatus = z.enum([
   'done',
   'rejected',
   'failed',
+  'interrupted',
 ])
 
 const listSchema = z

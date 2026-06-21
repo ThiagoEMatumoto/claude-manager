@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getDb } from './db'
+import { spawnEnv } from './custom-env'
 
 const execFileAsync = promisify(execFile)
 
@@ -78,6 +79,8 @@ export async function runClaude(args: string[], opts: RunOpts = {}): Promise<Run
       timeout: opts.timeoutMs ?? 60_000,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
+      // process.env + vars customizadas do usuário (Configurações), lidas agora.
+      env: spawnEnv(),
     })
     return { stdout, stderr, code: 0 }
   } catch (err) {

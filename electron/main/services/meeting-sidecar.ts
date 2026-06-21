@@ -14,6 +14,7 @@ import {
   resolveSidecarPython,
 } from './meeting-sidecar-config'
 import { getPref } from './prefs-store'
+import { spawnEnv } from './custom-env'
 import * as meetingStore from './meeting-store'
 import { broadcast } from './notify'
 
@@ -102,11 +103,20 @@ export function isMeetingSidecarConfigured(): boolean {
 // (python do venv + sidecar.py + --out-dir durável). Senão → FAKE (python3
 // herdado + fake_sidecar.py). O swap é só de script/interpretador — o manager
 // não muda.
-async function resolveStart(meetingId: string): Promise<{ command: string; args: string[] }> {
+async function resolveStart(
+  meetingId: string,
+): Promise<{ command: string; args: string[]; env: NodeJS.ProcessEnv }> {
   const resolution = resolveSidecar(configEnv(), await resolvePython3())
+  // Vars customizadas do usuário (Configurações) mescladas sobre process.env —
+  // ex.: HF_TOKEN p/ o faster-whisper, proxies. Lidas a cada start (pref viva).
+  const env = spawnEnv()
 
   if (resolution.mode === 'fake') {
-    return { command: resolution.command, args: [resolution.script, '--meeting-id', meetingId] }
+    return {
+      command: resolution.command,
+      args: [resolution.script, '--meeting-id', meetingId],
+      env,
+    }
   }
 
   const args = [resolution.script, '--meeting-id', meetingId]
@@ -121,7 +131,7 @@ async function resolveStart(meetingId: string): Promise<{ command: string; args:
       console.error(`[meeting-sidecar] falha ao criar out-dir ${outDir}:`, err)
     }
   }
-  return { command: resolution.command, args }
+  return { command: resolution.command, args, env }
 }
 
 export const meetingSidecarManager = new MeetingSidecarManager({

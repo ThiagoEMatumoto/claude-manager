@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 
-export const version = 22
-export const name = '022_dossiers'
+export const version = 25
+export const name = '025_dossiers'
 
 // Research Dossier: pesquisa profunda com proveniência em nível de trecho.
 //

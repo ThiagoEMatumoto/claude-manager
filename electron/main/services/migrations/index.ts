@@ -20,7 +20,7 @@ import * as handoffs from './018_handoffs'
 import * as repoHub from './019_repo_hub'
 import * as handoffModeProgress from './020_handoff_mode_progress'
 import * as handoffPendingQuestion from './021_handoff_pending_question'
-import * as dossiers from './022_dossiers'
+import * as dossiers from './025_dossiers'
 
 interface Migration {
   version: number

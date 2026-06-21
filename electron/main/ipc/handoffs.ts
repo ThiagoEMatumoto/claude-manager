@@ -50,6 +50,7 @@ const handoffStatus = z.enum([
   'done',
   'rejected',
   'failed',
+  'interrupted',
 ])
 
 const listSchema = z
@@ -76,6 +77,11 @@ const failSchema = z.object({
 const sendMessageSchema = z.object({
   id: z.string().min(1),
   text: z.string().min(1),
+})
+
+const setOutcomeSchema = z.object({
+  id: z.string().min(1),
+  outcome: z.enum(['useful', 'wrong', 'partial']),
 })
 
 export function registerHandoffsIpc(): void {
@@ -133,6 +139,15 @@ export function registerHandoffsIpc(): void {
       throw new Error('A sessão-filha não está mais viva — não há para onde enviar.')
     }
     injectIntoChild(handoff.childSessionId, text)
+  })
+
+  // Feedback humano (👍/👎/parcial) sobre a utilidade de um handoff concluído.
+  // Persiste o outcome e loga um evento 'feedback' na trilha (instrumentação).
+  ipcMain.handle('handoffs:set-outcome', (_e, raw: unknown): Handoff => {
+    const { id, outcome } = setOutcomeSchema.parse(raw)
+    const handoff = store.setOutcome(id, outcome)
+    broadcast('handoff:updated', handoff)
+    return handoff
   })
 
   // Resolve o repo-alvo + metadados do projeto pra UI conseguir chamar openSession.

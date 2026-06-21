@@ -90,6 +90,13 @@ export interface ConnectHubToAllInput {
 // que a faz voltar pra running). Transições extras:
 //   running ⇄ needs_input  (handoff_ask / handoff_message ou handoff_progress).
 // needs_input conta como in-flight (teto/dedup/reconciliação) — NÃO é terminal.
+//
+// 'interrupted' é um estado RECUPERÁVEL: a sessão-filha morreu (PTY exit no boot
+// ou na reconciliação periódica) SEM ter reportado erro real. Distinto de
+// 'failed' (a filha reportou um erro de tarefa). NÃO conta como ativo (libera o
+// teto/dedup) mas permanece visível/listável e pode ser RETOMADO (re-spawn da
+// filha → markRunning de volta pra running). A reconciliação (failIfRunning,
+// reconcileStuck, boot sweep) passa a marcar 'interrupted' em vez de 'failed'.
 export type HandoffStatus =
   | 'pending'
   | 'approved'
@@ -98,12 +105,18 @@ export type HandoffStatus =
   | 'done'
   | 'rejected'
   | 'failed'
+  | 'interrupted'
 
 // Modo de permissão com que a sessão-filha sobe:
 //  'plan'        → read-only (--permission-mode plan): explora mas não edita.
 //  'auto-edits'  → autônomo (--permission-mode acceptEdits) + denylist destrutivo.
 //  'interactive' → comportamento legado (pergunta cada ação).
 export type HandoffMode = 'plan' | 'auto-edits' | 'interactive'
+
+// Feedback humano sobre a utilidade de um handoff concluído (instrumentação
+// Fase 2): foi 'useful' (acertou), 'wrong' (errou o alvo) ou 'partial' (ajudou
+// em parte). NULL = ainda sem avaliação.
+export type HandoffOutcome = 'useful' | 'wrong' | 'partial'
 
 export interface Handoff {
   id: string
@@ -135,6 +148,13 @@ export interface Handoff {
   error: string | null
   createdAt: number
   updatedAt: number
+  // Instrumentação (Fase 2). consumedAt: quando a mãe consumiu o resultado (leu o
+  // done via handoff_result); NULL = nunca consumido. fromRepoId: repo de ORIGEM
+  // (a mãe que delegou); NULL para handoffs legados/sem origem. outcome: feedback
+  // humano sobre a utilidade; NULL = sem avaliação.
+  consumedAt: number | null
+  fromRepoId: string | null
+  outcome: HandoffOutcome | null
 }
 
 // Resolve o repo-alvo de um handoff + metadados do projeto, pra UI poder spawnar
@@ -153,6 +173,9 @@ export interface CreateHandoffInput {
   id?: string
   motherSessionId?: string | null
   targetRepoId: string
+  // Repo de ORIGEM (a mãe que delegou). Persistido pra instrumentação cross-repo
+  // (de onde→pra onde). Opcional: a MCP pode não ter o fromRepo resolvido.
+  fromRepoId?: string | null
   featureId?: string | null
   task: string
   contextJson?: string | null
@@ -1658,6 +1681,15 @@ export interface Api {
     // estiver viva. Injeta via bracketed-paste (com submit), não write cru.
     sendMessage(input: { id: string; text: string }): Promise<void>
     spawnContext(id: string): Promise<HandoffSpawnContext>
+    // Feedback humano sobre a utilidade de um handoff concluído (instrumentação).
+    setOutcome(input: { id: string; outcome: HandoffOutcome }): Promise<Handoff>
+    // Retoma um handoff INTERROMPIDO: re-spawna a filha via `claude --resume`,
+    // re-injeta o kickoff e devolve o handoff a 'running'. Rejeita se o status não
+    // for 'interrupted' ou se o transcript da filha não existir mais.
+    resume(id: string): Promise<Handoff>
+    // Gate de UI do "Retomar": true só se o handoff está interrompido E o
+    // transcript da filha ainda existe (mesma checagem do resume).
+    isResumable(id: string): Promise<boolean>
     onUpdated(handler: (payload: unknown) => void): () => void
   }
   dossiers: {

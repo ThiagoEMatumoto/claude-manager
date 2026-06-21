@@ -24,6 +24,7 @@ import * as meetings from './022_meetings'
 import * as meetingsCaptureStatus from './023_meetings_capture_status'
 import * as meetingsFts from './024_meetings_fts'
 import * as dossiers from './025_dossiers'
+import * as handoffInstrumentation from './026_handoff_instrumentation'
 
 interface Migration {
   version: number
@@ -63,6 +64,7 @@ export const migrations: Migration[] = [
   meetingsCaptureStatus,
   meetingsFts,
   dossiers,
+  handoffInstrumentation,
 ]
 
 export function runMigrations(db: Database.Database): void {

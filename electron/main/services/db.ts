@@ -31,9 +31,12 @@ export function getDb(): Database.Database {
   // PTY exit nunca dispara (o ptyManager morreu junto). Sem isto, órfãos travam
   // MAX_ACTIVE_HANDOFFS para sempre. No boot TODO in-flight é órfão — nenhum
   // PTY-filho sobrevive ao restart (inclui needs_input: a filha que perguntou
-  // também morreu junto com o app).
+  // também morreu junto com o app). Marca 'interrupted' (RECUPERÁVEL, não
+  // 'failed'): app-restart não é erro de tarefa; o handoff sai do ativo (libera
+  // o teto) mas fica retomável pelo humano. Mantém em sync com failIfRunning /
+  // reconcileStuck (mesma transição em → interrupted).
   db.prepare(
-    "UPDATE handoffs SET status = 'failed', error = ?, updated_at = ? WHERE status IN ('running','needs_input')",
+    "UPDATE handoffs SET status = 'interrupted', error = ?, updated_at = ? WHERE status IN ('running','needs_input')",
   ).run('Sessão-filha órfã: app reiniciou sem reconciliar o handoff', Date.now())
 
   dbInstance = db

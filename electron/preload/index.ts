@@ -58,6 +58,7 @@ import type {
   SyncConfigureInput,
   SyncResolveConflictInput,
   SyncSetProjectsRootInput,
+  ChatTranscriptUpdate,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -113,6 +114,17 @@ const api: Api = {
     },
     onGlobalActivity: (handler) =>
       subscribe<GlobalActivityBatch>('session:activity:global', handler),
+  },
+  chat: {
+    getTranscript: (sessionId) => invoke('chat:get-transcript', sessionId),
+    watch: (sessionId) => {
+      void invoke('chat:watch', sessionId)
+    },
+    unwatch: (sessionId) => {
+      void invoke('chat:unwatch', sessionId)
+    },
+    onTranscriptUpdate: (handler) =>
+      subscribe<ChatTranscriptUpdate>('chat:transcript-update', handler),
   },
   shell: {
     openPath: (path: string) => invoke('shell:open-path', path),

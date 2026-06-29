@@ -44,7 +44,7 @@ export function EffortPill({ canSwitch, pending, onSelectEffort }: Props) {
   const dim = !shown
 
   return (
-    <Menu open={open} onClose={() => setOpen(false)} sections={sections}>
+    <Menu open={open} onClose={() => setOpen(false)} sections={sections} portal align="left">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

@@ -105,7 +105,7 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel }: Props
   }
 
   return (
-    <Menu open={open} onClose={() => setOpen(false)} sections={sections}>
+    <Menu open={open} onClose={() => setOpen(false)} sections={sections} portal align="left">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

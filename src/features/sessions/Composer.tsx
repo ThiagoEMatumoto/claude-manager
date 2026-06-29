@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
+import { CornerDownLeft, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
@@ -15,6 +15,15 @@ import { insertPathToken, pickImageFiles, pickImageItems } from './image-paste'
 
 export interface ComposerHandle {
   focus: () => void
+}
+
+// Imagem anexada ao draft atual: `path` é o caminho temp injetado no prompt;
+// `previewUrl` é um object URL (blob:) usado só pra renderizar o thumbnail —
+// precisa ser revogado ao remover/desmontar pra não vazar memória.
+interface Attachment {
+  name: string
+  path: string
+  previewUrl: string
 }
 
 interface Props {
@@ -45,8 +54,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
-  // Feedback discreto das imagens anexadas no draft atual (nomes).
-  const [attached, setAttached] = useState<string[]>([])
+  // Imagens anexadas ao draft atual (thumbnail + nome).
+  const [attached, setAttached] = useState<Attachment[]>([])
+  // Espelha `attached` pra revogar os object URLs no unmount sem recriar o efeito.
+  const attachedRef = useRef<Attachment[]>([])
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const loadPrefs = useSessionPrefsStore((s) => s.load)
@@ -62,6 +73,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (text) drafts.set(sessionId, text)
     else drafts.delete(sessionId)
   }, [sessionId, text])
+
+  useEffect(() => {
+    attachedRef.current = attached
+  }, [attached])
+
+  // Revoga os object URLs ainda pendurados ao desmontar o composer.
+  useEffect(() => {
+    return () => {
+      for (const a of attachedRef.current) URL.revokeObjectURL(a.previewUrl)
+    }
+  }, [])
 
   // Auto-grow do textarea até um teto; depois disso, scroll interno.
   useEffect(() => {
@@ -80,12 +102,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // na posição do cursor — a CLI claude anexa a imagem a partir do caminho colado.
   // Nunca submete: o usuário revisa e aperta Enter.
   async function ingestImages(files: File[]) {
-    const saved: { path: string; name: string }[] = []
+    const saved: Attachment[] = []
     for (const file of files) {
       try {
         const buf = await file.arrayBuffer()
         const path = await sessionsApi.saveImage(sessionId, buf, file.type)
-        saved.push({ path, name: file.name || path.split('/').pop() || 'imagem' })
+        // Só cria o object URL após o save dar certo — evita vazar URL em erro.
+        saved.push({
+          path,
+          name: file.name || path.split('/').pop() || 'imagem',
+          previewUrl: URL.createObjectURL(file),
+        })
       } catch (err) {
         console.error('[composer] falha ao salvar imagem colada/arrastada:', err)
       }
@@ -106,7 +133,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       })
       return value
     })
-    setAttached((a) => [...a, ...saved.map((s) => s.name)])
+    setAttached((a) => [...a, ...saved])
+  }
+
+  function removeAttachment(i: number) {
+    const target = attachedRef.current[i]
+    if (target) URL.revokeObjectURL(target.previewUrl)
+    setAttached((a) => a.filter((_, j) => j !== i))
+  }
+
+  function clearAttachments() {
+    for (const a of attachedRef.current) URL.revokeObjectURL(a.previewUrl)
+    setAttached([])
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -138,7 +176,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (value.trim().length === 0) return
     onSend(value)
     setText('')
-    setAttached([])
+    clearAttachments()
     drafts.delete(sessionId)
     refocus()
   }
@@ -148,7 +186,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (value.trim().length === 0) return
     onInsert(value)
     setText('')
-    setAttached([])
+    clearAttachments()
     drafts.delete(sessionId)
     refocus()
   }
@@ -162,18 +200,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 pb-1 pt-2">
       {toolbar}
       {attached.length > 0 && (
-        <div className="mb-1 flex flex-wrap gap-1 px-1">
-          {attached.map((name, i) => (
+        <div className="mb-1 flex flex-wrap gap-1.5 px-1">
+          {attached.map((att, i) => (
             <span
-              key={`${name}-${i}`}
-              className="flex items-center gap-1 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+              key={`${att.name}-${i}`}
+              className="flex items-center gap-1.5 rounded bg-[var(--color-surface-2)] py-0.5 pl-0.5 pr-1.5 text-[10px] text-[var(--color-text-dim)]"
               title="Imagem anexada — o caminho foi inserido no prompt"
             >
-              <Icon as={ImageIcon} size={10} className="text-[var(--color-accent)]" />
-              {name}
+              <img
+                src={att.previewUrl}
+                alt={att.name}
+                className="h-7 w-7 rounded border border-[var(--color-border)] object-cover"
+              />
+              <span className="max-w-32 truncate">{att.name}</span>
               <button
                 type="button"
-                onClick={() => setAttached((a) => a.filter((_, j) => j !== i))}
+                onClick={() => removeAttachment(i)}
                 className="hover:text-[var(--color-text)]"
                 title="Remover indicador (não apaga o caminho do prompt)"
               >

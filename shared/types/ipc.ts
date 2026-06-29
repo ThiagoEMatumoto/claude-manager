@@ -1,6 +1,11 @@
 // Tipos compartilhados main ↔ renderer via contextBridge.
 // Toda feature nova adiciona seus tipos aqui e estende `Api` no preload.
 
+// Tipos do Chat View (Fase 5) moram em ./chat e são re-exportados aqui pra que os
+// consumidores sigam importando tudo de '@shared/types/ipc'.
+export type { ChatMessage, ChatTranscript, ChatTranscriptUpdate } from './chat'
+import type { ChatTranscript, ChatTranscriptUpdate } from './chat'
+
 export type LinkKind = 'inside' | 'symlink' | 'external'
 
 export interface Project {
@@ -1575,6 +1580,15 @@ export interface Api {
     watchGlobalActivity(): void
     unwatchGlobalActivity(): void
     onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void
+  }
+  chat: {
+    /** Read inicial: resolve cc_session_id → transcript → lista ordenada de mensagens. */
+    getTranscript(sessionId: string): Promise<ChatTranscript>
+    /** Começa a observar o JSONL da sessão; emite chat:transcript-update em cada mudança. */
+    watch(sessionId: string): void
+    /** Para o watcher (também é chamado automaticamente no pty:exit). */
+    unwatch(sessionId: string): void
+    onTranscriptUpdate(handler: (event: ChatTranscriptUpdate) => void): () => void
   }
   shell: {
     openPath(path: string): Promise<void>

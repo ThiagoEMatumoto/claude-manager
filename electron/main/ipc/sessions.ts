@@ -26,6 +26,7 @@ import {
 } from '../services/session-activity'
 import { getMcpRuntime } from '../services/mcp/server'
 import { mcpClientConfigPath } from '../services/mcp/config'
+import { chatTranscriptService } from '../services/chat-transcript-service'
 import {
   buildImageFilename,
   isImageTempFile,
@@ -38,6 +39,7 @@ import type {
   ResumeSessionInput,
   SessionSummary,
   LiveSessionInfo,
+  ChatTranscript,
 } from '../../../shared/types/ipc'
 
 interface SessionRow {
@@ -374,6 +376,10 @@ export function registerSessionIpc(): void {
       // Limpa as imagens temporárias coladas/arrastadas nesta sessão — a CLI já
       // as anexou na entrega; o path injetado não serve depois do exit.
       sweepImageTemps((name) => isSessionImageTempFile(name, e.sessionId))
+
+      // Para o watcher do transcript do Chat View desta sessão (evita leak de
+      // chokidar/interval após a PTY morrer). No-op se ninguém estava observando.
+      chatTranscriptService.unwatch(e.sessionId)
 
       // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
       // reportado conclusão (status ainda vivo: 'running' OU 'needs_input'), o
@@ -834,5 +840,34 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('session:activity:unwatch-global', () => {
     sessionActivityService.unwatchGlobal()
+  })
+
+  // ===== Chat View (Fase 5a): leitura/observação do transcript JSONL =====
+  // O renderer só tem o sessionId INTERNO (sessions.id); resolvemos o cc_session_id
+  // (id da sessão Claude Code) aqui — é ele que acha o transcript no disco.
+  const resolveCcSessionId = (sessionId: string): string | null => {
+    const row = getDb()
+      .prepare('SELECT cc_session_id FROM sessions WHERE id = ?')
+      .get(sessionId) as { cc_session_id: string | null } | undefined
+    return row?.cc_session_id ?? null
+  }
+
+  ipcMain.handle('chat:get-transcript', async (_e, sessionId: string): Promise<ChatTranscript> => {
+    const read = await chatTranscriptService.read(resolveCcSessionId(sessionId))
+    return {
+      sessionId,
+      ccSessionId: read.ccSessionId,
+      path: read.path,
+      mtimeMs: read.mtimeMs,
+      messages: read.messages,
+    }
+  })
+
+  ipcMain.handle('chat:watch', (_e, sessionId: string) => {
+    chatTranscriptService.watch(sessionId, resolveCcSessionId(sessionId))
+  })
+
+  ipcMain.handle('chat:unwatch', (_e, sessionId: string) => {
+    chatTranscriptService.unwatch(sessionId)
   })
 }

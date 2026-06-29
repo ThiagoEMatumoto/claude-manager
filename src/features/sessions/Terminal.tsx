@@ -14,10 +14,11 @@ import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { sessionsApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
-import { useAppStore } from '@/store/appStore'
+import { useAppStore, type PaneMode } from '@/store/appStore'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
+import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
@@ -33,6 +34,10 @@ interface Props {
   projectName: string
   projectIcon?: string | null
   projectColor?: string | null
+  // Display da pane (híbrido): 'terminal' mostra o xterm; 'chat' mostra o ChatView
+  // renderizado do transcript com o xterm/PTY vivo por baixo. Default 'terminal'.
+  mode?: PaneMode
+  onToggleMode?: () => void
   onClose: () => void
   onTitleChange?: (title: string) => void
   onReopen?: () => void
@@ -104,6 +109,8 @@ export function Terminal({
   projectName,
   projectIcon,
   projectColor,
+  mode = 'terminal',
+  onToggleMode,
   onClose,
   onTitleChange,
   onReopen,
@@ -135,6 +142,7 @@ export function Terminal({
   const [pastePreview, setPastePreview] = useState<string | null>(null)
   const [multilineActive, setMultilineActive] = useState(false)
   const composerRef = useRef<ComposerHandle>(null)
+  const chatViewRef = useRef<ChatViewHandle>(null)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   // O key handler do xterm é registrado uma vez (no mount); uma ref evita ler um
   // `activity` stale ao decidir interceptar as setas.
@@ -283,6 +291,9 @@ export function Terminal({
   function sendPrompt(text: string) {
     insertPrompt(text)
     write('\r')
+    // Eco otimista: em modo chat, a bolha do usuário aparece na hora; o ChatView
+    // a reconcilia quando o transcript de disco alcança (ver chat-logic).
+    if (mode === 'chat') chatViewRef.current?.pushEcho(text)
   }
 
   function commitRename() {
@@ -708,6 +719,34 @@ export function Terminal({
               {error}
             </span>
           )}
+          {onToggleMode && (
+            <div className="inline-flex overflow-hidden rounded border border-[var(--color-border)]">
+              <button
+                type="button"
+                onClick={() => mode !== 'terminal' && onToggleMode()}
+                title="Terminal cru (PTY)"
+                className={`px-2 py-0.5 transition ${
+                  mode === 'terminal'
+                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                    : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                Terminal
+              </button>
+              <button
+                type="button"
+                onClick={() => mode !== 'chat' && onToggleMode()}
+                title="Chat renderizado do transcript (PTY segue vivo por baixo)"
+                className={`px-2 py-0.5 transition ${
+                  mode === 'chat'
+                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                    : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                Chat
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -767,7 +806,14 @@ export function Terminal({
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={hostRef} className="h-full bg-[var(--color-bg)] p-2" />
+        {/* xterm SEMPRE montado: em modo chat só ocultamos visualmente (o
+            sendPrompt usa xterm.paste, então o terminal precisa seguir vivo). */}
+        <div
+          ref={hostRef}
+          className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'hidden' : ''}`}
+        />
+
+        {mode === 'chat' && <ChatView ref={chatViewRef} sessionId={session.id} />}
 
         {searchOpen && (
           <div

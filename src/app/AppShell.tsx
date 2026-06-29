@@ -56,6 +56,7 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
   const closePane = useAppStore((s) => s.closePane)
   const openSession = useAppStore((s) => s.openSession)
   const endSession = useAppStore((s) => s.endSession)
+  const setPaneMode = useAppStore((s) => s.setPaneMode)
   // Busca a pane no store pelo id do painel (= paneId). Após api.fromJSON do
   // restore, os params serializados no JSON podem estar stale (session/repo são
   // recriados pelo resume), então a fonte da verdade é sempre o store. Fallback
@@ -73,6 +74,8 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       projectName={pane.projectName ?? ''}
       projectIcon={pane.projectIcon}
       projectColor={pane.projectColor}
+      mode={pane.mode}
+      onToggleMode={() => setPaneMode(pane.paneId, pane.mode === 'chat' ? 'terminal' : 'chat')}
       onClose={() => closePane(pane.paneId)}
       onTitleChange={(t) => props.api.setTitle(t)}
       onReopen={() => {

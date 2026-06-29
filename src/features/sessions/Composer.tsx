@@ -6,10 +6,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { CornerDownLeft } from 'lucide-react'
+import { CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
 import { resolveComposerKey } from './composer-keys'
+import { insertPathToken, pickImageFiles, pickImageItems } from './image-paste'
 
 export interface ComposerHandle {
   focus: () => void
@@ -43,6 +45,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
+  // Feedback discreto das imagens anexadas no draft atual (nomes).
+  const [attached, setAttached] = useState<string[]>([])
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const loadPrefs = useSessionPrefsStore((s) => s.load)
@@ -72,11 +76,69 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     requestAnimationFrame(() => innerRef.current?.focus())
   }
 
+  // Salva cada imagem como temp (binário, via IPC) e injeta o(s) path(s) absoluto(s)
+  // na posição do cursor — a CLI claude anexa a imagem a partir do caminho colado.
+  // Nunca submete: o usuário revisa e aperta Enter.
+  async function ingestImages(files: File[]) {
+    const saved: { path: string; name: string }[] = []
+    for (const file of files) {
+      try {
+        const buf = await file.arrayBuffer()
+        const path = await sessionsApi.saveImage(sessionId, buf, file.type)
+        saved.push({ path, name: file.name || path.split('/').pop() || 'imagem' })
+      } catch (err) {
+        console.error('[composer] falha ao salvar imagem colada/arrastada:', err)
+      }
+    }
+    if (saved.length === 0) return
+    const el = innerRef.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? text.length
+    const joined = saved.map((s) => s.path).join(' ')
+    setText((cur) => {
+      const { value, cursor } = insertPathToken(cur, joined, start, end)
+      requestAnimationFrame(() => {
+        const node = innerRef.current
+        if (node) {
+          node.focus()
+          node.setSelectionRange(cursor, cursor)
+        }
+      })
+      return value
+    })
+    setAttached((a) => [...a, ...saved.map((s) => s.name)])
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const dt = e.clipboardData
+    if (!dt) return
+    let files = pickImageItems(Array.from(dt.items))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => f != null)
+    if (files.length === 0) files = pickImageFiles(Array.from(dt.files))
+    if (files.length === 0) return // texto comum → deixa o paste nativo do textarea
+    e.preventDefault()
+    void ingestImages(files)
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    const files = pickImageFiles(Array.from(e.dataTransfer?.files ?? []))
+    if (files.length === 0) return
+    e.preventDefault()
+    void ingestImages(files)
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLTextAreaElement>) {
+    // Sem preventDefault no dragover o onDrop nunca dispara.
+    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault()
+  }
+
   function submit() {
     const value = text
     if (value.trim().length === 0) return
     onSend(value)
     setText('')
+    setAttached([])
     drafts.delete(sessionId)
     refocus()
   }
@@ -86,6 +148,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (value.trim().length === 0) return
     onInsert(value)
     setText('')
+    setAttached([])
     drafts.delete(sessionId)
     refocus()
   }
@@ -98,11 +161,36 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   return (
     <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 pb-1 pt-2">
       {toolbar}
+      {attached.length > 0 && (
+        <div className="mb-1 flex flex-wrap gap-1 px-1">
+          {attached.map((name, i) => (
+            <span
+              key={`${name}-${i}`}
+              className="flex items-center gap-1 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+              title="Imagem anexada — o caminho foi inserido no prompt"
+            >
+              <Icon as={ImageIcon} size={10} className="text-[var(--color-accent)]" />
+              {name}
+              <button
+                type="button"
+                onClick={() => setAttached((a) => a.filter((_, j) => j !== i))}
+                className="hover:text-[var(--color-text)]"
+                title="Remover indicador (não apaga o caminho do prompt)"
+              >
+                <Icon as={X} size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <textarea
           ref={innerRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={handlePaste}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
           rows={2}
           placeholder="Escreva um prompt — vai pro mesmo claude. Setas, clique e seleção funcionam."
           className="max-h-48 min-h-[2.5rem] flex-1 resize-none overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)] focus:border-[var(--color-accent)]"

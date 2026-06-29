@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../services/db'
@@ -26,6 +26,11 @@ import {
 } from '../services/session-activity'
 import { getMcpRuntime } from '../services/mcp/server'
 import { mcpClientConfigPath } from '../services/mcp/config'
+import {
+  buildImageFilename,
+  isImageTempFile,
+  isSessionImageTempFile,
+} from '../services/image-temp'
 import { mapLiveSessionRepo, type LiveSessionJoinRow } from './live-session-mapping'
 import type {
   Session,
@@ -157,6 +162,51 @@ function writeTempPromptFile(prefix: string, content: string): string {
   const tmpPath = join(tmpDir, `${prefix}-${Date.now()}.md`)
   writeFileSync(tmpPath, content, 'utf8')
   return tmpPath
+}
+
+function tempDir(): string {
+  return join(app.getPath('userData'), 'tmp')
+}
+
+// Grava uma imagem colada/arrastada no composer como BINÁRIO em
+// <userData>/tmp/img-<sessionId>-<uuid>.<ext> e devolve o path absoluto. O
+// renderer injeta esse path como texto no prompt (a CLI claude anexa a imagem a
+// partir do caminho). Escreve um Uint8Array — nunca trata os bytes como utf8,
+// que corromperia o arquivo.
+function saveImageTemp(sessionId: string, bytes: ArrayBuffer | Uint8Array, mime: string): string {
+  const dir = tempDir()
+  mkdirSync(dir, { recursive: true })
+  const tmpPath = join(dir, buildImageFilename({ id: randomUUID(), mime, sessionId }))
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  writeFileSync(tmpPath, data)
+  return tmpPath
+}
+
+// Remove temporários de imagem que casam com o predicado. Best-effort: se o
+// diretório não existe ainda (nenhuma imagem foi colada) ou um arquivo some numa
+// corrida, ignora — limpeza nunca pode derrubar o boot/exit.
+function sweepImageTemps(predicate: (filename: string) => boolean): void {
+  let names: string[]
+  const dir = tempDir()
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!predicate(name)) continue
+    try {
+      unlinkSync(join(dir, name))
+    } catch {
+      // já removido / em uso — segue
+    }
+  }
+}
+
+// Sweep de boot: num processo fresco nenhum compose referencia temps de imagem,
+// então todos são órfãos. Chamado uma vez no app.whenReady (index.ts).
+export function sweepOrphanImageTemps(): void {
+  sweepImageTemps(isImageTempFile)
 }
 
 // Conteúdo do contexto da feature (header + bloco tracking + seções-chave) vem
@@ -320,6 +370,10 @@ export function registerSessionIpc(): void {
         "UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'",
       ).run(e.exitCode === 0 ? 'exited' : 'crashed', Date.now(), e.sessionId)
       broadcast('pty:exit', e)
+
+      // Limpa as imagens temporárias coladas/arrastadas nesta sessão — a CLI já
+      // as anexou na entrega; o path injetado não serve depois do exit.
+      sweepImageTemps((name) => isSessionImageTempFile(name, e.sessionId))
 
       // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
       // reportado conclusão (status ainda vivo: 'running' OU 'needs_input'), o
@@ -732,6 +786,12 @@ export function registerSessionIpc(): void {
   ipcMain.handle('sessions:write', (_e, sessionId: string, data: string) => {
     ptyManager.write(sessionId, data)
   })
+
+  ipcMain.handle(
+    'sessions:save-image',
+    (_e, sessionId: string, bytes: ArrayBuffer | Uint8Array, mime: string): string =>
+      saveImageTemp(sessionId, bytes, mime),
+  )
 
   ipcMain.handle('sessions:resize', (_e, sessionId: string, cols: number, rows: number) => {
     ptyManager.resize(sessionId, cols, rows)

@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, SquarePen, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -16,7 +16,7 @@ import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
-import { PromptComposer } from './PromptComposer'
+import { Composer, type ComposerHandle } from './Composer'
 import {
   ModelPill,
   MODEL_ALIASES,
@@ -138,7 +138,7 @@ export function Terminal({
   const [searchQuery, setSearchQuery] = useState('')
   const [pastePreview, setPastePreview] = useState<string | null>(null)
   const [multilineActive, setMultilineActive] = useState(false)
-  const [composerOpen, setComposerOpen] = useState(false)
+  const composerRef = useRef<ComposerHandle>(null)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   // O key handler do xterm é registrado uma vez (no mount); uma ref evita ler um
   // `activity` stale ao decidir interceptar as setas.
@@ -424,9 +424,9 @@ export function Terminal({
         return false
       }
 
-      // Compose box: abre o editor de prompt (default Ctrl+Shift+E).
+      // Compose box: foca o dock do composer (default Ctrl+Shift+E).
       if (matchCombo(e, resolveCombo('terminal.compose', kbOverrides))) {
-        setComposerOpen(true)
+        composerRef.current?.focus()
         return false
       }
 
@@ -689,17 +689,6 @@ export function Terminal({
               onSelectEffort={selectEffort}
             />
           )}
-          {!exited && (
-            <button
-              type="button"
-              onClick={() => setComposerOpen(true)}
-              title="Compor prompt num editor (Ctrl+Shift+E) — navegação completa por setas, clique e seleção"
-              aria-label="Compor prompt"
-              className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
-            >
-              <Icon as={SquarePen} size={13} />
-            </button>
-          )}
           <button
             type="button"
             onClick={onClose}
@@ -760,17 +749,6 @@ export function Terminal({
 
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="h-full bg-[var(--color-bg)] p-2" />
-
-        <PromptComposer
-          open={composerOpen}
-          onClose={() => {
-            setComposerOpen(false)
-            xtermRef.current?.focus()
-          }}
-          onSend={sendPrompt}
-          onInsert={insertPrompt}
-        />
-
 
         {searchOpen && (
           <div
@@ -872,6 +850,10 @@ export function Terminal({
           </div>
         )}
       </div>
+
+      {!exited && (
+        <Composer sessionId={session.id} ref={composerRef} onSend={sendPrompt} onInsert={insertPrompt} />
+      )}
 
       {menu && (
         <div

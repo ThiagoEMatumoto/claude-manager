@@ -1,15 +1,34 @@
 // Tipos do Chat View (Fase 5). O backend (F5a) lê/parseia/observa o transcript
 // JSONL da sessão e expõe estas formas por IPC; a UI (F5b) as consome.
 
+// Uma pergunta de AskUserQuestion. Espelha input.questions[] do transcript:
+// header curto + a pergunta + opções (label em destaque, description abaixo).
+export interface ChatQuestion {
+  question: string
+  header: string
+  multiSelect: boolean
+  options: { label: string; description: string }[]
+}
+
 // Uma mensagem renderizável do chat. A lista é ORDENADA na ordem do transcript
 // (ordem das linhas + ordem dos blocos de content dentro de cada linha). Uma
 // única linha assistant/user pode gerar várias mensagens (texto + tool_use, ou
 // texto + tool_result).
+//
+// Os momentos interativos do claude (AskUserQuestion / ExitPlanMode) ganham kinds
+// próprios em vez de cair como tool_use/tool_result genéricos. A pergunta/plano
+// vem do tool_use (assistant); a resposta/decisão vem do tool_result seguinte
+// (user), linkada por forId == id. A UI funde os dois (mostra a opção escolhida /
+// o estado de aprovação no mesmo card) e detecta pendência (tool_use sem result).
 export type ChatMessage =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
   | { kind: 'tool_result'; forId: string; content: string; isError: boolean }
+  | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
+  | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
+  | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }
+  | { kind: 'plan_decision'; forId: string; approved: boolean }
 
 // Retorno do read inicial (chat:get-transcript). path/mtimeMs são null quando a
 // sessão ainda não tem transcript no disco (recém-spawnada).

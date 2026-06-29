@@ -3,7 +3,7 @@
 
 // Tipos do Chat View (Fase 5) moram em ./chat e são re-exportados aqui pra que os
 // consumidores sigam importando tudo de '@shared/types/ipc'.
-export type { ChatMessage, ChatTranscript, ChatTranscriptUpdate } from './chat'
+export type { ChatMessage, ChatQuestion, ChatTranscript, ChatTranscriptUpdate } from './chat'
 import type { ChatTranscript, ChatTranscriptUpdate } from './chat'
 
 export type LinkKind = 'inside' | 'symlink' | 'external'

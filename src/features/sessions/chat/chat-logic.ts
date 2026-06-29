@@ -37,6 +37,38 @@ export function countUserMessages(messages: ChatMessage[]): number {
   return n
 }
 
+// Resolução dos momentos interativos: liga cada ask_user_question/exit_plan_mode
+// (por id) à sua resposta/decisão posterior (por forId). A UI usa isso pra mostrar
+// a opção escolhida / o estado de aprovação no MESMO card e pra não renderizar a
+// mensagem de resposta solta.
+export interface InteractiveResolution {
+  answers: Map<string, Record<string, string>> // id da pergunta → mapa pergunta→opção
+  plans: Map<string, boolean> // id do plano → aprovado
+}
+
+export function resolveInteractive(messages: ChatMessage[]): InteractiveResolution {
+  const answers = new Map<string, Record<string, string>>()
+  const plans = new Map<string, boolean>()
+  for (const m of messages) {
+    if (m.kind === 'ask_user_question_answered') answers.set(m.forId, m.answers)
+    else if (m.kind === 'plan_decision') plans.set(m.forId, m.approved)
+  }
+  return { answers, plans }
+}
+
+// 'question' | 'plan' quando o ÚLTIMO momento interativo do transcript ainda não
+// tem resposta/decisão (claude aguardando o usuário); null caso contrário. Espelha
+// o critério "tool_use de AskUserQuestion/ExitPlanMode sem tool_result depois".
+export function pendingInteractive(messages: ChatMessage[]): 'question' | 'plan' | null {
+  const { answers, plans } = resolveInteractive(messages)
+  let pending: 'question' | 'plan' | null = null
+  for (const m of messages) {
+    if (m.kind === 'ask_user_question') pending = answers.has(m.id) ? null : 'question'
+    else if (m.kind === 'exit_plan_mode') pending = plans.has(m.id) ? null : 'plan'
+  }
+  return pending
+}
+
 // resolveAt de um eco novo: resolve quando a contagem de usuário no disco chega a
 // (contagem atual + ecos já pendentes + 1). O +pendingCount evita que o disco de
 // um envio resolva o eco de outro envio ainda não gravado.

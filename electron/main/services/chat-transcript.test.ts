@@ -122,3 +122,188 @@ describe('parseChatMessages', () => {
     expect(parseChatMessages('   \n  \n')).toEqual([])
   })
 })
+
+// Momentos interativos: ExitPlanMode (aprovado), AskUserQuestion (respondido) e
+// um AskUserQuestion PENDENTE (tool_use sem tool_result depois). O toolUseResult é
+// IRMÃO de message no nível da linha (não dentro de content).
+const INTERACTIVE_FIXTURE = [
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'Plan it' } }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'plan_1',
+          name: 'ExitPlanMode',
+          input: { plan: '# My Plan\n\nDo the thing.', allowedPrompts: ['edit'] },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'plan_1', content: 'User has approved your plan. You can now start coding.' }],
+    },
+    toolUseResult: { plan: '# My Plan\n\nDo the thing.', isAgent: false, filePath: '/tmp/p.md' },
+  }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'ask_1',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                question: 'Which deliverable?',
+                header: 'Deliverable',
+                multiSelect: false,
+                options: [
+                  { label: 'Diagnosis', description: 'just analysis' },
+                  { label: 'Both', description: 'analysis + code' },
+                ],
+              },
+              {
+                question: 'Top priority?',
+                header: 'Priority',
+                multiSelect: true,
+                options: [{ label: 'Reliability', description: 'proof' }],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'ask_1', content: 'Your questions have been answered.' }],
+    },
+    toolUseResult: {
+      answers: { 'Which deliverable?': 'Both', 'Top priority?': 'Reliability' },
+    },
+  }),
+  // PENDENTE: tool_use de AskUserQuestion sem tool_result depois.
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'ask_pending',
+          name: 'AskUserQuestion',
+          input: { questions: [{ question: 'Proceed?', header: 'Go', multiSelect: false, options: [{ label: 'Yes', description: '' }] }] },
+        },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — interactive prompts', () => {
+  const m = parseChatMessages(INTERACTIVE_FIXTURE)
+
+  it('emits dedicated kinds (not generic tool_use/tool_result)', () => {
+    expect(m.map((x) => x.kind)).toEqual([
+      'user',
+      'exit_plan_mode',
+      'plan_decision',
+      'ask_user_question',
+      'ask_user_question_answered',
+      'ask_user_question', // pendente
+    ])
+  })
+
+  it('parses ExitPlanMode plan + allowedPrompts and its approval', () => {
+    expect(m[1]).toEqual({
+      kind: 'exit_plan_mode',
+      id: 'plan_1',
+      plan: '# My Plan\n\nDo the thing.',
+      allowedPrompts: ['edit'],
+    })
+    expect(m[2]).toEqual({ kind: 'plan_decision', forId: 'plan_1', approved: true })
+  })
+
+  it('parses AskUserQuestion questions/options and the answers map', () => {
+    const ask = m[3]
+    expect(ask.kind).toBe('ask_user_question')
+    if (ask.kind !== 'ask_user_question') throw new Error('narrow')
+    expect(ask.id).toBe('ask_1')
+    expect(ask.questions).toHaveLength(2)
+    expect(ask.questions[0]).toEqual({
+      question: 'Which deliverable?',
+      header: 'Deliverable',
+      multiSelect: false,
+      options: [
+        { label: 'Diagnosis', description: 'just analysis' },
+        { label: 'Both', description: 'analysis + code' },
+      ],
+    })
+    expect(ask.questions[1].multiSelect).toBe(true)
+    expect(m[4]).toEqual({
+      kind: 'ask_user_question_answered',
+      forId: 'ask_1',
+      answers: { 'Which deliverable?': 'Both', 'Top priority?': 'Reliability' },
+    })
+  })
+
+  it('leaves a pending AskUserQuestion without an answer message', () => {
+    const last = m[5]
+    expect(last.kind).toBe('ask_user_question')
+    if (last.kind !== 'ask_user_question') throw new Error('narrow')
+    expect(last.id).toBe('ask_pending')
+    expect(m.some((x) => x.kind === 'ask_user_question_answered' && x.forId === 'ask_pending')).toBe(
+      false,
+    )
+  })
+
+  it('marks a non-approved plan decision (rejection/feedback)', () => {
+    const rejected = parseChatMessages(
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'plan_r', name: 'ExitPlanMode', input: { plan: 'P' } }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'plan_r',
+                content: "The user doesn't want to proceed with this plan.",
+              },
+            ],
+          },
+        }),
+      ].join('\n'),
+    )
+    expect(rejected[1]).toEqual({ kind: 'plan_decision', forId: 'plan_r', approved: false })
+  })
+
+  it('defaults allowedPrompts to null when absent', () => {
+    const [plan] = parseChatMessages(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'p', name: 'ExitPlanMode', input: { plan: 'X' } }],
+        },
+      }),
+    )
+    expect(plan).toEqual({ kind: 'exit_plan_mode', id: 'p', plan: 'X', allowedPrompts: null })
+  })
+})

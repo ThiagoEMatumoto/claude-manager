@@ -2,6 +2,7 @@ import { Clock } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
+import { EffortPill } from './EffortPill'
 import { isPendingEmpty, type PendingSelection } from './model-queue'
 
 interface Props {
@@ -21,10 +22,10 @@ function pendingLabel(pending: PendingSelection): string {
   return parts.join(' · ')
 }
 
-// Barra de controles do composer: switcher de modelo/esforço (reusa ModelPill) +
-// affordance de fila. O switcher fica disponível mesmo com a sessão ocupada — a
-// troca é enfileirada e aplicada no próximo idle (sem desabilitar o controle).
-// Slot para o botão de anexar imagem (Fase 4) virá à direita.
+// Barra de controles do composer: dois controles distintos (Modelo · Esforço,
+// estilo Claude Desktop) + affordance de fila. Os switchers ficam disponíveis
+// mesmo com a sessão ocupada — a troca é enfileirada e aplicada no próximo idle
+// (sem desabilitar o controle). Slot para o botão de anexar imagem virá à direita.
 export function ComposerToolbar({
   activity,
   canSwitch,
@@ -41,8 +42,8 @@ export function ComposerToolbar({
         canSwitch={canSwitch}
         pending={pending}
         onSelectModel={onSelectModel}
-        onSelectEffort={onSelectEffort}
       />
+      <EffortPill canSwitch={canSwitch} pending={pending} onSelectEffort={onSelectEffort} />
       {hasPending && (
         <span
           className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]"

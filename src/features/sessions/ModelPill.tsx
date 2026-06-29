@@ -3,7 +3,7 @@ import { ChevronDown, Clock, Loader, Sparkles } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Menu, type MenuSection } from '@/components/ui/Menu'
 import type { SessionActivity } from '../../../shared/types/ipc'
-import { isPendingEmpty, type PendingSelection } from './model-queue'
+import type { PendingSelection } from './model-queue'
 
 // Whitelists literais — são a ÚNICA fonte do que pode ser injetado no PTY
 // (/model e /effort). Nunca interpolar texto livre nesses comandos.
@@ -40,16 +40,12 @@ interface Props {
   /** Troca escolhida enquanto a sessão estava ocupada, aguardando o próximo idle. */
   pending: PendingSelection
   onSelectModel: (alias: ModelAlias) => void
-  onSelectEffort: (level: EffortLevel) => void
 }
 
-export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelectEffort }: Props) {
+export function ModelPill({ activity, canSwitch, pending, onSelectModel }: Props) {
   const [open, setOpen] = useState(false)
   // Alvo da troca otimista de modelo; null = sem troca em voo.
   const [switching, setSwitching] = useState<ModelAlias | null>(null)
-  // Esforço escolhido pelo usuário nesta pane (otimista, sem confirmação via
-  // transcript — o claude não persiste o effort no JSONL).
-  const [effort, setEffort] = useState<EffortLevel | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const detected = modelAliasFromId(activity?.model)
@@ -79,14 +75,7 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelec
     }
   }
 
-  function pickEffort(level: EffortLevel) {
-    onSelectEffort(level)
-    // O claude não persiste effort no transcript — guardamos o último escolhido
-    // pra exibir mesmo após o flush da fila (a prop `pending` some ao aplicar).
-    setEffort(level)
-  }
-
-  const hasPending = !isPendingEmpty(pending)
+  const hasPending = pending.model !== undefined
 
   const sections: MenuSection[] = [
     {
@@ -95,14 +84,6 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelec
         label: MODEL_LABELS[alias],
         active: (switching ?? pending.model ?? detected) === alias,
         onClick: () => pickModel(alias),
-      })),
-    },
-    {
-      title: 'Esforço',
-      items: EFFORT_LEVELS.map((level) => ({
-        label: level,
-        active: (pending.effort ?? effort) === level,
-        onClick: () => pickEffort(level),
       })),
     },
   ]
@@ -117,13 +98,11 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelec
   } else if (detected) {
     label = MODEL_LABELS[detected]
   } else if (activity?.model) {
-    label = activity.model.replace(/^claude-/, '').slice(0, 16)
+    label = activity.model.replace(/^claude-/, '')
   } else {
     label = 'modelo…'
     dim = true
   }
-  const shownEffort = pending.effort ?? effort
-  if (shownEffort) label += ` · ${shownEffort}`
 
   return (
     <Menu open={open} onClose={() => setOpen(false)} sections={sections}>
@@ -144,7 +123,7 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelec
           size={11}
           className={switching ? 'animate-spin' : 'text-[var(--color-accent)]'}
         />
-        <span className="max-w-32 truncate">{label}</span>
+        <span className="whitespace-nowrap">{label}</span>
         <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />
       </button>
     </Menu>

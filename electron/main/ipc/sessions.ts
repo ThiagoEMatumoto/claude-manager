@@ -64,6 +64,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // mas o main re-valida — nada fora desta lista chega à linha de comando.
 const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
 
+// Whitelist do --effort no spawn: espelha SPAWN_MODEL_WHITELIST. O valor vem do
+// renderer (segmented control / default persistido), mas o main re-valida — nada
+// fora desta lista chega à linha de comando.
+const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+
 // Whitelist do --permission-mode no spawn. Só os modos usados pelo handoff são
 // aceitos — NUNCA 'bypassPermissions' (a filha jamais sobe pulando permissões).
 // O main é a autoridade: qualquer outro valor é descartado (vira null = default).
@@ -172,6 +177,7 @@ export function buildSpawnInnerCmd(parts: {
   name: string
   mcpConfigArg: string
   model: string | null
+  effort?: string | null
   systemPromptFilePath: string | null
   permissionMode?: string | null
   disallowedTools?: string[] | null
@@ -179,6 +185,9 @@ export function buildSpawnInnerCmd(parts: {
   let innerCmd = `${parts.claudeCmd} --session-id ${parts.sessionId} -n ${shquote(parts.name)}${parts.mcpConfigArg}`
   if (parts.model) {
     innerCmd += ` --model ${shquote(parts.model)}`
+  }
+  if (parts.effort) {
+    innerCmd += ` --effort ${shquote(parts.effort)}`
   }
   if (parts.permissionMode) {
     innerCmd += ` --permission-mode ${shquote(parts.permissionMode)}`
@@ -389,6 +398,11 @@ export function registerSessionIpc(): void {
     const model =
       input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
 
+    // Effort inicial: mesma defesa em profundidade do model — só passa adiante se
+    // o valor passar na whitelist.
+    const effort =
+      input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
+
     // System-prompt anexado via --append-system-prompt-file vem de TRÊS fontes:
     //  - bloco de arquitetura do repo (se repoId; dá o "mapa" do repo no sistema),
     //  - contexto da feature (se featureId; Fase 6), e
@@ -444,6 +458,7 @@ export function registerSessionIpc(): void {
       name,
       mcpConfigArg: mcpConfigArg(),
       model,
+      effort,
       systemPromptFilePath,
       permissionMode,
       disallowedTools,

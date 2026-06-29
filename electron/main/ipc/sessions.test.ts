@@ -92,6 +92,16 @@ describe('buildSpawnInnerCmd', () => {
     expect(cmd).not.toContain('--model')
   })
 
+  it('anexa --effort quando há nível (já validado)', () => {
+    const cmd = buildSpawnInnerCmd({ ...base, effort: 'high' })
+    expect(cmd).toContain("--effort 'high'")
+  })
+
+  it('NÃO inclui --effort quando o nível é null/ausente', () => {
+    expect(buildSpawnInnerCmd({ ...base, effort: null })).not.toContain('--effort')
+    expect(buildSpawnInnerCmd(base)).not.toContain('--effort')
+  })
+
   it('anexa --permission-mode quando passado (handoff plan/auto-edits)', () => {
     expect(buildSpawnInnerCmd({ ...base, permissionMode: 'plan' })).toContain(
       "--permission-mode 'plan'",

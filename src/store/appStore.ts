@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
-import type { LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
+import type { EffortLevel, LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
 
 export type Area =
   | 'projects'
@@ -189,6 +189,8 @@ interface AppState {
     initialCommand?: string,
     // Modelo inicial ('opus' | 'sonnet' | 'haiku'); validado no main.
     model?: string,
+    // Effort inicial; validado no main contra whitelist.
+    effort?: EffortLevel,
     // Texto de system-prompt anexado via arquivo (--append-system-prompt-file).
     // Trailing/opcional: callers existentes omitem. Usado pelo handoff pra
     // entregar o prompt completo íntegro (sem quebrar no REPL).
@@ -318,6 +320,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     name,
     initialCommand,
     model,
+    effort,
     systemPromptText,
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
@@ -328,6 +331,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       name,
       initialCommand,
       model,
+      effort,
       systemPromptText,
     })
     set((s) => ({

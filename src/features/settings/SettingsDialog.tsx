@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Palette, Keyboard, Bell, Info, RefreshCw, Variable } from 'lucide-react'
+import { Settings, Palette, Keyboard, Bell, Info, RefreshCw, Variable, MessageSquare } from 'lucide-react'
 import { AboutTab } from './AboutTab'
 import { SyncTab } from './SyncTab'
 import { EnvVarsTab } from './EnvVarsTab'
@@ -19,6 +19,7 @@ import {
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
+import { useSessionPrefsStore, type KeyboardSendMode } from '@/lib/session-prefs-store'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
@@ -29,6 +30,7 @@ interface Props {
 
 type TabId =
   | 'general'
+  | 'session'
   | 'appearance'
   | 'shortcuts'
   | 'notifications'
@@ -38,6 +40,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string; icon: typeof Settings }[] = [
   { id: 'general', label: 'Geral', icon: Settings },
+  { id: 'session', label: 'Sessão/Chat', icon: MessageSquare },
   { id: 'appearance', label: 'Aparência', icon: Palette },
   { id: 'shortcuts', label: 'Atalhos', icon: Keyboard },
   { id: 'notifications', label: 'Notificações', icon: Bell },
@@ -82,6 +85,7 @@ export function SettingsDialog({ open, onClose }: Props) {
 
         <div className="min-w-0 flex-1">
           {tab === 'general' && <GeneralTab open={open} />}
+          {tab === 'session' && <SessionTab open={open} />}
           {tab === 'appearance' && <AppearanceTab open={open} />}
           {tab === 'shortcuts' && <ShortcutsTab />}
           {tab === 'notifications' && <NotificationsTab open={open} />}
@@ -404,6 +408,133 @@ function GeneralTab({ open }: { open: boolean }) {
             onChange={(e) => updateHeartbeatTtl(Number(e.target.value))}
             className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
           />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const SESSION_MODEL_OPTIONS = [
+  { value: '', label: 'Padrão' },
+  { value: 'opus', label: 'Opus' },
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'haiku', label: 'Haiku' },
+] as const
+
+const SESSION_EFFORT_OPTIONS = [
+  { value: '', label: 'Padrão' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'X-High' },
+  { value: 'max', label: 'Max' },
+] as const
+
+const KEYBOARD_OPTIONS: { value: KeyboardSendMode; label: string; hint: string }[] = [
+  { value: 'enter-sends', label: 'Enter envia', hint: 'Shift+Enter quebra linha' },
+  { value: 'enter-newline', label: 'Enter quebra linha', hint: 'Cmd/Ctrl+Enter envia' },
+]
+
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`px-3 py-1.5 text-xs transition ${
+            value === opt.value
+              ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+              : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function SessionTab({ open }: { open: boolean }) {
+  const defaultModel = useSessionPrefsStore((s) => s.defaultModel)
+  const defaultEffort = useSessionPrefsStore((s) => s.defaultEffort)
+  const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
+  const setDefaultModel = useSessionPrefsStore((s) => s.setDefaultModel)
+  const setDefaultEffort = useSessionPrefsStore((s) => s.setDefaultEffort)
+  const setKeyboardMode = useSessionPrefsStore((s) => s.setKeyboardMode)
+
+  useEffect(() => {
+    if (!open) return
+    void useSessionPrefsStore.getState().load()
+  }, [open])
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Defaults de novas sessões
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Modelo padrão</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Pré-selecionado ao abrir "Nova sessão". Padrão = sem --model.
+            </div>
+          </div>
+          <Segmented
+            options={SESSION_MODEL_OPTIONS}
+            value={defaultModel}
+            onChange={(v) => void setDefaultModel(v)}
+          />
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Esforço padrão</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Nível de raciocínio (--effort) pré-selecionado. Padrão = sem --effort.
+            </div>
+          </div>
+          <Segmented
+            options={SESSION_EFFORT_OPTIONS}
+            value={defaultEffort}
+            onChange={(v) => void setDefaultEffort(v)}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Teclado do chat
+        </div>
+        <div className="mb-2 text-xs text-[var(--color-text-dim)]">
+          Como a tecla Enter se comporta no composer (aplicado a partir do chat nativo).
+        </div>
+        <div className="space-y-1">
+          {KEYBOARD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => void setKeyboardMode(opt.value)}
+              className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left transition ${
+                keyboardMode === opt.value
+                  ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]'
+                  : 'border-[var(--color-border)] hover:border-[var(--color-text-dim)]'
+              }`}
+            >
+              <span className="text-sm text-[var(--color-text)]">{opt.label}</span>
+              <span className="text-xs text-[var(--color-text-dim)]">{opt.hint}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>

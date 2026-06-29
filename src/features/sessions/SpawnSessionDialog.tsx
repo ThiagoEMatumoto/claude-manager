@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { featuresApi } from '@/lib/ipc'
 import { suggestFeatures } from '@/features/features/fuzzy'
 import { STATUS_META } from '@/features/features/status'
-import type { Feature, Repo } from '../../../shared/types/ipc'
+import { useSessionPrefsStore } from '@/lib/session-prefs-store'
+import type { EffortLevel, Feature, Repo } from '../../../shared/types/ipc'
 
 // Opções do segmented control de modelo. '' = Padrão (sem --model no spawn).
 const MODEL_OPTIONS = [
@@ -15,16 +16,27 @@ const MODEL_OPTIONS = [
   { value: 'haiku', label: 'Haiku' },
 ] as const
 
+// Opções do segmented control de effort. '' = Padrão (sem --effort no spawn).
+const EFFORT_OPTIONS = [
+  { value: '', label: 'Padrão' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'X-High' },
+  { value: 'max', label: 'Max' },
+] as const
+
 interface Props {
   open: boolean
   onClose: () => void
   repo: Repo
   // Feature já existente neste projeto (filtradas por projeto do repo).
-  // Confirmar dispara o spawn com o name, featureId e model resolvidos.
+  // Confirmar dispara o spawn com o name, featureId, model e effort resolvidos.
   onConfirm: (
     name: string | undefined,
     featureId: string | undefined,
     model: string | undefined,
+    effort: EffortLevel | undefined,
   ) => void
 }
 
@@ -36,6 +48,8 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const [selectedFeature, setSelectedFeature] = useState<string>('')
   // Modelo inicial. '' = default do claude (não passa --model).
   const [model, setModel] = useState<string>('')
+  // Effort inicial. '' = default do claude (não passa --effort).
+  const [effort, setEffort] = useState<'' | EffortLevel>('')
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -43,7 +57,15 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     setName('')
     setObjective('')
     setSelectedFeature('')
-    setModel('')
+    // Pré-preenche modelo + effort com os defaults persistidos (Settings → Sessão/Chat).
+    void useSessionPrefsStore
+      .getState()
+      .load()
+      .then(() => {
+        const { defaultModel, defaultEffort } = useSessionPrefsStore.getState()
+        setModel(defaultModel)
+        setEffort(defaultEffort)
+      })
     // Features ligadas a este repo (linkagem (a) filtrada por repo).
     void featuresApi.list().then((all) => {
       setFeatures(all.filter((f) => f.repos.some((l) => l.repoId === repo.id)))
@@ -62,7 +84,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const featureId = selectedFeature || undefined
 
   function confirm() {
-    onConfirm(name.trim() || undefined, featureId, model || undefined)
+    onConfirm(name.trim() || undefined, featureId, model || undefined, effort || undefined)
     onClose()
   }
 
@@ -92,23 +114,45 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
           }}
         />
 
-        <div className="w-full">
-          <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Modelo</label>
-          <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
-            {MODEL_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setModel(opt.value)}
-                className={`px-3 py-1.5 text-xs transition ${
-                  model === opt.value
-                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
-                    : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Modelo</label>
+            <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+              {MODEL_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setModel(opt.value)}
+                  className={`px-3 py-1.5 text-xs transition ${
+                    model === opt.value
+                      ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                      : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Esforço</label>
+            <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+              {EFFORT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setEffort(opt.value)}
+                  className={`px-3 py-1.5 text-xs transition ${
+                    effort === opt.value
+                      ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                      : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

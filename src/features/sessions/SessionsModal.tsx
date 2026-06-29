@@ -94,7 +94,7 @@ export function SessionsModal({
         open={spawnOpen}
         onClose={() => setSpawnOpen(false)}
         repo={repo}
-        onConfirm={(name, featureId, model) => {
+        onConfirm={(name, featureId, model, effort) => {
           void openSession(
             repo,
             projectName,
@@ -105,6 +105,7 @@ export function SessionsModal({
             name,
             undefined,
             model,
+            effort,
           )
           setSpawnOpen(false)
           onClose()

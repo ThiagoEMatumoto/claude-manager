@@ -35,6 +35,10 @@ function writeSidebarCollapsed(collapsed: boolean): void {
   }
 }
 
+// Display da pane: terminal cru (xterm/PTY) ou chat renderizado do transcript. O
+// PTY segue vivo nos dois modos; chat é só uma camada de leitura por cima.
+export type PaneMode = 'terminal' | 'chat'
+
 export interface ActivePane {
   paneId: string
   session: Session
@@ -43,6 +47,37 @@ export interface ActivePane {
   projectName: string | null
   projectIcon: string | null
   projectColor: string | null
+  mode: PaneMode
+}
+
+// Memória leve do último modo por sessão (chave = ccSessionId), no mesmo padrão
+// localStorage do estado da sidebar. Sobrevive a resume/restore/remount sem ir ao
+// DB — o modo é preferência de visualização, não estado de sessão.
+const PANE_MODE_KEY = 'cm:pane-modes'
+
+function readPaneModes(): Record<string, PaneMode> {
+  try {
+    const raw = localStorage.getItem(PANE_MODE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, PaneMode>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function readPaneMode(ccSessionId: string | null): PaneMode {
+  if (!ccSessionId) return 'terminal'
+  return readPaneModes()[ccSessionId] ?? 'terminal'
+}
+
+function writePaneMode(ccSessionId: string | null, mode: PaneMode): void {
+  if (!ccSessionId) return
+  try {
+    const all = readPaneModes()
+    all[ccSessionId] = mode
+    localStorage.setItem(PANE_MODE_KEY, JSON.stringify(all))
+  } catch {
+    // localStorage indisponível — o modo segue só na pane em memória.
+  }
 }
 
 let savePanesTimer: ReturnType<typeof setTimeout> | null = null
@@ -144,6 +179,7 @@ function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane 
     projectName: item.projectName,
     projectIcon: item.projectIcon,
     projectColor: item.projectColor,
+    mode: readPaneMode(item.ccSessionId),
   }
 }
 
@@ -221,6 +257,8 @@ interface AppState {
     paneId?: string,
   ) => Promise<void>
   closePane: (paneId: string) => void
+  // Alterna/define o display da pane (terminal ⇄ chat) e lembra por sessão.
+  setPaneMode: (paneId: string, mode: PaneMode) => void
   // Kill EXPLÍCITO: mata a PTY e remove a pane correspondente da view (se houver).
   endSession: (sessionId: string) => void
   // Clique simples na lista: foca a pane se já exibida; senão resume/abre (sem
@@ -344,6 +382,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           projectName,
           projectIcon,
           projectColor,
+          mode: readPaneMode(session.ccSessionId ?? null),
         },
       ],
     }))
@@ -390,6 +429,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             projectName,
             projectIcon,
             projectColor,
+            mode: readPaneMode(ccSessionId),
           },
         ],
       }))
@@ -398,6 +438,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       resuming.delete(ccSessionId)
     }
+  },
+
+  setPaneMode: (paneId, mode) => {
+    set((s) => ({
+      panes: s.panes.map((p) => (p.paneId === paneId ? { ...p, mode } : p)),
+    }))
+    const pane = get().panes.find((p) => p.paneId === paneId)
+    writePaneMode(pane?.session.ccSessionId ?? null, mode)
   },
 
   // Detach, NÃO mata: só tira da view + persiste. A PTY sobrevive no main

@@ -445,13 +445,13 @@ function Segmented<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+    <div className="flex max-w-full flex-wrap overflow-hidden rounded-md border border-[var(--color-border)]">
       {options.map((opt) => (
         <button
           key={opt.value}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`px-3 py-1.5 text-xs transition ${
+          className={`shrink-0 px-3 py-1.5 text-xs transition ${
             value === opt.value
               ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
               : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
@@ -483,7 +483,7 @@ function SessionTab({ open }: { open: boolean }) {
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
           Defaults de novas sessões
         </div>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="min-w-0">
             <div className="text-sm text-[var(--color-text)]">Modelo padrão</div>
             <div className="text-xs text-[var(--color-text-dim)]">
@@ -497,7 +497,7 @@ function SessionTab({ open }: { open: boolean }) {
           />
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--color-border)] pt-3">
           <div className="min-w-0">
             <div className="text-sm text-[var(--color-text)]">Esforço padrão</div>
             <div className="text-xs text-[var(--color-text-dim)]">

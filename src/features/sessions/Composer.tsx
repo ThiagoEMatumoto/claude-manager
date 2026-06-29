@@ -10,7 +10,7 @@ import { CornerDownLeft, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
-import { resolveComposerKey } from './composer-keys'
+import { resolveComposerKey, resolveForwardKey } from './composer-keys'
 import { insertPathToken, pickImageFiles, pickImageItems } from './image-paste'
 
 export interface ComposerHandle {
@@ -32,6 +32,9 @@ interface Props {
   onSend: (text: string) => void
   // Injeta o texto SEM submeter (usuário revisa antes do Enter).
   onInsert: (text: string) => void
+  // Encaminha uma sequência ANSI crua direto pro PTY (modelo Warp: o xterm é
+  // display-only e o composer dirige a TUI do claude — setas, Ctrl+C, Esc, etc).
+  onForwardKey?: (seq: string) => void
   // Barra de controles acima do textarea (switcher de modelo, anexar, etc).
   // Slot agnóstico: o pai compõe o conteúdo (compartilhado entre terminal e chat).
   toolbar?: ReactNode
@@ -50,7 +53,7 @@ const MAX_HEIGHT = 192
 // resolvendo a dor do Enter/Shift+Enter do input nativo do claude no xterm. É
 // aditivo: o input direto na TUI continua funcionando.
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { sessionId, onSend, onInsert, toolbar },
+  { sessionId, onSend, onInsert, onForwardKey, toolbar },
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
@@ -234,11 +237,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           rows={2}
-          placeholder="Escreva um prompt — vai pro mesmo claude. Setas, clique e seleção funcionam."
+          placeholder="Escreva um prompt — vai pro mesmo claude. Vazio: setas/Esc/Ctrl+C dirigem a TUI."
           className="max-h-48 min-h-[2.5rem] flex-1 resize-none overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)] focus:border-[var(--color-accent)]"
           onKeyDown={(e) => {
             // Não deixa atalhos globais/terminal interceptarem enquanto compõe.
             e.stopPropagation()
+            // Modelo Warp: teclas de controle/navegação são encaminhadas pro PTY pra
+            // dirigir a TUI do claude (menus, y/n, Shift+Tab, interrupção). O textarea
+            // vazio é "modo de controle"; com texto, as teclas editam o draft.
+            if (onForwardKey) {
+              const fwd = resolveForwardKey(
+                {
+                  key: e.key,
+                  ctrl: e.ctrlKey,
+                  meta: e.metaKey,
+                  shift: e.shiftKey,
+                  alt: e.altKey,
+                },
+                text.trim().length === 0,
+              )
+              if ('seq' in fwd) {
+                e.preventDefault()
+                onForwardKey(fwd.seq)
+                return
+              }
+            }
             const action = resolveComposerKey(
               { key: e.key, shift: e.shiftKey, meta: e.metaKey, ctrl: e.ctrlKey },
               keyboardMode,

@@ -1,4 +1,4 @@
-import { Clock, ShieldCheck } from 'lucide-react'
+import { Clock, OctagonX, ShieldCheck } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
@@ -15,6 +15,8 @@ interface Props {
   onSelectEffort: (level: EffortLevel) => void
   /** Cicla o modo de permissão (envia Shift+Tab ao PTY). Ausente = sem o controle. */
   onCyclePermission?: () => void
+  /** Interrompe o claude (envia Ctrl+C ao PTY). Ausente = sem o botão. */
+  onInterrupt?: () => void
 }
 
 function pendingLabel(pending: PendingSelection): string {
@@ -35,6 +37,7 @@ export function ComposerToolbar({
   onSelectModel,
   onSelectEffort,
   onCyclePermission,
+  onInterrupt,
 }: Props) {
   const hasPending = !isPendingEmpty(pending)
 
@@ -56,6 +59,17 @@ export function ComposerToolbar({
         >
           <Icon as={ShieldCheck} size={11} className="text-[var(--color-accent)]" />
           <span className="whitespace-nowrap">Permissão ⇧⇥</span>
+        </button>
+      )}
+      {onInterrupt && (
+        <button
+          type="button"
+          onClick={onInterrupt}
+          title="Interromper o claude — envia Ctrl+C ao PTY (o mesmo que digitar Ctrl+C no terminal)."
+          className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)]/50 hover:text-[var(--color-danger)]"
+        >
+          <Icon as={OctagonX} size={11} className="text-[var(--color-danger)]" />
+          <span className="whitespace-nowrap">Interromper</span>
         </button>
       )}
       {hasPending && (

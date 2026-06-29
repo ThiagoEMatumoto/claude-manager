@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveComposerKey } from './composer-keys'
+import { resolveComposerKey, resolveForwardKey } from './composer-keys'
 
 describe('resolveComposerKey', () => {
   it('Enter in enter-sends mode → send', () => {
@@ -26,5 +26,68 @@ describe('resolveComposerKey', () => {
   it('non-Enter keys → noop', () => {
     expect(resolveComposerKey({ key: 'a' }, 'enter-sends')).toBe('noop')
     expect(resolveComposerKey({ key: 'Shift' }, 'enter-newline')).toBe('noop')
+  })
+})
+
+describe('resolveForwardKey', () => {
+  const empty = true
+  const withText = false
+
+  it('arrows forward to the PTY when the composer is empty', () => {
+    expect(resolveForwardKey({ key: 'ArrowUp' }, empty)).toEqual({ seq: '\x1b[A' })
+    expect(resolveForwardKey({ key: 'ArrowDown' }, empty)).toEqual({ seq: '\x1b[B' })
+    expect(resolveForwardKey({ key: 'ArrowRight' }, empty)).toEqual({ seq: '\x1b[C' })
+    expect(resolveForwardKey({ key: 'ArrowLeft' }, empty)).toEqual({ seq: '\x1b[D' })
+  })
+
+  it('arrows edit the draft (stay in textarea) when there is text', () => {
+    expect(resolveForwardKey({ key: 'ArrowUp' }, withText)).toEqual({ handleInTextarea: true })
+    expect(resolveForwardKey({ key: 'ArrowLeft' }, withText)).toEqual({ handleInTextarea: true })
+  })
+
+  it('PageUp/PageDown/Home/End forward only when empty', () => {
+    expect(resolveForwardKey({ key: 'PageUp' }, empty)).toEqual({ seq: '\x1b[5~' })
+    expect(resolveForwardKey({ key: 'PageDown' }, empty)).toEqual({ seq: '\x1b[6~' })
+    expect(resolveForwardKey({ key: 'Home' }, empty)).toEqual({ seq: '\x1b[H' })
+    expect(resolveForwardKey({ key: 'End' }, empty)).toEqual({ seq: '\x1b[F' })
+    expect(resolveForwardKey({ key: 'PageUp' }, withText)).toEqual({ handleInTextarea: true })
+  })
+
+  it('Ctrl+C interrupts (SIGINT) only when empty; otherwise preserves native copy', () => {
+    expect(resolveForwardKey({ key: 'c', ctrl: true }, empty)).toEqual({ seq: '\x03' })
+    expect(resolveForwardKey({ key: 'C', ctrl: true }, empty)).toEqual({ seq: '\x03' })
+    expect(resolveForwardKey({ key: 'c', ctrl: true }, withText)).toEqual({ handleInTextarea: true })
+  })
+
+  it('Cmd+C never interrupts (mac copy stays native)', () => {
+    expect(resolveForwardKey({ key: 'c', meta: true }, empty)).toEqual({ handleInTextarea: true })
+  })
+
+  it('Ctrl+D → EOF', () => {
+    expect(resolveForwardKey({ key: 'd', ctrl: true }, empty)).toEqual({ seq: '\x04' })
+  })
+
+  it('Esc always forwards (cancel claude prompts/menus)', () => {
+    expect(resolveForwardKey({ key: 'Escape' }, empty)).toEqual({ seq: '\x1b' })
+    expect(resolveForwardKey({ key: 'Escape' }, withText)).toEqual({ seq: '\x1b' })
+  })
+
+  it('Tab → \\t; Shift+Tab → CSI Z (permission cycle)', () => {
+    expect(resolveForwardKey({ key: 'Tab' }, empty)).toEqual({ seq: '\t' })
+    expect(resolveForwardKey({ key: 'Tab', shift: true }, empty)).toEqual({ seq: '\x1b[Z' })
+    expect(resolveForwardKey({ key: 'Tab', shift: true }, withText)).toEqual({ seq: '\x1b[Z' })
+  })
+
+  it('Enter with empty composer → \\r (confirm prompts); with text → handled by composer', () => {
+    expect(resolveForwardKey({ key: 'Enter' }, empty)).toEqual({ seq: '\r' })
+    expect(resolveForwardKey({ key: 'Enter' }, withText)).toEqual({ handleInTextarea: true })
+    // Shift+Enter (newline) is never forwarded — the composer handles it.
+    expect(resolveForwardKey({ key: 'Enter', shift: true }, empty)).toEqual({ handleInTextarea: true })
+  })
+
+  it('printable characters stay in the textarea', () => {
+    expect(resolveForwardKey({ key: 'a' }, empty)).toEqual({ handleInTextarea: true })
+    expect(resolveForwardKey({ key: 'a' }, withText)).toEqual({ handleInTextarea: true })
+    expect(resolveForwardKey({ key: ' ' }, empty)).toEqual({ handleInTextarea: true })
   })
 })

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../services/db'
@@ -26,6 +26,11 @@ import {
 } from '../services/session-activity'
 import { getMcpRuntime } from '../services/mcp/server'
 import { mcpClientConfigPath } from '../services/mcp/config'
+import {
+  buildImageFilename,
+  isImageTempFile,
+  isSessionImageTempFile,
+} from '../services/image-temp'
 import { mapLiveSessionRepo, type LiveSessionJoinRow } from './live-session-mapping'
 import type {
   Session,
@@ -63,6 +68,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Whitelist do --model no spawn: o valor vem do renderer (segmented control),
 // mas o main re-valida — nada fora desta lista chega à linha de comando.
 const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
+
+// Whitelist do --effort no spawn: espelha SPAWN_MODEL_WHITELIST. O valor vem do
+// renderer (segmented control / default persistido), mas o main re-valida — nada
+// fora desta lista chega à linha de comando.
+const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 // Whitelist do --permission-mode no spawn. Só os modos usados pelo handoff são
 // aceitos — NUNCA 'bypassPermissions' (a filha jamais sobe pulando permissões).
@@ -154,6 +164,51 @@ function writeTempPromptFile(prefix: string, content: string): string {
   return tmpPath
 }
 
+function tempDir(): string {
+  return join(app.getPath('userData'), 'tmp')
+}
+
+// Grava uma imagem colada/arrastada no composer como BINÁRIO em
+// <userData>/tmp/img-<sessionId>-<uuid>.<ext> e devolve o path absoluto. O
+// renderer injeta esse path como texto no prompt (a CLI claude anexa a imagem a
+// partir do caminho). Escreve um Uint8Array — nunca trata os bytes como utf8,
+// que corromperia o arquivo.
+function saveImageTemp(sessionId: string, bytes: ArrayBuffer | Uint8Array, mime: string): string {
+  const dir = tempDir()
+  mkdirSync(dir, { recursive: true })
+  const tmpPath = join(dir, buildImageFilename({ id: randomUUID(), mime, sessionId }))
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  writeFileSync(tmpPath, data)
+  return tmpPath
+}
+
+// Remove temporários de imagem que casam com o predicado. Best-effort: se o
+// diretório não existe ainda (nenhuma imagem foi colada) ou um arquivo some numa
+// corrida, ignora — limpeza nunca pode derrubar o boot/exit.
+function sweepImageTemps(predicate: (filename: string) => boolean): void {
+  let names: string[]
+  const dir = tempDir()
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!predicate(name)) continue
+    try {
+      unlinkSync(join(dir, name))
+    } catch {
+      // já removido / em uso — segue
+    }
+  }
+}
+
+// Sweep de boot: num processo fresco nenhum compose referencia temps de imagem,
+// então todos são órfãos. Chamado uma vez no app.whenReady (index.ts).
+export function sweepOrphanImageTemps(): void {
+  sweepImageTemps(isImageTempFile)
+}
+
 // Conteúdo do contexto da feature (header + bloco tracking + seções-chave) vem
 // do builder puro em feature-context.ts. Retorna null se a feature não existe.
 function buildFeatureContextOrNull(featureId: string): string | null {
@@ -172,6 +227,7 @@ export function buildSpawnInnerCmd(parts: {
   name: string
   mcpConfigArg: string
   model: string | null
+  effort?: string | null
   systemPromptFilePath: string | null
   permissionMode?: string | null
   disallowedTools?: string[] | null
@@ -179,6 +235,9 @@ export function buildSpawnInnerCmd(parts: {
   let innerCmd = `${parts.claudeCmd} --session-id ${parts.sessionId} -n ${shquote(parts.name)}${parts.mcpConfigArg}`
   if (parts.model) {
     innerCmd += ` --model ${shquote(parts.model)}`
+  }
+  if (parts.effort) {
+    innerCmd += ` --effort ${shquote(parts.effort)}`
   }
   if (parts.permissionMode) {
     innerCmd += ` --permission-mode ${shquote(parts.permissionMode)}`
@@ -312,6 +371,10 @@ export function registerSessionIpc(): void {
       ).run(e.exitCode === 0 ? 'exited' : 'crashed', Date.now(), e.sessionId)
       broadcast('pty:exit', e)
 
+      // Limpa as imagens temporárias coladas/arrastadas nesta sessão — a CLI já
+      // as anexou na entrega; o path injetado não serve depois do exit.
+      sweepImageTemps((name) => isSessionImageTempFile(name, e.sessionId))
+
       // Reconciliação do handoff: se a sessão-filha morreu (exit/crash) sem ter
       // reportado conclusão (status ainda vivo: 'running' OU 'needs_input'), o
       // handoff ficaria preso pra sempre. failIfRunning transiciona ambos→failed
@@ -389,6 +452,11 @@ export function registerSessionIpc(): void {
     const model =
       input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
 
+    // Effort inicial: mesma defesa em profundidade do model — só passa adiante se
+    // o valor passar na whitelist.
+    const effort =
+      input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
+
     // System-prompt anexado via --append-system-prompt-file vem de TRÊS fontes:
     //  - bloco de arquitetura do repo (se repoId; dá o "mapa" do repo no sistema),
     //  - contexto da feature (se featureId; Fase 6), e
@@ -444,6 +512,7 @@ export function registerSessionIpc(): void {
       name,
       mcpConfigArg: mcpConfigArg(),
       model,
+      effort,
       systemPromptFilePath,
       permissionMode,
       disallowedTools,
@@ -717,6 +786,12 @@ export function registerSessionIpc(): void {
   ipcMain.handle('sessions:write', (_e, sessionId: string, data: string) => {
     ptyManager.write(sessionId, data)
   })
+
+  ipcMain.handle(
+    'sessions:save-image',
+    (_e, sessionId: string, bytes: ArrayBuffer | Uint8Array, mime: string): string =>
+      saveImageTemp(sessionId, bytes, mime),
+  )
 
   ipcMain.handle('sessions:resize', (_e, sessionId: string, cols: number, rows: number) => {
     ptyManager.resize(sessionId, cols, rows)

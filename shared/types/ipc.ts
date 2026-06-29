@@ -437,6 +437,9 @@ export interface ReorderReposInput {
   repoIds: string[]
 }
 
+// Nível de esforço de raciocínio (--effort). Espelha a whitelist do main.
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 export interface SpawnSessionInput {
   // Ausente/null = sessão avulsa: cwd vira o scratch dir (pref scratch_dir).
   repoId?: string | null
@@ -450,6 +453,9 @@ export interface SpawnSessionInput {
   // contra whitelist no main e anexado ao spawn como `--model <alias>`.
   // Ausente = default do claude.
   model?: string
+  // Nível de esforço inicial passado como `--effort <level>`. Validado contra
+  // whitelist no main. Ausente = default do claude.
+  effort?: EffortLevel
   // Texto de system-prompt a ANEXAR via --append-system-prompt-file (arquivo
   // temp). Usado pelo fluxo de handoff pra entregar o prompt multi-linha íntegro
   // (em vez de injetá-lo no REPL, onde os \n viram Enter). Se também houver
@@ -1554,6 +1560,8 @@ export interface Api {
     listByRepo(repoId: string): Promise<SessionSummary[]>
     getBacklog(sessionId: string): Promise<string>
     write(sessionId: string, data: string): Promise<void>
+    /** Grava uma imagem (paste/drag) como binário em <userData>/tmp e devolve o path absoluto. */
+    saveImage(sessionId: string, bytes: ArrayBuffer, mime: string): Promise<string>
     resize(sessionId: string, cols: number, rows: number): Promise<void>
     kill(sessionId: string): Promise<void>
     rename(sessionId: string, title: string): Promise<void>

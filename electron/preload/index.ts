@@ -93,6 +93,8 @@ const api: Api = {
     listByRepo: (repoId) => invoke('sessions:list-by-repo', repoId),
     getBacklog: (sessionId) => invoke('sessions:get-backlog', sessionId),
     write: (sessionId, data) => invoke('sessions:write', sessionId, data),
+    saveImage: (sessionId, bytes, mime) =>
+      invoke('sessions:save-image', sessionId, bytes, mime),
     resize: (sessionId, cols, rows) => invoke('sessions:resize', sessionId, cols, rows),
     kill: (sessionId) => invoke('sessions:kill', sessionId),
     rename: (sessionId, title) => invoke('sessions:rename', sessionId, title),

@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, SquarePen, Zap } from 'lucide-react'
+import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -16,14 +16,10 @@ import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore } from '@/store/appStore'
 import { useSession } from './useSession'
-import { PromptComposer } from './PromptComposer'
-import {
-  ModelPill,
-  MODEL_ALIASES,
-  EFFORT_LEVELS,
-  type ModelAlias,
-  type EffortLevel,
-} from './ModelPill'
+import { Composer, type ComposerHandle } from './Composer'
+import { ComposerToolbar } from './ComposerToolbar'
+import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
+import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
@@ -138,7 +134,7 @@ export function Terminal({
   const [searchQuery, setSearchQuery] = useState('')
   const [pastePreview, setPastePreview] = useState<string | null>(null)
   const [multilineActive, setMultilineActive] = useState(false)
-  const [composerOpen, setComposerOpen] = useState(false)
+  const composerRef = useRef<ComposerHandle>(null)
   const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
   // O key handler do xterm é registrado uma vez (no mount); uma ref evita ler um
   // `activity` stale ao decidir interceptar as setas.
@@ -213,14 +209,45 @@ export function Terminal({
   // Injeção sanitizada: os valores vêm EXCLUSIVAMENTE das whitelists literais
   // do ModelPill — nunca texto livre. \x15 (Ctrl+U) limpa a linha do prompt
   // antes, pra não concatenar com algo já digitado (mesmo padrão do /rename).
+  function injectModel(alias: ModelAlias) {
+    if (MODEL_ALIASES.includes(alias)) write('\x15/model ' + alias + '\r')
+  }
+  function injectEffort(level: EffortLevel) {
+    if (EFFORT_LEVELS.includes(level)) write('\x15/effort ' + level + '\r')
+  }
+
+  // Troca enfileirada enquanto a sessão está ocupada; aplicada no próximo idle.
+  const [pending, setPending] = useState<PendingSelection>({})
+  const pendingRef = useRef(pending)
+  pendingRef.current = pending
+  const prevStatusRef = useRef<SessionActivity['status'] | null>(null)
+
+  // Em idle injeta direto; ocupada, enfileira (última troca de cada tipo vence).
   function selectModel(alias: ModelAlias) {
-    if (!canSwitchModel || !MODEL_ALIASES.includes(alias)) return
-    write('\x15/model ' + alias + '\r')
+    if (!MODEL_ALIASES.includes(alias)) return
+    if (canSwitchModel) injectModel(alias)
+    else setPending((p) => mergePending(p, { model: alias }))
   }
   function selectEffort(level: EffortLevel) {
-    if (!canSwitchModel || !EFFORT_LEVELS.includes(level)) return
-    write('\x15/effort ' + level + '\r')
+    if (!EFFORT_LEVELS.includes(level)) return
+    if (canSwitchModel) injectEffort(level)
+    else setPending((p) => mergePending(p, { effort: level }))
   }
+
+  // Flush da fila na transição → idle (único estado seguro p/ injetar), uma vez.
+  // Lê a pendência via ref pra não re-rodar quando ela muda — só na troca de status.
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    const current = activity?.status ?? null
+    prevStatusRef.current = current
+    if (exited) return
+    const { apply, pending: rest } = nextPendingApply(prev, current, pendingRef.current)
+    if (!apply) return
+    if (apply.model) injectModel(apply.model)
+    if (apply.effort) injectEffort(apply.effort)
+    setPending(rest)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity?.status, exited])
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
@@ -424,9 +451,9 @@ export function Terminal({
         return false
       }
 
-      // Compose box: abre o editor de prompt (default Ctrl+Shift+E).
+      // Compose box: foca o dock do composer (default Ctrl+Shift+E).
       if (matchCombo(e, resolveCombo('terminal.compose', kbOverrides))) {
-        setComposerOpen(true)
+        composerRef.current?.focus()
         return false
       }
 
@@ -681,25 +708,6 @@ export function Terminal({
               {error}
             </span>
           )}
-          {!exited && (
-            <ModelPill
-              activity={activity}
-              canSwitch={canSwitchModel}
-              onSelectModel={selectModel}
-              onSelectEffort={selectEffort}
-            />
-          )}
-          {!exited && (
-            <button
-              type="button"
-              onClick={() => setComposerOpen(true)}
-              title="Compor prompt num editor (Ctrl+Shift+E) — navegação completa por setas, clique e seleção"
-              aria-label="Compor prompt"
-              className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
-            >
-              <Icon as={SquarePen} size={13} />
-            </button>
-          )}
           <button
             type="button"
             onClick={onClose}
@@ -760,17 +768,6 @@ export function Terminal({
 
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="h-full bg-[var(--color-bg)] p-2" />
-
-        <PromptComposer
-          open={composerOpen}
-          onClose={() => {
-            setComposerOpen(false)
-            xtermRef.current?.focus()
-          }}
-          onSend={sendPrompt}
-          onInsert={insertPrompt}
-        />
-
 
         {searchOpen && (
           <div
@@ -872,6 +869,24 @@ export function Terminal({
           </div>
         )}
       </div>
+
+      {!exited && (
+        <Composer
+          sessionId={session.id}
+          ref={composerRef}
+          onSend={sendPrompt}
+          onInsert={insertPrompt}
+          toolbar={
+            <ComposerToolbar
+              activity={activity}
+              canSwitch={canSwitchModel}
+              pending={pending}
+              onSelectModel={selectModel}
+              onSelectEffort={selectEffort}
+            />
+          }
+        />
+      )}
 
       {menu && (
         <div

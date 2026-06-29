@@ -7,7 +7,7 @@ import { meetingSidecarManager } from './services/meeting-sidecar'
 import * as handoffStore from './services/handoff-store'
 import { sessionActivityService } from './services/session-activity'
 import { registerProjectIpc } from './ipc/projects'
-import { registerSessionIpc } from './ipc/sessions'
+import { registerSessionIpc, sweepOrphanImageTemps } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc } from './ipc/git'
@@ -128,6 +128,9 @@ app.whenReady().then(async () => {
   registerHandoffsIpc()
   registerDossiersIpc()
   registerSessionIpc()
+  // Boot reconcile: apaga temporários de imagem órfãos (pasted/dropped no
+  // composer) deixados por sessões de execuções anteriores.
+  sweepOrphanImageTemps()
   registerShellIpc()
   registerDialogIpc()
   registerGitIpc()

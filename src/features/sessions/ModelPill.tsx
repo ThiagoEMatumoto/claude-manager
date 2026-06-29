@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Loader, Sparkles } from 'lucide-react'
+import { ChevronDown, Clock, Loader, Sparkles } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Menu, type MenuSection } from '@/components/ui/Menu'
 import type { SessionActivity } from '../../../shared/types/ipc'
+import { isPendingEmpty, type PendingSelection } from './model-queue'
 
 // Whitelists literais — são a ÚNICA fonte do que pode ser injetado no PTY
 // (/model e /effort). Nunca interpolar texto livre nesses comandos.
@@ -36,11 +37,13 @@ interface Props {
   activity: SessionActivity | null
   /** Sessão ociosa — único estado em que é seguro injetar /model | /effort. */
   canSwitch: boolean
+  /** Troca escolhida enquanto a sessão estava ocupada, aguardando o próximo idle. */
+  pending: PendingSelection
   onSelectModel: (alias: ModelAlias) => void
   onSelectEffort: (level: EffortLevel) => void
 }
 
-export function ModelPill({ activity, canSwitch, onSelectModel, onSelectEffort }: Props) {
+export function ModelPill({ activity, canSwitch, pending, onSelectModel, onSelectEffort }: Props) {
   const [open, setOpen] = useState(false)
   // Alvo da troca otimista de modelo; null = sem troca em voo.
   const [switching, setSwitching] = useState<ModelAlias | null>(null)
@@ -68,22 +71,29 @@ export function ModelPill({ activity, canSwitch, onSelectModel, onSelectEffort }
 
   function pickModel(alias: ModelAlias) {
     onSelectModel(alias)
-    setSwitching(alias)
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => setSwitching(null), SWITCH_TIMEOUT_MS)
+    // Otimismo só quando vai injetar agora; em busy a pendência (prop) é a fonte.
+    if (canSwitch) {
+      setSwitching(alias)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => setSwitching(null), SWITCH_TIMEOUT_MS)
+    }
   }
 
   function pickEffort(level: EffortLevel) {
     onSelectEffort(level)
+    // O claude não persiste effort no transcript — guardamos o último escolhido
+    // pra exibir mesmo após o flush da fila (a prop `pending` some ao aplicar).
     setEffort(level)
   }
+
+  const hasPending = !isPendingEmpty(pending)
 
   const sections: MenuSection[] = [
     {
       title: 'Modelo',
       items: MODEL_ALIASES.map((alias) => ({
         label: MODEL_LABELS[alias],
-        active: (switching ?? detected) === alias,
+        active: (switching ?? pending.model ?? detected) === alias,
         onClick: () => pickModel(alias),
       })),
     },
@@ -91,16 +101,18 @@ export function ModelPill({ activity, canSwitch, onSelectModel, onSelectEffort }
       title: 'Esforço',
       items: EFFORT_LEVELS.map((level) => ({
         label: level,
-        active: effort === level,
+        active: (pending.effort ?? effort) === level,
         onClick: () => pickEffort(level),
       })),
     },
   ]
 
-  // Label do pill: troca em voo > alias detectado > id cru encurtado > 'modelo…'.
+  // Label do pill: pendência (busy) > troca em voo > alias detectado > id cru > 'modelo…'.
   let label: string
   let dim = false
-  if (switching) {
+  if (pending.model) {
+    label = MODEL_LABELS[pending.model]
+  } else if (switching) {
     label = MODEL_LABELS[switching]
   } else if (detected) {
     label = MODEL_LABELS[detected]
@@ -110,25 +122,25 @@ export function ModelPill({ activity, canSwitch, onSelectModel, onSelectEffort }
     label = 'modelo…'
     dim = true
   }
-  if (effort) label += ` · ${effort}`
+  const shownEffort = pending.effort ?? effort
+  if (shownEffort) label += ` · ${shownEffort}`
 
   return (
     <Menu open={open} onClose={() => setOpen(false)} sections={sections}>
       <button
         type="button"
-        disabled={!canSwitch}
         onClick={() => setOpen((v) => !v)}
         title={
           canSwitch
             ? 'Trocar modelo ou esforço desta sessão'
-            : 'Aguarde a sessão ficar ociosa pra trocar modelo/esforço'
+            : 'Sessão ocupada — a troca será aplicada quando ela ficar ociosa'
         }
-        className={`flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] transition enabled:hover:border-[var(--color-accent)]/50 enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
-          dim ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'
-        }`}
+        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)] ${
+          hasPending ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'
+        } ${dim ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'}`}
       >
         <Icon
-          as={switching ? Loader : Sparkles}
+          as={switching ? Loader : hasPending ? Clock : Sparkles}
           size={11}
           className={switching ? 'animate-spin' : 'text-[var(--color-accent)]'}
         />

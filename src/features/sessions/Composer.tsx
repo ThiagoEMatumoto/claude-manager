@@ -1,4 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { CornerDownLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
@@ -14,6 +21,9 @@ interface Props {
   onSend: (text: string) => void
   // Injeta o texto SEM submeter (usuário revisa antes do Enter).
   onInsert: (text: string) => void
+  // Barra de controles acima do textarea (switcher de modelo, anexar, etc).
+  // Slot agnóstico: o pai compõe o conteúdo (compartilhado entre terminal e chat).
+  toolbar?: ReactNode
 }
 
 // Drafts em memória por sessão — princípio "nunca perder input". Sobrevive ao
@@ -29,7 +39,7 @@ const MAX_HEIGHT = 192
 // resolvendo a dor do Enter/Shift+Enter do input nativo do claude no xterm. É
 // aditivo: o input direto na TUI continua funcionando.
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { sessionId, onSend, onInsert },
+  { sessionId, onSend, onInsert, toolbar },
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
@@ -87,6 +97,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 pb-1 pt-2">
+      {toolbar}
       <div className="flex items-end gap-2">
         <textarea
           ref={innerRef}

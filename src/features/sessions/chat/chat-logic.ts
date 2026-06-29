@@ -13,6 +13,24 @@ export interface Echo {
   resolveAt: number
 }
 
+// Estado de tela do Chat View. Distingue "aguardando o JSONL nascer" (sessão
+// recém-spawnada, transitório — o watcher recupera quando o arquivo aparece) do
+// "vazio real" (arquivo existe, 0 mensagens renderizáveis).
+export type ChatViewState = 'loading' | 'waiting' | 'empty' | 'ready'
+
+// PURA: a decisão de estado fica testável sem React. messageCount inclui ecos
+// otimistas — qualquer coisa a renderar ganha de loading/waiting/empty.
+export function resolveChatViewState(input: {
+  loading: boolean
+  transcriptExists: boolean
+  messageCount: number
+}): ChatViewState {
+  if (input.messageCount > 0) return 'ready'
+  if (input.loading) return 'loading'
+  if (!input.transcriptExists) return 'waiting'
+  return 'empty'
+}
+
 export function countUserMessages(messages: ChatMessage[]): number {
   let n = 0
   for (const m of messages) if (m.kind === 'user') n++

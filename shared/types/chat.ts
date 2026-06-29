@@ -25,8 +25,10 @@ export interface ChatTranscript {
 
 // Payload do broadcast chat:transcript-update. Emite a LISTA completa reparseada
 // a cada mudança do JSONL — simples e robusto a reescritas do arquivo (o renderer
-// só substitui o estado).
+// só substitui o estado). transcriptExists distingue "JSONL ainda não nasceu"
+// (sessão recém-spawnada, pré-flush) de "existe mas sem mensagens renderizáveis".
 export interface ChatTranscriptUpdate {
   sessionId: string
+  transcriptExists: boolean
   messages: ChatMessage[]
 }

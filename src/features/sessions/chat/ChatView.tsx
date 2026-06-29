@@ -11,7 +11,14 @@ import type { ChatMessage } from '../../../../shared/types/ipc'
 import { MessageBubble } from './MessageBubble'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
-import { countUserMessages, isAtBottom, nextResolveAt, pendingEchoes, type Echo } from './chat-logic'
+import {
+  countUserMessages,
+  isAtBottom,
+  nextResolveAt,
+  pendingEchoes,
+  resolveChatViewState,
+  type Echo,
+} from './chat-logic'
 
 export interface ChatViewHandle {
   // Eco otimista: chamado pelo Terminal ao enviar pelo composer em modo chat.
@@ -26,7 +33,7 @@ interface Props {
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
 export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId }, ref) {
-  const { messages, loading } = useChatTranscript(sessionId)
+  const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   // Só auto-scrollamos se o usuário já estava colado no fim (não roubamos a
@@ -69,11 +76,23 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
   }, [rendered])
 
-  if (!loading && rendered.length === 0) {
+  const viewState = resolveChatViewState({
+    loading,
+    transcriptExists,
+    messageCount: rendered.length,
+  })
+
+  if (viewState !== 'ready') {
     return (
-      <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-[var(--color-text-dim)]">
-        Sem mensagens ainda. Envie um prompt pelo compositor abaixo — a conversa aparece aqui
-        assim que o claude responder.
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-[var(--color-text-dim)]">
+        {(viewState === 'loading' || viewState === 'waiting') && (
+          <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
+        )}
+        {viewState === 'loading' && 'Carregando conversa…'}
+        {viewState === 'waiting' &&
+          'Aguardando transcript… a conversa aparece assim que o claude responder.'}
+        {viewState === 'empty' &&
+          'Sem mensagens ainda. Envie um prompt pelo compositor abaixo — a conversa aparece aqui assim que o claude responder.'}
       </div>
     )
   }
@@ -81,9 +100,6 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   return (
     <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-3 py-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-3">
-        {loading && rendered.length === 0 && (
-          <div className="text-center text-xs text-[var(--color-text-dim)]">Carregando conversa…</div>
-        )}
         {rendered.map((m, i) => {
           // Ecos otimistas vêm DEPOIS das mensagens de disco; marcamos como pendentes.
           const pending = i >= messages.length

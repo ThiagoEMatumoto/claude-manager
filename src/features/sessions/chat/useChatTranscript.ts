@@ -8,6 +8,9 @@ import type { ChatMessage } from '../../../../shared/types/ipc'
 export function useChatTranscript(sessionId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
+  // O read inicial sinaliza inexistência via path null; o broadcast via flag. Isso
+  // distingue "aguardando transcript" (arquivo não nasceu) de "vazio real".
+  const [transcriptExists, setTranscriptExists] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -18,6 +21,7 @@ export function useChatTranscript(sessionId: string) {
       .then((t) => {
         if (cancelled) return
         setMessages(t.messages)
+        setTranscriptExists(t.path !== null)
         setLoading(false)
       })
       .catch(() => {
@@ -31,6 +35,7 @@ export function useChatTranscript(sessionId: string) {
     const off = chatApi.onTranscriptUpdate((u) => {
       if (u.sessionId !== sessionId) return
       setMessages(u.messages)
+      setTranscriptExists(u.transcriptExists)
     })
 
     return () => {
@@ -40,5 +45,5 @@ export function useChatTranscript(sessionId: string) {
     }
   }, [sessionId])
 
-  return { messages, loading }
+  return { messages, loading, transcriptExists }
 }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '../../../../shared/types/ipc'
-import { countUserMessages, isAtBottom, nextResolveAt, pendingEchoes, type Echo } from './chat-logic'
+import {
+  countUserMessages,
+  isAtBottom,
+  nextResolveAt,
+  pendingEchoes,
+  resolveChatViewState,
+  type Echo,
+} from './chat-logic'
 
 const user = (text: string): ChatMessage => ({ kind: 'user', text })
 const assistant = (text: string): ChatMessage => ({ kind: 'assistant', text })
@@ -52,6 +59,42 @@ describe('optimistic echo reconciliation', () => {
     expect(pendingEchoes([echo], 1)).toHaveLength(1)
     // Disco vai a 2 (o novo 'hello' gravou) → resolve.
     expect(pendingEchoes([echo], 2)).toHaveLength(0)
+  })
+})
+
+describe('resolveChatViewState', () => {
+  it('is loading before the first read returns (no file known yet)', () => {
+    expect(resolveChatViewState({ loading: true, transcriptExists: false, messageCount: 0 })).toBe(
+      'loading',
+    )
+  })
+
+  it('waits when the read finished and no transcript exists on disk', () => {
+    expect(resolveChatViewState({ loading: false, transcriptExists: false, messageCount: 0 })).toBe(
+      'waiting',
+    )
+  })
+
+  it('is empty when the transcript exists but has no renderable messages', () => {
+    expect(resolveChatViewState({ loading: false, transcriptExists: true, messageCount: 0 })).toBe(
+      'empty',
+    )
+  })
+
+  it('is ready as soon as there is anything to render', () => {
+    expect(resolveChatViewState({ loading: false, transcriptExists: true, messageCount: 3 })).toBe(
+      'ready',
+    )
+  })
+
+  it('renders content (echo) even while still loading or pre-flush', () => {
+    // Eco otimista enviado antes do disco alcançar: messageCount > 0 vence loading/waiting.
+    expect(resolveChatViewState({ loading: true, transcriptExists: false, messageCount: 1 })).toBe(
+      'ready',
+    )
+    expect(resolveChatViewState({ loading: false, transcriptExists: false, messageCount: 1 })).toBe(
+      'ready',
+    )
   })
 })
 

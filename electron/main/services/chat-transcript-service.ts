@@ -94,7 +94,11 @@ class ChatTranscriptService {
   // subdirs de projects — leve o bastante pra 1s. Emite uma lista vazia de cara pra
   // o renderer não ficar pendurado esperando o primeiro evento.
   private startPoll(sessionId: string, entry: WatchEntry): void {
-    broadcast('chat:transcript-update', { sessionId, messages: [] } satisfies ChatTranscriptUpdate)
+    broadcast('chat:transcript-update', {
+      sessionId,
+      transcriptExists: false,
+      messages: [],
+    } satisfies ChatTranscriptUpdate)
     entry.poll = setInterval(() => {
       const path = findTranscriptPath(entry.ccSessionId)
       if (!path) return
@@ -122,7 +126,12 @@ class ChatTranscriptService {
     if (!this.watches.has(sessionId)) return // corrida com unwatch durante o debounce.
     const { messages } = await this.readPath(entry.ccSessionId, path)
     if (!this.watches.has(sessionId)) return
-    broadcast('chat:transcript-update', { sessionId, messages } satisfies ChatTranscriptUpdate)
+    // emit() só dispara depois do attach() (path encontrado) → o arquivo existe.
+    broadcast('chat:transcript-update', {
+      sessionId,
+      transcriptExists: true,
+      messages,
+    } satisfies ChatTranscriptUpdate)
   }
 }
 

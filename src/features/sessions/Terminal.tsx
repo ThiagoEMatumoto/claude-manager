@@ -269,8 +269,13 @@ export function Terminal({
     const term = xtermRef.current
     if (!term) return
     term.options.disableStdin = false
-    term.paste(text)
-    term.options.disableStdin = true
+    // try-finally: se paste() lançar, o stdin precisa voltar a desligado (xterm é
+    // display-only); caso contrário o teclado vazaria pro PTY.
+    try {
+      term.paste(text)
+    } finally {
+      term.options.disableStdin = true
+    }
   }
   function sendPrompt(text: string) {
     insertPrompt(text)

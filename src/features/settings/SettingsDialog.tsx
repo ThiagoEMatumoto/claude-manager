@@ -430,6 +430,15 @@ const SESSION_EFFORT_OPTIONS = [
   { value: 'max', label: 'Max' },
 ] as const
 
+const SESSION_PERMISSION_OPTIONS = [
+  { value: 'default', label: 'Padrão' },
+  { value: 'plan', label: 'Plano' },
+  { value: 'acceptEdits', label: 'Aceitar edições' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'bypassPermissions', label: 'Bypass' },
+  { value: 'dontAsk', label: 'Não perguntar' },
+] as const
+
 const KEYBOARD_OPTIONS: { value: KeyboardSendMode; label: string; hint: string }[] = [
   { value: 'enter-sends', label: 'Enter envia', hint: 'Shift+Enter quebra linha' },
   { value: 'enter-newline', label: 'Enter quebra linha', hint: 'Cmd/Ctrl+Enter envia' },
@@ -467,9 +476,11 @@ function Segmented<T extends string>({
 function SessionTab({ open }: { open: boolean }) {
   const defaultModel = useSessionPrefsStore((s) => s.defaultModel)
   const defaultEffort = useSessionPrefsStore((s) => s.defaultEffort)
+  const defaultPermission = useSessionPrefsStore((s) => s.defaultPermission)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const setDefaultModel = useSessionPrefsStore((s) => s.setDefaultModel)
   const setDefaultEffort = useSessionPrefsStore((s) => s.setDefaultEffort)
+  const setDefaultPermission = useSessionPrefsStore((s) => s.setDefaultPermission)
   const setKeyboardMode = useSessionPrefsStore((s) => s.setKeyboardMode)
 
   useEffect(() => {
@@ -508,6 +519,20 @@ function SessionTab({ open }: { open: boolean }) {
             options={SESSION_EFFORT_OPTIONS}
             value={defaultEffort}
             onChange={(v) => void setDefaultEffort(v)}
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Permissão padrão</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Modo de permissão (--permission-mode) pré-selecionado. Padrão = pergunta tudo.
+            </div>
+          </div>
+          <Segmented
+            options={SESSION_PERMISSION_OPTIONS}
+            value={defaultPermission}
+            onChange={(v) => void setDefaultPermission(v)}
           />
         </div>
       </div>

@@ -929,6 +929,9 @@ export function Terminal({
               pending={pending}
               onSelectModel={selectModel}
               onSelectEffort={selectEffort}
+              // Shift+Tab (CSI Z) cicla o modo de permissão no TUI do claude. A CLI
+              // não tem set-exato em runtime (sem /permission) — só este ciclo nativo.
+              onCyclePermission={() => write('\x1b[Z')}
             />
           }
         />

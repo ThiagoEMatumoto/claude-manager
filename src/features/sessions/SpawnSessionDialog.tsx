@@ -6,7 +6,7 @@ import { featuresApi } from '@/lib/ipc'
 import { suggestFeatures } from '@/features/features/fuzzy'
 import { STATUS_META } from '@/features/features/status'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
-import type { EffortLevel, Feature, Repo } from '../../../shared/types/ipc'
+import type { EffortLevel, Feature, PermissionMode, Repo } from '../../../shared/types/ipc'
 
 // Opções do segmented control de modelo. '' = Padrão (sem --model no spawn).
 const MODEL_OPTIONS = [
@@ -26,17 +26,29 @@ const EFFORT_OPTIONS = [
   { value: 'max', label: 'Max' },
 ] as const
 
+// Opções do segmented de permissão. Espelha os 6 choices da CLI; 'default' é o
+// modo padrão da própria CLI (pergunta tudo), então é o selecionado inicial.
+const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
+  { value: 'default', label: 'Padrão' },
+  { value: 'plan', label: 'Plano' },
+  { value: 'acceptEdits', label: 'Aceitar edições' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'bypassPermissions', label: 'Bypass' },
+  { value: 'dontAsk', label: 'Não perguntar' },
+]
+
 interface Props {
   open: boolean
   onClose: () => void
   repo: Repo
   // Feature já existente neste projeto (filtradas por projeto do repo).
-  // Confirmar dispara o spawn com o name, featureId, model e effort resolvidos.
+  // Confirmar dispara o spawn com name, featureId, model, effort e permission.
   onConfirm: (
     name: string | undefined,
     featureId: string | undefined,
     model: string | undefined,
     effort: EffortLevel | undefined,
+    permission: PermissionMode,
   ) => void
 }
 
@@ -50,6 +62,10 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const [model, setModel] = useState<string>('')
   // Effort inicial. '' = default do claude (não passa --effort).
   const [effort, setEffort] = useState<'' | EffortLevel>('')
+  // Modo de permissão inicial. 'default' = pergunta tudo (padrão da CLI).
+  const [permission, setPermission] = useState<PermissionMode>('default')
+  // bypassPermissions é destrutivo (pula TODAS as permissões): exige um 2º clique.
+  const [confirmingBypass, setConfirmingBypass] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -57,14 +73,17 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     setName('')
     setObjective('')
     setSelectedFeature('')
-    // Pré-preenche modelo + effort com os defaults persistidos (Settings → Sessão/Chat).
+    setConfirmingBypass(false)
+    // Pré-preenche modelo + effort + permissão com os defaults persistidos
+    // (Settings → Sessão/Chat).
     void useSessionPrefsStore
       .getState()
       .load()
       .then(() => {
-        const { defaultModel, defaultEffort } = useSessionPrefsStore.getState()
+        const { defaultModel, defaultEffort, defaultPermission } = useSessionPrefsStore.getState()
         setModel(defaultModel)
         setEffort(defaultEffort)
+        setPermission(defaultPermission)
       })
     // Features ligadas a este repo (linkagem (a) filtrada por repo).
     void featuresApi.list().then((all) => {
@@ -83,8 +102,18 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   // aceitou (clicar numa sugestão seta selectedFeature).
   const featureId = selectedFeature || undefined
 
+  function pickPermission(v: PermissionMode) {
+    setPermission(v)
+    setConfirmingBypass(false)
+  }
+
   function confirm() {
-    onConfirm(name.trim() || undefined, featureId, model || undefined, effort || undefined)
+    // bypassPermissions pula todas as permissões — pede um 2º clique de confirmação.
+    if (permission === 'bypassPermissions' && !confirmingBypass) {
+      setConfirmingBypass(true)
+      return
+    }
+    onConfirm(name.trim() || undefined, featureId, model || undefined, effort || undefined, permission)
     onClose()
   }
 
@@ -98,7 +127,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={confirm}>Abrir</Button>
+          <Button onClick={confirm}>{confirmingBypass ? 'Confirmar bypass' : 'Abrir'}</Button>
         </>
       }
     >
@@ -154,6 +183,32 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
               ))}
             </div>
           </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Permissão</label>
+          <div className="inline-flex max-w-full flex-wrap overflow-hidden rounded-md border border-[var(--color-border)]">
+            {PERMISSION_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => pickPermission(opt.value)}
+                className={`shrink-0 px-3 py-1.5 text-xs transition ${
+                  permission === opt.value
+                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                    : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {permission === 'bypassPermissions' && (
+            <div className="mt-1.5 text-[11px] text-[var(--color-danger)]">
+              Bypass pula TODAS as permissões — o Claude executa qualquer ação sem
+              perguntar. Clique em "Confirmar bypass" para prosseguir.
+            </div>
+          )}
         </div>
 
         <div className="w-full">

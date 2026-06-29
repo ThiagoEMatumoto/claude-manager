@@ -32,7 +32,12 @@ vi.mock('../services/session-activity', () => ({
   mapStatus: () => 'idle',
 }))
 
-import { formatPtyInjection, buildSpawnInnerCmd } from './sessions'
+import {
+  formatPtyInjection,
+  buildSpawnInnerCmd,
+  resolvePermissionMode,
+  resolveDisallowedTools,
+} from './sessions'
 
 describe('formatPtyInjection', () => {
   const START = '\x1b[200~'
@@ -126,5 +131,52 @@ describe('buildSpawnInnerCmd', () => {
   it('NÃO inclui --disallowedTools quando a lista é vazia/ausente', () => {
     expect(buildSpawnInnerCmd({ ...base, disallowedTools: [] })).not.toContain('--disallowedTools')
     expect(buildSpawnInnerCmd(base)).not.toContain('--disallowedTools')
+  })
+})
+
+describe('resolvePermissionMode', () => {
+  const VALID = ['default', 'plan', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk']
+
+  it('aceita TODOS os 6 modos da CLI', () => {
+    for (const mode of VALID) {
+      expect(resolvePermissionMode(mode)).toBe(mode)
+    }
+  })
+
+  it('rejeita valores inválidos (vira null = sem flag)', () => {
+    expect(resolvePermissionMode('yolo')).toBeNull()
+    expect(resolvePermissionMode('Plan')).toBeNull() // case-sensitive
+    expect(resolvePermissionMode('')).toBeNull()
+    expect(resolvePermissionMode(null)).toBeNull()
+    expect(resolvePermissionMode(undefined)).toBeNull()
+  })
+})
+
+describe('resolveDisallowedTools', () => {
+  it('mescla o denylist destrutivo nos modos autônomos', () => {
+    for (const mode of ['acceptEdits', 'auto', 'bypassPermissions']) {
+      const out = resolveDisallowedTools(mode, [])
+      expect(out).toContain('Bash(rm:*)')
+      expect(out).toContain('Bash(git push:*)')
+    }
+  })
+
+  it('NÃO mescla o denylist em modos não-autônomos (plan/default/dontAsk/null)', () => {
+    for (const mode of ['plan', 'default', 'dontAsk', null]) {
+      expect(resolveDisallowedTools(mode, [])).toBeNull()
+    }
+  })
+
+  it('preserva o denylist do renderer e deduplica ao mesclar', () => {
+    const out = resolveDisallowedTools('acceptEdits', ['Bash(rm:*)', 'Custom(x)'])
+    expect(out).toContain('Custom(x)')
+    // 'Bash(rm:*)' veio do renderer E do canônico — sem duplicata.
+    expect(out!.filter((t) => t === 'Bash(rm:*)')).toHaveLength(1)
+  })
+
+  it('em modo não-autônomo devolve só o denylist do renderer (ou null se vazio)', () => {
+    expect(resolveDisallowedTools('plan', ['Custom(x)'])).toEqual(['Custom(x)'])
+    expect(resolveDisallowedTools(null, [])).toBeNull()
+    expect(resolveDisallowedTools('default', ['', 123 as unknown as string])).toBeNull()
   })
 })

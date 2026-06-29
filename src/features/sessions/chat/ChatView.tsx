@@ -7,9 +7,9 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Clock } from 'lucide-react'
+import { Clock, Loader } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import type { ChatMessage } from '../../../../shared/types/ipc'
+import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { MessageBubble } from './MessageBubble'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
@@ -33,12 +33,15 @@ export interface ChatViewHandle {
 
 interface Props {
   sessionId: string
+  // Status da sessão (do broadcast session:activity, via Terminal) pra mostrar um
+  // indicador discreto de "trabalhando" enquanto o claude computa a resposta.
+  status?: SessionActivity['status']
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status }, ref) {
   const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -141,6 +144,14 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             {pendingPrompt === 'plan'
               ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
               : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
+          </div>
+        )}
+        {/* Indicador discreto de atividade. Suprimido quando há um prompt pendente
+            (status 'waiting'), pra não competir com o banner acima. */}
+        {status === 'working' && !pendingPrompt && (
+          <div className="flex items-center gap-2 px-1 text-xs text-[var(--color-text-dim)]">
+            <Icon as={Loader} size={13} className="animate-spin text-[var(--color-accent)]" />
+            Claude está trabalhando…
           </div>
         )}
       </div>

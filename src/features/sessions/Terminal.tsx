@@ -718,7 +718,9 @@ export function Terminal({
           className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'hidden' : ''}`}
         />
 
-        {mode === 'chat' && <ChatView ref={chatViewRef} sessionId={session.id} />}
+        {mode === 'chat' && (
+          <ChatView ref={chatViewRef} sessionId={session.id} status={activity?.status} />
+        )}
 
         {searchOpen && (
           <div

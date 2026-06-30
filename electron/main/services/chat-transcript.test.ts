@@ -453,4 +453,20 @@ describe('parseChatMessages — subagents', () => {
     expect(m[1].kind).toBe('tool_use')
     expect(m[1]).toMatchObject({ kind: 'tool_use', id: 'toolu_sub', name: 'Agent' })
   })
+
+  it('folds the Task tool_result into a subagent_result (status), not a generic tool_result', () => {
+    const withResult = [
+      MAIN_WITH_TASK,
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'toolu_sub', content: 'done', is_error: true }],
+        },
+      }),
+    ].join('\n')
+    const m = parseChatMessages(withResult, subMap())
+    expect(m.map((x) => x.kind)).toEqual(['user', 'subagent', 'subagent_result'])
+    expect(m[2]).toEqual({ kind: 'subagent_result', forId: 'toolu_sub', isError: true })
+  })
 })

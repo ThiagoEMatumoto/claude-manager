@@ -19,6 +19,12 @@ export function MessageBubble({ role, text, pending }: Props) {
         } ${pending ? 'opacity-60' : ''}`}
       >
         <MarkdownViewer content={text} />
+        {pending && (
+          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-[var(--color-text-dim)]">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
+            enviando…
+          </div>
+        )}
       </div>
     </div>
   )

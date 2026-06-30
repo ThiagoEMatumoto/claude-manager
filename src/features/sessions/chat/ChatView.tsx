@@ -140,6 +140,13 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
                   description={m.description}
                   turnCount={m.turnCount}
                   turns={m.turns}
+                  status={
+                    interactive.subagents.has(m.id)
+                      ? interactive.subagents.get(m.id)
+                        ? 'error'
+                        : 'ok'
+                      : undefined
+                  }
                 />
               )
             case 'tool_result':
@@ -148,9 +155,11 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
             case 'exit_plan_mode':
               return <PlanCard key={i} plan={m.plan} decision={interactive.plans.get(m.id)} />
-            // Resposta/decisão são fundidas no card acima (por forId) — não renderizam sozinhas.
+            // Resposta/decisão/status são fundidos no card acima (por forId) — não
+            // renderizam sozinhos.
             case 'ask_user_question_answered':
             case 'plan_decision':
+            case 'subagent_result':
               return null
           }
         })}

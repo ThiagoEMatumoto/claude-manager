@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bot, ChevronRight } from 'lucide-react'
+import { Bot, Check, ChevronRight, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 
 interface Props {
@@ -8,11 +8,14 @@ interface Props {
   turnCount: number
   // Resumos dos turnos (assistant) do subagente, pra expandir sob demanda.
   turns: string[]
+  // Status final, derivado do is_error do tool_result do Task. undefined = ainda
+  // em andamento (sem tool_result no transcript) → sem badge.
+  status?: 'ok' | 'error'
 }
 
 // Card de um subagente disparado (Task/Agent), no lugar do tool_use genérico.
-// Fechado: nome + descrição + contagem de turnos. Aberto: os resumos de cada turno.
-export function SubagentCard({ name, description, turnCount, turns }: Props) {
+// Fechado: nome + descrição + status + contagem de turnos. Aberto: os resumos.
+export function SubagentCard({ name, description, turnCount, turns, status }: Props) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-md border border-[var(--color-accent)]/30 bg-[var(--color-surface)]/60 text-xs">
@@ -28,6 +31,12 @@ export function SubagentCard({ name, description, turnCount, turns }: Props) {
         />
         <Icon as={Bot} size={12} className="shrink-0 text-[var(--color-accent)]" />
         <span className="shrink-0 font-medium text-[var(--color-text)]">{name}</span>
+        {status === 'ok' && (
+          <Icon as={Check} size={12} className="shrink-0 text-[var(--color-success,#22c55e)]" />
+        )}
+        {status === 'error' && (
+          <Icon as={X} size={12} className="shrink-0 text-[var(--color-danger)]" />
+        )}
         {description && <span className="truncate text-[var(--color-text-dim)]">{description}</span>}
         <span className="ml-auto shrink-0 whitespace-nowrap text-[var(--color-text-dim)]">
           {turnCount} {turnCount === 1 ? 'turno' : 'turnos'}

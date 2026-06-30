@@ -213,6 +213,9 @@ export function parseChatMessages(
   // Ids de tool_use interativos já vistos, pra classificar o tool_result seguinte.
   const askIds = new Set<string>()
   const planIds = new Set<string>()
+  // Ids de tool_use que viraram subagente, pra dobrar o status (is_error) do
+  // tool_result no card em vez de mostrar um tool_result genérico duplicado.
+  const subIds = new Set<string>()
   for (const raw of jsonl.split('\n')) {
     const line = raw.trim()
     if (!line) continue
@@ -247,6 +250,8 @@ export function parseChatMessages(
                 forId,
                 answers: parseAnswers(obj.toolUseResult),
               })
+            } else if (subIds.has(forId)) {
+              out.push({ kind: 'subagent_result', forId, isError: item.is_error === true })
             } else if (planIds.has(forId)) {
               // Aprovação tem texto canônico "User has approved your plan."; a
               // ausência dele (rejeição/feedback) marca não-aprovado.
@@ -287,6 +292,7 @@ export function parseChatMessages(
           const id = typeof item.id === 'string' ? item.id : ''
           const sub = id ? subagents?.get(id) : undefined
           if (sub) {
+            if (id) subIds.add(id)
             out.push({
               kind: 'subagent',
               id,

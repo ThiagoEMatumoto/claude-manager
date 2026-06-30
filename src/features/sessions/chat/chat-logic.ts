@@ -44,16 +44,19 @@ export function countUserMessages(messages: ChatMessage[]): number {
 export interface InteractiveResolution {
   answers: Map<string, Record<string, string>> // id da pergunta → mapa pergunta→opção
   plans: Map<string, boolean> // id do plano → aprovado
+  subagents: Map<string, boolean> // id do subagente → terminou com erro
 }
 
 export function resolveInteractive(messages: ChatMessage[]): InteractiveResolution {
   const answers = new Map<string, Record<string, string>>()
   const plans = new Map<string, boolean>()
+  const subagents = new Map<string, boolean>()
   for (const m of messages) {
     if (m.kind === 'ask_user_question_answered') answers.set(m.forId, m.answers)
     else if (m.kind === 'plan_decision') plans.set(m.forId, m.approved)
+    else if (m.kind === 'subagent_result') subagents.set(m.forId, m.isError)
   }
-  return { answers, plans }
+  return { answers, plans, subagents }
 }
 
 // 'question' | 'plan' quando o ÚLTIMO momento interativo do transcript ainda não

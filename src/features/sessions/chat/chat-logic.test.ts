@@ -113,9 +113,21 @@ describe('resolveInteractive', () => {
     expect(r.plans.get('p1')).toBe(true)
   })
 
+  it('maps subagent ids to their final error status', () => {
+    const r = resolveInteractive([
+      { kind: 'subagent', id: 's1', name: 'Explore', description: '', turnCount: 1, turns: [] },
+      { kind: 'subagent_result', forId: 's1', isError: false },
+      { kind: 'subagent', id: 's2', name: 'Explore', description: '', turnCount: 1, turns: [] },
+      { kind: 'subagent_result', forId: 's2', isError: true },
+    ])
+    expect(r.subagents.get('s1')).toBe(false)
+    expect(r.subagents.get('s2')).toBe(true)
+  })
+
   it('leaves unresolved ids out of the maps', () => {
     const r = resolveInteractive([{ kind: 'ask_user_question', id: 'pend', questions: [] }])
     expect(r.answers.has('pend')).toBe(false)
+    expect(r.subagents.has('pend')).toBe(false)
   })
 })
 

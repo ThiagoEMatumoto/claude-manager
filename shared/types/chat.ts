@@ -43,6 +43,9 @@ export type ChatMessage =
   // erro de API, comando local, info) viram um chip discreto colapsado. O ruído
   // de alto volume (stop_hook_summary, turn_duration, …) é descartado no parser.
   | { kind: 'system'; label: string; detail: string; level: 'info' | 'warning' | 'error' }
+  // Resultado de um subagente (tool_result do Task/Agent). Não renderiza sozinho:
+  // a UI funde o status (sucesso/erro) no SubagentCard por forId == id.
+  | { kind: 'subagent_result'; forId: string; isError: boolean }
   | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
   | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
   | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }

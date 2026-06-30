@@ -1,4 +1,4 @@
-import { Clock, OctagonX } from 'lucide-react'
+import { Clock, Loader, OctagonX } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
@@ -63,15 +63,26 @@ export function ComposerToolbar({
           <span className="whitespace-nowrap">Interromper</span>
         </button>
       )}
-      {hasPending && (
-        <span
-          className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]"
-          title="A sessão está ocupada — a troca será injetada assim que ela ficar ociosa"
-        >
-          <Icon as={Clock} size={11} className="text-[var(--color-accent)]" />
-          {pendingLabel(pending)} será aplicado quando ociosa
-        </span>
-      )}
+      {hasPending &&
+        (canSwitch ? (
+          // Sessão ficou ociosa com troca pendente: a injeção dispara agora —
+          // feedback de "aplicando" em vez de a transição ser tácita.
+          <span
+            className="flex items-center gap-1 text-[10px] text-[var(--color-accent)]"
+            title="A sessão ficou ociosa — aplicando a troca agora"
+          >
+            <Icon as={Loader} size={11} className="animate-spin" />
+            aplicando {pendingLabel(pending)}…
+          </span>
+        ) : (
+          <span
+            className="flex items-center gap-1 text-[10px] text-[var(--color-text-dim)]"
+            title="A sessão está ocupada — a troca será injetada assim que ela ficar ociosa"
+          >
+            <Icon as={Clock} size={11} className="text-[var(--color-accent)]" />
+            {pendingLabel(pending)} será aplicado quando ociosa
+          </span>
+        ))}
     </div>
   )
 }

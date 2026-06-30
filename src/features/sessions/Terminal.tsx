@@ -20,6 +20,7 @@ import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
 import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
+import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
@@ -266,25 +267,14 @@ export function Terminal({
     if (sel) void navigator.clipboard.writeText(sel)
   }
 
-  // Compose box: injeta o texto no input do claude via paste (bracketed, não
-  // auto-submete); sendPrompt ainda manda o \r final pra submeter.
-  //
-  // O xterm é display-only (disableStdin), o que zera term.paste(). Em vez de
-  // reimplementar o bracketed-paste (e arriscar o footgun de multilinha), reabilitamos
-  // o stdin por uma janela SÍNCRONA só durante o paste — JS é single-thread, então
-  // nenhuma tecla do teclado interleava nesse intervalo. NÃO focamos o xterm: o foco
-  // fica no composer (input único do modelo Warp).
+  // Compose box → PTY direto, sem tocar o xterm. O input é desacoplado do terminal:
+  // buildPromptBytes normaliza as quebras de linha e envolve em bracketed-paste
+  // (quando o TUI tem o modo ativo) pra preservar multilinha sem auto-submeter;
+  // write() manda direto pro PTY. O xterm fica display-only permanente. sendPrompt
+  // adiciona o \r final que submete.
   function insertPrompt(text: string) {
-    const term = xtermRef.current
-    if (!term) return
-    term.options.disableStdin = false
-    // try-finally: se paste() lançar, o stdin precisa voltar a desligado (xterm é
-    // display-only); caso contrário o teclado vazaria pro PTY.
-    try {
-      term.paste(text)
-    } finally {
-      term.options.disableStdin = true
-    }
+    const bracketed = xtermRef.current?.modes.bracketedPasteMode ?? true
+    write(buildPromptBytes(text, bracketed))
   }
   function sendPrompt(text: string) {
     insertPrompt(text)
@@ -335,7 +325,7 @@ export function Terminal({
       // digitação→PTV (textarea readOnly, triggerDataEvent vira no-op) mantendo o
       // render do TUI, seleção, scroll e copy vivos. O input único é o Composer; ele
       // encaminha teclas de controle via write() (direto no PTY, fora do xterm) e o
-      // texto via insertPrompt (que reabilita stdin por um instante — ver abaixo).
+      // texto via insertPrompt (também write() direto no PTY, em bracketed-paste).
       disableStdin: true,
     })
     const fit = new FitAddon()
@@ -728,12 +718,13 @@ export function Terminal({
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
-        {/* xterm SEMPRE montado: em modo chat só ocultamos visualmente (o
-            sendPrompt usa xterm.paste, então o terminal precisa seguir vivo). */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* xterm SEMPRE montado: em modo chat só ocultamos visualmente (invisible,
+            não hidden, pra a caixa de layout sobreviver e o fit() seguir medindo
+            certo). O PTY e o scrollback seguem vivos por baixo. */}
         <div
           ref={hostRef}
-          className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'hidden' : ''}`}
+          className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'invisible' : ''}`}
         />
 
         {/* Cobre o box de input da TUI no rodapé do xterm (só no modo terminal). O

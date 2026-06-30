@@ -3,7 +3,7 @@
 
 // Tipos do Chat View (Fase 5) moram em ./chat e são re-exportados aqui pra que os
 // consumidores sigam importando tudo de '@shared/types/ipc'.
-export type { ChatMessage, ChatTranscript, ChatTranscriptUpdate } from './chat'
+export type { ChatMessage, ChatQuestion, ChatTranscript, ChatTranscriptUpdate } from './chat'
 import type { ChatTranscript, ChatTranscriptUpdate } from './chat'
 
 export type LinkKind = 'inside' | 'symlink' | 'external'
@@ -445,6 +445,18 @@ export interface ReorderReposInput {
 // Nível de esforço de raciocínio (--effort). Espelha a whitelist do main.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+// Modo de permissão da sessão (--permission-mode). Espelha EXATAMENTE os choices
+// da CLI claude: default (pergunta tudo), plan (read-only), acceptEdits (edita
+// sem perguntar), auto, bypassPermissions (pula tudo), dontAsk. Validado contra
+// whitelist no main; os modos autônomos recebem o denylist destrutivo no spawn.
+export type PermissionMode =
+  | 'default'
+  | 'plan'
+  | 'acceptEdits'
+  | 'auto'
+  | 'bypassPermissions'
+  | 'dontAsk'
+
 export interface SpawnSessionInput {
   // Ausente/null = sessão avulsa: cwd vira o scratch dir (pref scratch_dir).
   repoId?: string | null
@@ -467,9 +479,8 @@ export interface SpawnSessionInput {
   // featureId, os dois conteúdos são concatenados num único arquivo.
   systemPromptText?: string
   // Modo de permissão inicial passado como `--permission-mode <mode>`. Validado
-  // contra whitelist no main. Usado pelo handoff (plan/acceptEdits). Ausente =
-  // default do claude (pergunta tudo).
-  permissionMode?: string
+  // contra whitelist no main. Ausente = default do claude (pergunta tudo).
+  permissionMode?: PermissionMode
   // Ferramentas a NEGAR via `--disallowedTools <specs...>` (ex.: 'Bash(rm:*)').
   // Denylist destrutivo do handoff auto-edits. Cada spec é validado/escapado.
   disallowedTools?: string[]

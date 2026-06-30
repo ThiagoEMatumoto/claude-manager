@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseChatMessages } from './chat-transcript'
+import { parseChatMessages, parseSubagentTurns, type SubagentInfo } from './chat-transcript'
 
 // Fixture representativo: prompt do usuário, resposta assistant com texto +
 // tool_use, tool_result do usuário (string e array), uma linha não-mensagem, uma
@@ -120,5 +120,353 @@ describe('parseChatMessages', () => {
   it('returns an empty list for empty or whitespace input', () => {
     expect(parseChatMessages('')).toEqual([])
     expect(parseChatMessages('   \n  \n')).toEqual([])
+  })
+})
+
+// Momentos interativos: ExitPlanMode (aprovado), AskUserQuestion (respondido) e
+// um AskUserQuestion PENDENTE (tool_use sem tool_result depois). O toolUseResult é
+// IRMÃO de message no nível da linha (não dentro de content).
+const INTERACTIVE_FIXTURE = [
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'Plan it' } }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'plan_1',
+          name: 'ExitPlanMode',
+          input: { plan: '# My Plan\n\nDo the thing.', allowedPrompts: ['edit'] },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'plan_1', content: 'User has approved your plan. You can now start coding.' }],
+    },
+    toolUseResult: { plan: '# My Plan\n\nDo the thing.', isAgent: false, filePath: '/tmp/p.md' },
+  }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'ask_1',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                question: 'Which deliverable?',
+                header: 'Deliverable',
+                multiSelect: false,
+                options: [
+                  { label: 'Diagnosis', description: 'just analysis' },
+                  { label: 'Both', description: 'analysis + code' },
+                ],
+              },
+              {
+                question: 'Top priority?',
+                header: 'Priority',
+                multiSelect: true,
+                options: [{ label: 'Reliability', description: 'proof' }],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'ask_1', content: 'Your questions have been answered.' }],
+    },
+    toolUseResult: {
+      answers: { 'Which deliverable?': 'Both', 'Top priority?': 'Reliability' },
+    },
+  }),
+  // PENDENTE: tool_use de AskUserQuestion sem tool_result depois.
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'ask_pending',
+          name: 'AskUserQuestion',
+          input: { questions: [{ question: 'Proceed?', header: 'Go', multiSelect: false, options: [{ label: 'Yes', description: '' }] }] },
+        },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — interactive prompts', () => {
+  const m = parseChatMessages(INTERACTIVE_FIXTURE)
+
+  it('emits dedicated kinds (not generic tool_use/tool_result)', () => {
+    expect(m.map((x) => x.kind)).toEqual([
+      'user',
+      'exit_plan_mode',
+      'plan_decision',
+      'ask_user_question',
+      'ask_user_question_answered',
+      'ask_user_question', // pendente
+    ])
+  })
+
+  it('parses ExitPlanMode plan + allowedPrompts and its approval', () => {
+    expect(m[1]).toEqual({
+      kind: 'exit_plan_mode',
+      id: 'plan_1',
+      plan: '# My Plan\n\nDo the thing.',
+      allowedPrompts: ['edit'],
+    })
+    expect(m[2]).toEqual({ kind: 'plan_decision', forId: 'plan_1', approved: true })
+  })
+
+  it('parses AskUserQuestion questions/options and the answers map', () => {
+    const ask = m[3]
+    expect(ask.kind).toBe('ask_user_question')
+    if (ask.kind !== 'ask_user_question') throw new Error('narrow')
+    expect(ask.id).toBe('ask_1')
+    expect(ask.questions).toHaveLength(2)
+    expect(ask.questions[0]).toEqual({
+      question: 'Which deliverable?',
+      header: 'Deliverable',
+      multiSelect: false,
+      options: [
+        { label: 'Diagnosis', description: 'just analysis' },
+        { label: 'Both', description: 'analysis + code' },
+      ],
+    })
+    expect(ask.questions[1].multiSelect).toBe(true)
+    expect(m[4]).toEqual({
+      kind: 'ask_user_question_answered',
+      forId: 'ask_1',
+      answers: { 'Which deliverable?': 'Both', 'Top priority?': 'Reliability' },
+    })
+  })
+
+  it('leaves a pending AskUserQuestion without an answer message', () => {
+    const last = m[5]
+    expect(last.kind).toBe('ask_user_question')
+    if (last.kind !== 'ask_user_question') throw new Error('narrow')
+    expect(last.id).toBe('ask_pending')
+    expect(m.some((x) => x.kind === 'ask_user_question_answered' && x.forId === 'ask_pending')).toBe(
+      false,
+    )
+  })
+
+  it('marks a non-approved plan decision (rejection/feedback)', () => {
+    const rejected = parseChatMessages(
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'plan_r', name: 'ExitPlanMode', input: { plan: 'P' } }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'plan_r',
+                content: "The user doesn't want to proceed with this plan.",
+              },
+            ],
+          },
+        }),
+      ].join('\n'),
+    )
+    expect(rejected[1]).toEqual({ kind: 'plan_decision', forId: 'plan_r', approved: false })
+  })
+
+  it('defaults allowedPrompts to null when absent', () => {
+    const [plan] = parseChatMessages(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'p', name: 'ExitPlanMode', input: { plan: 'X' } }],
+        },
+      }),
+    )
+    expect(plan).toEqual({ kind: 'exit_plan_mode', id: 'p', plan: 'X', allowedPrompts: null })
+  })
+})
+
+// Blocos de raciocínio (extended thinking): texto não-vazio vira kind 'thinking';
+// bloco vazio (só assinatura) é descartado; redacted_thinking vira placeholder.
+const THINKING_FIXTURE = [
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Let me reason about this.', signature: 'abc' },
+        { type: 'text', text: 'Here is the answer.' },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '', signature: 'def' }, // vazio → descartado
+        { type: 'redacted_thinking', data: 'encrypted' }, // → placeholder
+        { type: 'text', text: 'Done.' },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — thinking', () => {
+  const m = parseChatMessages(THINKING_FIXTURE)
+
+  it('emits thinking for non-empty blocks, drops empty, placeholders redacted', () => {
+    expect(m.map((x) => x.kind)).toEqual([
+      'thinking', // "Let me reason about this."
+      'assistant', // "Here is the answer."
+      'thinking', // redacted placeholder (bloco vazio anterior descartado)
+      'assistant', // "Done."
+    ])
+    expect(m[0]).toEqual({ kind: 'thinking', text: 'Let me reason about this.' })
+    expect(m[2]).toEqual({ kind: 'thinking', text: '(raciocínio oculto)' })
+  })
+})
+
+// Linhas type:'system': só subtypes whitelistados viram chip; o ruído de alto
+// volume (stop_hook_summary, turn_duration) é descartado.
+const SYSTEM_FIXTURE = [
+  JSON.stringify({ type: 'system', subtype: 'stop_hook_summary', level: 'suggestion' }), // ruído → fora
+  JSON.stringify({ type: 'system', subtype: 'turn_duration', isMeta: false }), // ruído → fora
+  JSON.stringify({ type: 'system', subtype: 'compact_boundary', level: 'info', content: 'Conversation compacted' }),
+  JSON.stringify({ type: 'system', subtype: 'api_error', level: 'error', error: 'rate limited' }),
+  JSON.stringify({
+    type: 'system',
+    subtype: 'local_command',
+    level: 'info',
+    content: '<command-name>/model</command-name>\n<command-args></command-args>',
+  }),
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
+].join('\n')
+
+describe('parseChatMessages — system context (curated)', () => {
+  const m = parseChatMessages(SYSTEM_FIXTURE)
+
+  it('keeps whitelisted subtypes as system chips, drops noise', () => {
+    expect(m.map((x) => x.kind)).toEqual(['system', 'system', 'system', 'user'])
+  })
+
+  it('maps subtype to label/detail/level (local_command extracts the name)', () => {
+    expect(m[0]).toEqual({ kind: 'system', label: 'Conversa compactada', detail: 'Conversation compacted', level: 'info' })
+    expect(m[1]).toEqual({ kind: 'system', label: 'Erro de API', detail: 'rate limited', level: 'error' })
+    expect(m[2]).toMatchObject({ kind: 'system', label: 'Comando /model', level: 'info' })
+  })
+})
+
+// Conteúdo de um agent-<hash>.jsonl: turnos do subagente (isSidechain). Cada linha
+// assistant é um turno; o resumo junta o texto, ou lista ferramentas se for só
+// tool_use. A 1ª linha user (o prompt) e linhas malformadas não contam como turno.
+const SUBAGENT_JSONL = [
+  JSON.stringify({ type: 'user', isSidechain: true, message: { role: 'user', content: 'go' } }),
+  JSON.stringify({
+    type: 'assistant',
+    isSidechain: true,
+    message: { role: 'assistant', content: [{ type: 'text', text: 'Looking into it.' }] },
+  }),
+  '{ broken',
+  JSON.stringify({
+    type: 'assistant',
+    isSidechain: true,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }] },
+  }),
+].join('\n')
+
+describe('parseSubagentTurns', () => {
+  it('counts assistant turns and summarizes text / tool-only turns', () => {
+    const { turnCount, turns } = parseSubagentTurns(SUBAGENT_JSONL)
+    expect(turnCount).toBe(2) // dois assistant; user e linha quebrada não contam
+    expect(turns).toEqual(['Looking into it.', '⚙ Bash'])
+  })
+
+  it('returns zeroes for empty input', () => {
+    expect(parseSubagentTurns('')).toEqual({ turnCount: 0, turns: [] })
+  })
+})
+
+// Invocação Task/Agent no JSONL principal + dados do subagente (montados a partir
+// de SUBAGENT_JSONL) → o tool_use vira o kind 'subagent'.
+const MAIN_WITH_TASK = [
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'investigate' } }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_sub',
+          name: 'Agent',
+          input: { subagent_type: 'Explore', description: 'Map the area' },
+        },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — subagents', () => {
+  function subMap(): Map<string, SubagentInfo> {
+    const { turnCount, turns } = parseSubagentTurns(SUBAGENT_JSONL)
+    return new Map([['toolu_sub', { name: 'Explore', description: 'Map the area', turnCount, turns }]])
+  }
+
+  it('emits a subagent kind with name/turnCount when data is provided', () => {
+    const m = parseChatMessages(MAIN_WITH_TASK, subMap())
+    expect(m.map((x) => x.kind)).toEqual(['user', 'subagent'])
+    expect(m[1]).toEqual({
+      kind: 'subagent',
+      id: 'toolu_sub',
+      name: 'Explore',
+      description: 'Map the area',
+      turnCount: 2,
+      turns: ['Looking into it.', '⚙ Bash'],
+    })
+  })
+
+  it('falls back to a generic tool_use when no subagent data matches the id', () => {
+    const m = parseChatMessages(MAIN_WITH_TASK)
+    expect(m[1].kind).toBe('tool_use')
+    expect(m[1]).toMatchObject({ kind: 'tool_use', id: 'toolu_sub', name: 'Agent' })
+  })
+
+  it('folds the Task tool_result into a subagent_result (status), not a generic tool_result', () => {
+    const withResult = [
+      MAIN_WITH_TASK,
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'toolu_sub', content: 'done', is_error: true }],
+        },
+      }),
+    ].join('\n')
+    const m = parseChatMessages(withResult, subMap())
+    expect(m.map((x) => x.kind)).toEqual(['user', 'subagent', 'subagent_result'])
+    expect(m[2]).toEqual({ kind: 'subagent_result', forId: 'toolu_sub', isError: true })
   })
 })

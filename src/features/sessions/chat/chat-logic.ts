@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../../../shared/types/ipc'
+import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 
 // Eco otimista de uma mensagem do usuário enviada pelo composer em modo chat. O
 // transcript de disco tem atraso (o claude grava o turno do usuário no JSONL
@@ -35,6 +35,54 @@ export function countUserMessages(messages: ChatMessage[]): number {
   let n = 0
   for (const m of messages) if (m.kind === 'user') n++
   return n
+}
+
+// Resolução dos momentos interativos: liga cada ask_user_question/exit_plan_mode
+// (por id) à sua resposta/decisão posterior (por forId). A UI usa isso pra mostrar
+// a opção escolhida / o estado de aprovação no MESMO card e pra não renderizar a
+// mensagem de resposta solta.
+export interface InteractiveResolution {
+  answers: Map<string, Record<string, string>> // id da pergunta → mapa pergunta→opção
+  plans: Map<string, boolean> // id do plano → aprovado
+  subagents: Map<string, boolean> // id do subagente → terminou com erro
+}
+
+export function resolveInteractive(messages: ChatMessage[]): InteractiveResolution {
+  const answers = new Map<string, Record<string, string>>()
+  const plans = new Map<string, boolean>()
+  const subagents = new Map<string, boolean>()
+  for (const m of messages) {
+    if (m.kind === 'ask_user_question_answered') answers.set(m.forId, m.answers)
+    else if (m.kind === 'plan_decision') plans.set(m.forId, m.approved)
+    else if (m.kind === 'subagent_result') subagents.set(m.forId, m.isError)
+  }
+  return { answers, plans, subagents }
+}
+
+// 'question' | 'plan' quando o ÚLTIMO momento interativo do transcript ainda não
+// tem resposta/decisão (claude aguardando o usuário); null caso contrário. Espelha
+// o critério "tool_use de AskUserQuestion/ExitPlanMode sem tool_result depois".
+export function pendingInteractive(messages: ChatMessage[]): 'question' | 'plan' | null {
+  const { answers, plans } = resolveInteractive(messages)
+  let pending: 'question' | 'plan' | null = null
+  for (const m of messages) {
+    if (m.kind === 'ask_user_question') pending = answers.has(m.id) ? null : 'question'
+    else if (m.kind === 'exit_plan_mode') pending = plans.has(m.id) ? null : 'plan'
+  }
+  return pending
+}
+
+// Decisão pura: mostrar o banner genérico de "aguardando no terminal"? Verdadeiro
+// quando a sessão está 'waiting' MAS não há um momento interativo conhecido
+// (pergunta/plano) já renderizado como card. Ou seja: é uma espera que o chat NÃO
+// consegue representar a partir do transcript — provável prompt de permissão y/n
+// ou menu TTY que só existe no PTY. O banner do R5 (pendingInteractive) tem
+// precedência; este é o fallback que direciona o usuário ao terminal.
+export function showTerminalWaitBanner(input: {
+  status: SessionActivity['status'] | undefined
+  pending: 'question' | 'plan' | null
+}): boolean {
+  return input.status === 'waiting' && input.pending === null
 }
 
 // resolveAt de um eco novo: resolve quando a contagem de usuário no disco chega a

@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
-import type { EffortLevel, LiveSessionInfo, PaneSnapshot, Repo, Session } from '../../shared/types/ipc'
+import type {
+  EffortLevel,
+  LiveSessionInfo,
+  PaneSnapshot,
+  PermissionMode,
+  Repo,
+  Session,
+} from '../../shared/types/ipc'
 
 export type Area =
   | 'projects'
@@ -231,6 +238,9 @@ interface AppState {
     // Trailing/opcional: callers existentes omitem. Usado pelo handoff pra
     // entregar o prompt completo íntegro (sem quebrar no REPL).
     systemPromptText?: string,
+    // Modo de permissão inicial (--permission-mode); validado no main. Trailing/
+    // opcional: callers que não escolhem permissão omitem (= default da CLI).
+    permissionMode?: PermissionMode,
     // Retorna o id da sessão criada. Callers existentes ignoram o retorno; o fluxo
     // de handoff usa pra marcar mark-running com o childSessionId.
   ) => Promise<string>
@@ -243,7 +253,7 @@ interface AppState {
     featureId?: string
     initialCommand?: string
     systemPromptText?: string
-    permissionMode?: string
+    permissionMode?: PermissionMode
     disallowedTools?: string[]
   }) => Promise<string>
   // Sessão avulsa: spawn sem repo (cwd = scratch dir do backend).
@@ -360,6 +370,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     model,
     effort,
     systemPromptText,
+    permissionMode,
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
@@ -371,6 +382,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       model,
       effort,
       systemPromptText,
+      permissionMode,
     })
     set((s) => ({
       panes: [

@@ -18,6 +18,7 @@ import { useAppStore, type PaneMode } from '@/store/appStore'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
+import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
@@ -67,15 +68,19 @@ function activityStatusView(status: SessionActivity['status'] | undefined): Stat
   }
 }
 
-// Colar conteúdo multilinha manda vários `\r` ⇒ o claude auto-submete cada linha
-// (footgun). Conteúdo grande/multilinha passa por uma confirmação antes de colar.
-const needsPasteConfirm = (t: string) => t.includes('\n') || t.length > 200
-
 // Casa paths impressos no terminal: absolutos (/...), home (~/...) e relativos
 // (./..., ../..., ou sem prefixo). Exige conter `/` (o `\/` no meio garante isso).
 const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
 // Pontuação de fim de frase grudada no path não faz parte dele.
 const TRAILING = /[.,:;)\]}>'"]+$/
+
+// Altura (px) da faixa que cobre o box de input da TUI do claude no modo terminal.
+// O composer é o input ÚNICO (modelo Warp), então o box que o claude desenha no
+// rodapé é redundante e gera dois campos visíveis. Cobrimos com uma faixa opaca
+// na cor de fundo do terminal. Heurística (~5 linhas do box) — AFINAR LIVE, pois a
+// altura do box varia com largura/conteúdo. Fallback documentado: se ficar janky,
+// esconder o composer no terminal ({!exited && mode === 'chat'}) em vez de cobrir.
+const TUI_INPUT_COVER_PX = 96
 
 // Resolução simples de path no renderer (sem `path` do node): junta um path
 // relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
@@ -139,15 +144,8 @@ export function Terminal({
   const [now, setNow] = useState(() => Date.now())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [pastePreview, setPastePreview] = useState<string | null>(null)
-  const [multilineActive, setMultilineActive] = useState(false)
   const composerRef = useRef<ComposerHandle>(null)
   const chatViewRef = useRef<ChatViewHandle>(null)
-  const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
-  // O key handler do xterm é registrado uma vez (no mount); uma ref evita ler um
-  // `activity` stale ao decidir interceptar as setas.
-  const activityRef = useRef<SessionActivity | null>(activity)
-  activityRef.current = activity
 
   // cwd da sessão pra resolver paths relativos clicados no terminal. É o path do
   // repo do pane; vazio em sessões avulsas (aí só linkamos absolutos/`~`). Ref pra
@@ -180,13 +178,6 @@ export function Terminal({
     const id = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
-
-  // Backstop do indicador de multilinha: se o claude começou a processar (= submeteu)
-  // ou a sessão saiu, o badge não faz mais sentido — zera mesmo sem o Enter ter passado
-  // pelo handler do xterm (ex: submit por outro caminho).
-  useEffect(() => {
-    if (activity?.status === 'working' || exited) setMultilineActive(false)
-  }, [activity?.status, exited])
 
   // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
   const displayTitle = activity?.name ?? title ?? repoLabel
@@ -275,18 +266,25 @@ export function Terminal({
     if (sel) void navigator.clipboard.writeText(sel)
   }
 
-  async function paste() {
-    const text = await navigator.clipboard.readText()
-    if (!text) return
-    if (needsPasteConfirm(text)) setPastePreview(text)
-    else xtermRef.current?.paste(text) // respeita bracketed-paste, não auto-submete
-  }
-
   // Compose box: injeta o texto no input do claude via paste (bracketed, não
   // auto-submete); sendPrompt ainda manda o \r final pra submeter.
+  //
+  // O xterm é display-only (disableStdin), o que zera term.paste(). Em vez de
+  // reimplementar o bracketed-paste (e arriscar o footgun de multilinha), reabilitamos
+  // o stdin por uma janela SÍNCRONA só durante o paste — JS é single-thread, então
+  // nenhuma tecla do teclado interleava nesse intervalo. NÃO focamos o xterm: o foco
+  // fica no composer (input único do modelo Warp).
   function insertPrompt(text: string) {
-    xtermRef.current?.focus()
-    xtermRef.current?.paste(text)
+    const term = xtermRef.current
+    if (!term) return
+    term.options.disableStdin = false
+    // try-finally: se paste() lançar, o stdin precisa voltar a desligado (xterm é
+    // display-only); caso contrário o teclado vazaria pro PTY.
+    try {
+      term.paste(text)
+    } finally {
+      term.options.disableStdin = true
+    }
   }
   function sendPrompt(text: string) {
     insertPrompt(text)
@@ -321,19 +319,6 @@ export function Terminal({
     }
   }, [menu])
 
-  // Esc cancela a confirmação de colagem.
-  useEffect(() => {
-    if (pastePreview == null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setPastePreview(null)
-        xtermRef.current?.focus()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [pastePreview])
-
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
@@ -346,6 +331,12 @@ export function Terminal({
       scrollback: useTerminalPrefsStore.getState().scrollback,
       cursorBlink: true,
       allowProposedApi: true,
+      // Modelo Warp: o xterm é DISPLAY-ONLY. disableStdin desliga o caminho de
+      // digitação→PTV (textarea readOnly, triggerDataEvent vira no-op) mantendo o
+      // render do TUI, seleção, scroll e copy vivos. O input único é o Composer; ele
+      // encaminha teclas de controle via write() (direto no PTY, fora do xterm) e o
+      // texto via insertPrompt (que reabilita stdin por um instante — ver abaixo).
+      disableStdin: true,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -428,6 +419,10 @@ export function Terminal({
 
     const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)
 
+    // Display-only (modelo Warp): o teclado não vai mais pro PTY (disableStdin). Este
+    // handler só sobra pros atalhos que fazem sentido num terminal de leitura — e só
+    // disparam quando o xterm está focado (ex: depois de clicar pra selecionar texto).
+    // Todo o input (texto + teclas de controle) é responsabilidade do Composer.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
 
@@ -444,64 +439,27 @@ export function Terminal({
         return false
       }
 
-      // Colar (Ctrl+V, Ctrl+Shift+V, Cmd+V): o evento DOM `paste` (onPaste, abaixo) é o
-      // ÚNICO inseridor. Aqui só retornamos false pra suprimir o paste/byte-de-controle que
-      // o xterm dispara no keydown — chamar paste() aqui colaria 2x junto com o onPaste.
-      if ((e.ctrlKey && (e.key === 'v' || e.key === 'V')) || (isMac && e.metaKey && e.key === 'v')) {
-        return false
-      }
-
-      // Multiline: combo configurável (default Shift+Enter) + Alt+Enter fixo como alternativa.
-      // O xterm manda `\r` puro (igual ao Enter); o claude só quebra linha quando recebe
-      // ESC+CR (o mesmo que `/terminal-setup` configura no emulador nativo).
-      // Lê overrides via getState() pra rebind valer sem recriar o xterm.
       const kbOverrides = useKeybindingsStore.getState().overrides
-      if (matchCombo(e, resolveCombo('terminal.newline', kbOverrides)) || (e.key === 'Enter' && e.altKey)) {
-        setMultilineActive(true)
-        write('\x1b\r')
-        return false
-      }
 
-      // Compose box: foca o dock do composer (default Ctrl+Shift+E).
+      // Voltar o foco pro composer (default Ctrl+Shift+E) — o input único da sessão.
       if (matchCombo(e, resolveCombo('terminal.compose', kbOverrides))) {
         composerRef.current?.focus()
         return false
       }
 
-      // Navegação por linha visual (opt-in): ↑/↓ movem o cursor uma linha VISUAL
-      // (uma largura de tela) em vez de cair no histórico do claude. Só quando o
-      // modo está ligado, a sessão não está processando, e sem modificadores.
-      if (
-        useTerminalPrefsStore.getState().visualLineNav &&
-        activityRef.current?.status !== 'working' &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        !e.shiftKey &&
-        (e.key === 'ArrowUp' || e.key === 'ArrowDown')
-      ) {
-        const step = e.key === 'ArrowUp' ? '\x1b[D' : '\x1b[C'
-        write(step.repeat(Math.max(1, term.cols)))
-        return false
-      }
-
       // Busca no terminal: combo configurável (default Ctrl/Cmd+F). Abre o overlay
       // por-pane ligado ao SearchAddon deste terminal.
-      if (matchCombo(e, resolveCombo('terminal.search', useKeybindingsStore.getState().overrides))) {
+      if (matchCombo(e, resolveCombo('terminal.search', kbOverrides))) {
         setSearchOpen(true)
         return false
       }
 
       // Limpar terminal: combo configurável (default Ctrl+Shift+K).
-      if (matchCombo(e, resolveCombo('terminal.clear', useKeybindingsStore.getState().overrides))) {
+      if (matchCombo(e, resolveCombo('terminal.clear', kbOverrides))) {
         xtermRef.current?.clear()
         return false
       }
 
-      // Enter puro = submit no claude: zera o indicador de multilinha. NÃO interceptamos.
-      if (e.key === 'Enter' && !e.shiftKey && !e.altKey) setMultilineActive(false)
-
-      // Ctrl+C simples NÃO é interceptado: precisa chegar ao claude como SIGINT/interrupt.
       return true
     })
 
@@ -512,28 +470,6 @@ export function Terminal({
       setMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() })
     }
     host.addEventListener('contextmenu', onContextMenu)
-
-    // Único ponto de inserção para paste via DOM (Ctrl+V, clique direito, middle-click).
-    // Sempre interceptamos em captura e inserimos nós mesmos — assim o paste nativo do
-    // xterm não roda em paralelo (era a 2ª inserção do double-paste). Conteúdo grande/
-    // multilinha abre a confirmação; o resto cola via term.paste() (respeita bracketed).
-    let lastPasteText = ''
-    let lastPasteAt = 0
-    const onPaste = (e: ClipboardEvent) => {
-      const text = e.clipboardData?.getData('text') ?? ''
-      if (!text) return
-      e.preventDefault()
-      e.stopPropagation()
-      // Alguns ambientes (Electron/Chromium) emitem 2 eventos `paste` para um único gesto.
-      // Descartamos o duplicado idêntico dentro de uma janela curta pra não colar 2x.
-      const now = Date.now()
-      if (text === lastPasteText && now - lastPasteAt < 50) return
-      lastPasteText = text
-      lastPasteAt = now
-      if (needsPasteConfirm(text)) setPastePreview(text)
-      else xtermRef.current?.paste(text)
-    }
-    host.addEventListener('paste', onPaste, true)
 
     const observer = new ResizeObserver(() => {
       if (!xtermRef.current || !fitRef.current) return
@@ -552,7 +488,6 @@ export function Terminal({
     // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
       host.removeEventListener('contextmenu', onContextMenu)
-      host.removeEventListener('paste', onPaste, true)
       observer.disconnect()
       offTheme()
       linkProvider.dispose()
@@ -683,24 +618,12 @@ export function Terminal({
                   {activity.title}
                 </span>
               )}
-              {multilineActive && activity?.status !== 'working' && (
-                <span
-                  title="Modo multilinha — Enter envia, Shift+Enter quebra linha"
-                  className="flex items-center gap-1 rounded border border-[var(--color-accent)]/40 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]"
-                >
-                  ⇧⏎ multilinha
-                </span>
-              )}
-              {visualLineNav && (
-                <span
-                  title="Navegação por linha visual ligada — ↑/↓ movem pelo prompt em vez do histórico (Configurações ▸ Terminal)"
-                  className="flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]"
-                >
-                  ↕ por linha
-                </span>
-              )}
             </div>
           )}
+          {/* Monitor de contexto: mesmo header (compartilhado pelos dois modos) já
+              mostra o status acima; aqui repomos o uso da janela vs. o limite do
+              modelo. Auto-oculta sem tokens+modelo. */}
+          {!exited && <ContextUsageIndicator activity={activity} />}
           {exited &&
             (claudeNotFound ? (
               <span className="flex items-center gap-1 text-[var(--color-danger)]">
@@ -813,7 +736,25 @@ export function Terminal({
           className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'hidden' : ''}`}
         />
 
-        {mode === 'chat' && <ChatView ref={chatViewRef} sessionId={session.id} />}
+        {/* Cobre o box de input da TUI no rodapé do xterm (só no modo terminal). O
+            composer é o input único, então o box do claude é redundante. pointer-events-none
+            preserva seleção/scroll/copy da área visível acima. */}
+        {!exited && mode !== 'chat' && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--color-bg)]"
+            style={{ height: TUI_INPUT_COVER_PX }}
+          />
+        )}
+
+        {mode === 'chat' && (
+          <ChatView
+            ref={chatViewRef}
+            sessionId={session.id}
+            status={activity?.status}
+            onToggleMode={onToggleMode}
+          />
+        )}
 
         {searchOpen && (
           <div
@@ -872,48 +813,6 @@ export function Terminal({
             </button>
           </div>
         )}
-
-        {pastePreview != null && (
-          <div
-            className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex max-h-full w-full max-w-md flex-col gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4 text-xs shadow-2xl">
-              <div className="font-medium text-[var(--color-text)]">
-                Colar {pastePreview.split('\n').length} linha
-                {pastePreview.split('\n').length === 1 ? '' : 's'}?
-              </div>
-              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[var(--color-text-dim)]">
-                {pastePreview.split('\n').slice(0, 12).join('\n').slice(0, 600)}
-                {(pastePreview.split('\n').length > 12 || pastePreview.length > 600) && '\n…'}
-              </pre>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPastePreview(null)
-                    xtermRef.current?.focus()
-                  }}
-                  className="rounded border border-[var(--color-border)] px-3 py-1 text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const t = pastePreview
-                    setPastePreview(null)
-                    xtermRef.current?.paste(t)
-                    xtermRef.current?.focus()
-                  }}
-                  className="rounded border border-[var(--color-accent)] bg-[var(--color-accent)] px-3 py-1 font-medium text-[var(--color-bg)] hover:opacity-90"
-                >
-                  Colar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {!exited && (
@@ -922,6 +821,9 @@ export function Terminal({
           ref={composerRef}
           onSend={sendPrompt}
           onInsert={insertPrompt}
+          // Modelo Warp: o composer encaminha teclas de controle/navegação direto pro
+          // PTY (write escreve no pty, fora do xterm display-only).
+          onForwardKey={(seq) => write(seq)}
           toolbar={
             <ComposerToolbar
               activity={activity}
@@ -929,6 +831,11 @@ export function Terminal({
               pending={pending}
               onSelectModel={selectModel}
               onSelectEffort={selectEffort}
+              // Shift+Tab (CSI Z) cicla o modo de permissão no TUI do claude. A CLI
+              // não tem set-exato em runtime (sem /permission) — só este ciclo nativo.
+              onCyclePermission={() => write('\x1b[Z')}
+              // Ctrl+C interrompe o claude (descoberta da ação que antes era só teclado).
+              onInterrupt={() => write('\x03')}
             />
           }
         />
@@ -952,16 +859,6 @@ export function Terminal({
               Copiar
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              void paste()
-              setMenu(null)
-            }}
-            className="block w-full px-3 py-1 text-left hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
-          >
-            Colar
-          </button>
           <button
             type="button"
             onClick={() => {

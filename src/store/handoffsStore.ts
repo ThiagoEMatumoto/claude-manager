@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import { handoffsApi } from '@/lib/ipc'
 import { useAppStore } from './appStore'
-import type { Handoff, HandoffMode } from '../../shared/types/ipc'
+import type { Handoff, HandoffMode, PermissionMode } from '../../shared/types/ipc'
 
 // Mapeia o modo do handoff → permissionMode do spawn (o main valida contra
 // whitelist e, em acceptEdits, mescla o denylist destrutivo canônico sozinho —
 // o renderer NÃO monta disallowedTools). 'interactive' = sem permissionMode
 // (comportamento legado: o claude pergunta cada ação). Pura → testável.
-export function permissionModeFor(mode: HandoffMode): string | undefined {
+export function permissionModeFor(mode: HandoffMode): PermissionMode | undefined {
   switch (mode) {
     case 'plan':
       return 'plan'

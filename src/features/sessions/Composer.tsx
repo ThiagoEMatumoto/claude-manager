@@ -10,11 +10,22 @@ import { CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
-import { resolveComposerKey } from './composer-keys'
+import { navigateHistory, resolveComposerKey, resolveForwardKey } from './composer-keys'
 import { insertPathToken, pickImageFiles, pickImageItems } from './image-paste'
 
 export interface ComposerHandle {
   focus: () => void
+}
+
+// Imagem anexada ao draft atual: `path` é o caminho temp injetado no prompt;
+// `previewUrl` é um object URL (blob:) usado só pra renderizar o thumbnail —
+// precisa ser revogado ao remover/desmontar pra não vazar memória. Vazio ('')
+// quando o anexo foi RESTAURADO da persistência: o object URL é efêmero (não
+// serializável) e não há IPC pra reler o binário, então o chip mostra um ícone.
+interface Attachment {
+  name: string
+  path: string
+  previewUrl: string
 }
 
 interface Props {
@@ -23,6 +34,9 @@ interface Props {
   onSend: (text: string) => void
   // Injeta o texto SEM submeter (usuário revisa antes do Enter).
   onInsert: (text: string) => void
+  // Encaminha uma sequência ANSI crua direto pro PTY (modelo Warp: o xterm é
+  // display-only e o composer dirige a TUI do claude — setas, Ctrl+C, Esc, etc).
+  onForwardKey?: (seq: string) => void
   // Barra de controles acima do textarea (switcher de modelo, anexar, etc).
   // Slot agnóstico: o pai compõe o conteúdo (compartilhado entre terminal e chat).
   toolbar?: ReactNode
@@ -34,6 +48,26 @@ interface Props {
 // estável durante o ciclo de vida da instância.
 const drafts = new Map<string, string>()
 
+// Histórico de prompts despachados por sessão (em ordem cronológica). Mesma
+// natureza dos drafts: memória, por sessão, sobrevive ao remount do dock mas não
+// persiste em disco. Recuperável via Ctrl+↑/↓ no composer.
+const histories = new Map<string, string[]>()
+
+function pushHistory(sessionId: string, value: string) {
+  const v = value.trim()
+  if (!v) return
+  const list = histories.get(sessionId) ?? []
+  // Dedupe consecutivo (estilo shell) — não polui o histórico com repetições.
+  if (list[list.length - 1] === v) return
+  histories.set(sessionId, [...list, v])
+}
+
+// Anexos persistidos por sessão: só a parte serializável ({name, path}). O
+// `previewUrl` (object URL) é efêmero e não viaja — ao restaurar, o chip aparece
+// sem thumbnail (com ícone). Mesma natureza dos drafts/histórico: memória.
+type PersistedAttachment = Pick<Attachment, 'name' | 'path'>
+const attachmentsBySession = new Map<string, PersistedAttachment[]>()
+
 const MAX_HEIGHT = 192
 
 // Dock de composição sempre visível abaixo do terminal. Um <textarea> de verdade
@@ -41,12 +75,22 @@ const MAX_HEIGHT = 192
 // resolvendo a dor do Enter/Shift+Enter do input nativo do claude no xterm. É
 // aditivo: o input direto na TUI continua funcionando.
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { sessionId, onSend, onInsert, toolbar },
+  { sessionId, onSend, onInsert, onForwardKey, toolbar },
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
-  // Feedback discreto das imagens anexadas no draft atual (nomes).
-  const [attached, setAttached] = useState<string[]>([])
+  // Navegação do histórico de prompts: `histIndex` null = editando o rascunho
+  // atual (fora do histórico); >= 0 = posição no histórico da sessão. `savedDraft`
+  // guarda o rascunho ao entrar no histórico pra restaurá-lo ao voltar pro fim.
+  const [histIndex, setHistIndex] = useState<number | null>(null)
+  const savedDraftRef = useRef('')
+  // Imagens anexadas ao draft atual (thumbnail + nome). Restaura da persistência
+  // por sessão — sem object URL (chip com ícone até o usuário reanexar).
+  const [attached, setAttached] = useState<Attachment[]>(() =>
+    (attachmentsBySession.get(sessionId) ?? []).map((a) => ({ ...a, previewUrl: '' })),
+  )
+  // Espelha `attached` pra revogar os object URLs no unmount sem recriar o efeito.
+  const attachedRef = useRef<Attachment[]>([])
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const loadPrefs = useSessionPrefsStore((s) => s.load)
@@ -63,6 +107,30 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     else drafts.delete(sessionId)
   }, [sessionId, text])
 
+  useEffect(() => {
+    attachedRef.current = attached
+  }, [attached])
+
+  // Persiste os anexos (só {name, path}) por sessão — sobrevive à troca de sessão,
+  // espelhando o draft. O previewUrl é descartado (efêmero).
+  useEffect(() => {
+    if (attached.length > 0) {
+      attachmentsBySession.set(
+        sessionId,
+        attached.map(({ name, path }) => ({ name, path })),
+      )
+    } else {
+      attachmentsBySession.delete(sessionId)
+    }
+  }, [sessionId, attached])
+
+  // Revoga os object URLs ainda pendurados ao desmontar o composer.
+  useEffect(() => {
+    return () => {
+      for (const a of attachedRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+    }
+  }, [])
+
   // Auto-grow do textarea até um teto; depois disso, scroll interno.
   useEffect(() => {
     const el = innerRef.current
@@ -76,16 +144,55 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     requestAnimationFrame(() => innerRef.current?.focus())
   }
 
+  // Move o cursor pro fim e foca — usado ao recuperar um prompt do histórico.
+  function caretToEnd() {
+    requestAnimationFrame(() => {
+      const node = innerRef.current
+      if (!node) return
+      node.focus()
+      const end = node.value.length
+      node.setSelectionRange(end, end)
+    })
+  }
+
+  // Ctrl+↑/↓ percorre o histórico de prompts da sessão (estilo shell). 'prev'
+  // recua pros mais recentes; 'next' avança de volta até o rascunho salvo. Binding
+  // distinto do ↑/↓ puro (que dirige a TUI do claude quando o composer está vazio).
+  function recallHistory(dir: 'prev' | 'next') {
+    const list = histories.get(sessionId) ?? []
+    if (list.length === 0) return
+    // Ao entrar no histórico a partir do rascunho, guarda o texto atual.
+    const cur = histIndex ?? list.length
+    if (histIndex === null) {
+      if (dir === 'next') return // já no fim; nada mais novo
+      savedDraftRef.current = text
+    }
+    const res = navigateHistory(list, cur, dir)
+    if (res.index >= list.length) {
+      setText(savedDraftRef.current)
+      setHistIndex(null)
+    } else {
+      setText(res.value)
+      setHistIndex(res.index)
+    }
+    caretToEnd()
+  }
+
   // Salva cada imagem como temp (binário, via IPC) e injeta o(s) path(s) absoluto(s)
   // na posição do cursor — a CLI claude anexa a imagem a partir do caminho colado.
   // Nunca submete: o usuário revisa e aperta Enter.
   async function ingestImages(files: File[]) {
-    const saved: { path: string; name: string }[] = []
+    const saved: Attachment[] = []
     for (const file of files) {
       try {
         const buf = await file.arrayBuffer()
         const path = await sessionsApi.saveImage(sessionId, buf, file.type)
-        saved.push({ path, name: file.name || path.split('/').pop() || 'imagem' })
+        // Só cria o object URL após o save dar certo — evita vazar URL em erro.
+        saved.push({
+          path,
+          name: file.name || path.split('/').pop() || 'imagem',
+          previewUrl: URL.createObjectURL(file),
+        })
       } catch (err) {
         console.error('[composer] falha ao salvar imagem colada/arrastada:', err)
       }
@@ -106,7 +213,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       })
       return value
     })
-    setAttached((a) => [...a, ...saved.map((s) => s.name)])
+    setAttached((a) => [...a, ...saved])
+  }
+
+  function removeAttachment(i: number) {
+    const target = attachedRef.current[i]
+    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+    setAttached((a) => a.filter((_, j) => j !== i))
+  }
+
+  function clearAttachments() {
+    for (const a of attachedRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+    setAttached([])
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -137,8 +255,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const value = text
     if (value.trim().length === 0) return
     onSend(value)
+    pushHistory(sessionId, value)
     setText('')
-    setAttached([])
+    setHistIndex(null)
+    clearAttachments()
     drafts.delete(sessionId)
     refocus()
   }
@@ -147,8 +267,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const value = text
     if (value.trim().length === 0) return
     onInsert(value)
+    pushHistory(sessionId, value)
     setText('')
-    setAttached([])
+    setHistIndex(null)
+    clearAttachments()
     drafts.delete(sessionId)
     refocus()
   }
@@ -162,18 +284,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 pb-1 pt-2">
       {toolbar}
       {attached.length > 0 && (
-        <div className="mb-1 flex flex-wrap gap-1 px-1">
-          {attached.map((name, i) => (
+        <div className="mb-1 flex flex-wrap gap-1.5 px-1">
+          {attached.map((att, i) => (
             <span
-              key={`${name}-${i}`}
-              className="flex items-center gap-1 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]"
+              key={`${att.name}-${i}`}
+              className="flex items-center gap-1.5 rounded bg-[var(--color-surface-2)] py-0.5 pl-0.5 pr-1.5 text-[10px] text-[var(--color-text-dim)]"
               title="Imagem anexada — o caminho foi inserido no prompt"
             >
-              <Icon as={ImageIcon} size={10} className="text-[var(--color-accent)]" />
-              {name}
+              {att.previewUrl ? (
+                <img
+                  src={att.previewUrl}
+                  alt={att.name}
+                  className="h-7 w-7 rounded border border-[var(--color-border)] object-cover"
+                />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border)] text-[var(--color-text-dim)]">
+                  <Icon as={ImageIcon} size={14} />
+                </span>
+              )}
+              <span className="max-w-32 truncate">{att.name}</span>
               <button
                 type="button"
-                onClick={() => setAttached((a) => a.filter((_, j) => j !== i))}
+                onClick={() => removeAttachment(i)}
                 className="hover:text-[var(--color-text)]"
                 title="Remover indicador (não apaga o caminho do prompt)"
               >
@@ -187,16 +319,52 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         <textarea
           ref={innerRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            // Editar manualmente sai do modo histórico (vira um novo rascunho).
+            if (histIndex !== null) setHistIndex(null)
+          }}
           onPaste={handlePaste}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           rows={2}
-          placeholder="Escreva um prompt — vai pro mesmo claude. Setas, clique e seleção funcionam."
+          placeholder="Escreva um prompt — vai pro mesmo claude. Vazio: setas/Esc/Ctrl+C dirigem a TUI."
           className="max-h-48 min-h-[2.5rem] flex-1 resize-none overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)] focus:border-[var(--color-accent)]"
           onKeyDown={(e) => {
             // Não deixa atalhos globais/terminal interceptarem enquanto compõe.
             e.stopPropagation()
+            // Histórico de prompts: Ctrl+↑/↓ recupera prompts despachados na sessão.
+            // Vem ANTES do forward pro PTY pra não conflitar com o ↑/↓ puro (que
+            // dirige a TUI do claude quando o composer está vazio).
+            if (
+              (e.ctrlKey || e.altKey) &&
+              !e.metaKey &&
+              (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+            ) {
+              e.preventDefault()
+              recallHistory(e.key === 'ArrowUp' ? 'prev' : 'next')
+              return
+            }
+            // Modelo Warp: teclas de controle/navegação são encaminhadas pro PTY pra
+            // dirigir a TUI do claude (menus, y/n, Shift+Tab, interrupção). O textarea
+            // vazio é "modo de controle"; com texto, as teclas editam o draft.
+            if (onForwardKey) {
+              const fwd = resolveForwardKey(
+                {
+                  key: e.key,
+                  ctrl: e.ctrlKey,
+                  meta: e.metaKey,
+                  shift: e.shiftKey,
+                  alt: e.altKey,
+                },
+                text.trim().length === 0,
+              )
+              if ('seq' in fwd) {
+                e.preventDefault()
+                onForwardKey(fwd.seq)
+                return
+              }
+            }
             const action = resolveComposerKey(
               { key: e.key, shift: e.shiftKey, meta: e.metaKey, ctrl: e.ctrlKey },
               keyboardMode,
@@ -228,7 +396,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>
         </div>
       </div>
-      <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">{hint}</div>
+      <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">
+        {hint} · Ctrl+↑/↓ histórico
+      </div>
     </div>
   )
 })

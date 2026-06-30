@@ -1,8 +1,10 @@
 import { BrowserWindow } from 'electron'
 import { readFile, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import { findTranscriptPath } from './session-activity'
 import { parseChatMessages } from './chat-transcript'
+import { readSubagentInfos } from './subagent-turns'
 import type { ChatMessage, ChatTranscriptUpdate } from '../../../shared/types/chat'
 
 const POLL_MS = 1000 // espera o JSONL nascer (sessão recém-spawnada)
@@ -53,7 +55,15 @@ class ChatTranscriptService {
   private async readPath(ccSessionId: string, path: string): Promise<ChatTranscriptRead> {
     try {
       const [content, st] = await Promise.all([readFile(path, 'utf8'), stat(path)])
-      return { ccSessionId, path, mtimeMs: st.mtimeMs, messages: parseChatMessages(content) }
+      // Subagentes vivem em <projectDir>/<ccSessionId>/subagents/ (irmão do JSONL
+      // principal em <projectDir>/<ccSessionId>.jsonl) — leitura síncrona barata.
+      const subagents = readSubagentInfos(dirname(path), ccSessionId)
+      return {
+        ccSessionId,
+        path,
+        mtimeMs: st.mtimeMs,
+        messages: parseChatMessages(content, subagents),
+      }
     } catch {
       // arquivo sumiu / corrida — devolve vazio em vez de derrubar o handler.
       return { ccSessionId, path, mtimeMs: null, messages: [] }

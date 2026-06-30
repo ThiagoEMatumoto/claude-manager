@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, ChevronRight, CornerDownRight, Wrench } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { CopyButton } from '@/components/ui/CopyButton'
 
 // Resumo de uma linha do input/result quando o card está fechado.
 function summarize(value: unknown, max = 140): string {
@@ -42,9 +43,16 @@ export function ToolUseCard({ name, input }: { name: string; input: unknown }) {
         {!open && <span className="truncate text-[var(--color-text-dim)]">{summarize(input)}</span>}
       </button>
       {open && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] px-2 py-1.5 text-[var(--color-text-dim)]">
-          {pretty(input)}
-        </pre>
+        <div className="group relative border-t border-[var(--color-border)]">
+          <CopyButton
+            text={pretty(input)}
+            className="absolute right-1.5 top-1.5 opacity-0 transition group-hover:opacity-100"
+            size={11}
+          />
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-2 py-1.5 text-[var(--color-text-dim)]">
+            {pretty(input)}
+          </pre>
+        </div>
       )}
     </div>
   )
@@ -79,9 +87,16 @@ export function ToolResultCard({ content, isError }: { content: string; isError:
         {!open && <span className="truncate text-[var(--color-text-dim)]">{summarize(content)}</span>}
       </button>
       {open && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--color-border)] px-2 py-1.5 text-[var(--color-text-dim)]">
-          {content}
-        </pre>
+        <div className="group relative border-t border-[var(--color-border)]">
+          <CopyButton
+            text={content}
+            className="absolute right-1.5 top-1.5 opacity-0 transition group-hover:opacity-100"
+            size={11}
+          />
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-2 py-1.5 text-[var(--color-text-dim)]">
+            {content}
+          </pre>
+        </div>
       )}
     </div>
   )

@@ -76,15 +76,28 @@ const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
 // fora desta lista chega à linha de comando.
 const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
-// Whitelist do --permission-mode no spawn. Só os modos usados pelo handoff são
-// aceitos — NUNCA 'bypassPermissions' (a filha jamais sobe pulando permissões).
-// O main é a autoridade: qualquer outro valor é descartado (vira null = default).
-const SPAWN_PERMISSION_MODE_WHITELIST = new Set(['plan', 'acceptEdits'])
+// Whitelist do --permission-mode no spawn: TODOS os choices da CLI claude. O main
+// é a autoridade — qualquer valor fora desta lista é descartado (vira null = sem
+// flag = default do claude). Espelha o tipo PermissionMode em shared/types/ipc.
+const SPAWN_PERMISSION_MODES = [
+  'default',
+  'plan',
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'dontAsk',
+] as const
+const SPAWN_PERMISSION_MODE_WHITELIST = new Set<string>(SPAWN_PERMISSION_MODES)
 
-// Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a filha
-// sobe em modo que edita (acceptEdits). Bloqueia as ops irreversíveis das regras
-// do usuário. O main mescla isto a qualquer denylist vindo do renderer, então o
-// renderer não consegue enfraquecê-lo.
+// Modos autônomos (editam/agem sem confirmar cada ação) que recebem o denylist
+// destrutivo como guard-rail. plan é read-only e default pergunta tudo — não
+// precisam. (dontAsk fica fora por ora: não é um modo autônomo de edição.)
+const AUTONOMOUS_PERMISSION_MODES = new Set<string>(['acceptEdits', 'auto', 'bypassPermissions'])
+
+// Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a sessão
+// sobe em modo autônomo. Bloqueia as ops irreversíveis das regras do usuário. O
+// main mescla isto a qualquer denylist vindo do renderer, então o renderer não
+// consegue enfraquecê-lo.
 const DESTRUCTIVE_DENYLIST = [
   'Bash(rm:*)',
   'Bash(git push:*)',
@@ -93,6 +106,28 @@ const DESTRUCTIVE_DENYLIST = [
   'Bash(git push -f:*)',
   'Bash(git clean:*)',
 ]
+
+// Valida o modo de permissão vindo do renderer/handoff contra a whitelist. PURA:
+// retorna o modo se válido, senão null (= sem flag = default do claude).
+export function resolvePermissionMode(value: string | null | undefined): string | null {
+  return value && SPAWN_PERMISSION_MODE_WHITELIST.has(value) ? value : null
+}
+
+// Monta o denylist final do spawn. PURA: mescla o denylist destrutivo canônico
+// quando o modo é autônomo (o renderer não pode enfraquecê-lo); senão devolve só
+// o denylist do renderer (ou null se vazio). Filtra specs não-string/vazios.
+export function resolveDisallowedTools(
+  permissionMode: string | null,
+  rendererDeny: readonly unknown[] | null | undefined,
+): string[] | null {
+  const deny = (rendererDeny ?? []).filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+  if (permissionMode && AUTONOMOUS_PERMISSION_MODES.has(permissionMode)) {
+    return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST]))
+  }
+  return deny.length > 0 ? deny : null
+}
 
 const toSession = (row: SessionRow): Session => ({
   id: row.id,
@@ -495,22 +530,11 @@ export function registerSessionIpc(): void {
       console.error('[sessions] system-prompt injection failed:', err)
     }
 
-    // Permission mode: validado contra whitelist (nunca bypassPermissions). Em
-    // modo que edita (acceptEdits), aplica SEMPRE o denylist destrutivo canônico
-    // mesclado ao que veio do renderer — o renderer não consegue enfraquecê-lo.
-    const permissionMode =
-      input.permissionMode && SPAWN_PERMISSION_MODE_WHITELIST.has(input.permissionMode)
-        ? input.permissionMode
-        : null
-    const rendererDeny = (input.disallowedTools ?? []).filter(
-      (t) => typeof t === 'string' && t.length > 0,
-    )
-    const disallowedTools =
-      permissionMode === 'acceptEdits'
-        ? Array.from(new Set([...rendererDeny, ...DESTRUCTIVE_DENYLIST]))
-        : rendererDeny.length > 0
-          ? rendererDeny
-          : null
+    // Permission mode: validado contra a whitelist (TODOS os modos da CLI). Em
+    // modo autônomo, aplica SEMPRE o denylist destrutivo canônico mesclado ao que
+    // veio do renderer — o renderer não consegue enfraquecê-lo.
+    const permissionMode = resolvePermissionMode(input.permissionMode)
+    const disallowedTools = resolveDisallowedTools(permissionMode, input.disallowedTools)
 
     const innerCmd = buildSpawnInnerCmd({
       claudeCmd,

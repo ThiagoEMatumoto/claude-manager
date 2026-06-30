@@ -14,12 +14,27 @@ export function useChatTranscript(sessionId: string) {
 
   useEffect(() => {
     let cancelled = false
+    // Race fix: se um update do watch chegar antes (ou durante) o read inicial, ele
+    // é a verdade mais nova — não deixamos o resultado do getTranscript (mais velho)
+    // sobrescrevê-lo. Também garante que a 1ª atualização (ex: pergunta recém-escrita)
+    // não se perca na janela entre disparar o read e assinar o watch.
+    let gotUpdate = false
     setLoading(true)
+
+    // Assina ANTES do read pra não perder updates emitidos nessa janela.
+    chatApi.watch(sessionId)
+    const off = chatApi.onTranscriptUpdate((u) => {
+      if (u.sessionId !== sessionId) return
+      gotUpdate = true
+      setMessages(u.messages)
+      setTranscriptExists(u.transcriptExists)
+      setLoading(false)
+    })
 
     void chatApi
       .getTranscript(sessionId)
       .then((t) => {
-        if (cancelled) return
+        if (cancelled || gotUpdate) return
         setMessages(t.messages)
         setTranscriptExists(t.path !== null)
         setLoading(false)
@@ -30,13 +45,6 @@ export function useChatTranscript(sessionId: string) {
         if (cancelled) return
         setLoading(false)
       })
-
-    chatApi.watch(sessionId)
-    const off = chatApi.onTranscriptUpdate((u) => {
-      if (u.sessionId !== sessionId) return
-      setMessages(u.messages)
-      setTranscriptExists(u.transcriptExists)
-    })
 
     return () => {
       cancelled = true

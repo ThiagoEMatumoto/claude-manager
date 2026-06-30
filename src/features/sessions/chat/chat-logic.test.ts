@@ -5,7 +5,10 @@ import {
   isAtBottom,
   nextResolveAt,
   pendingEchoes,
+  pendingInteractive,
   resolveChatViewState,
+  resolveInteractive,
+  showTerminalWaitBanner,
   type Echo,
 } from './chat-logic'
 
@@ -95,6 +98,88 @@ describe('resolveChatViewState', () => {
     expect(resolveChatViewState({ loading: false, transcriptExists: false, messageCount: 1 })).toBe(
       'ready',
     )
+  })
+})
+
+describe('resolveInteractive', () => {
+  it('maps question/plan ids to their answers/decision', () => {
+    const msgs: ChatMessage[] = [
+      { kind: 'ask_user_question', id: 'a1', questions: [] },
+      { kind: 'ask_user_question_answered', forId: 'a1', answers: { Q: 'opt' } },
+      { kind: 'exit_plan_mode', id: 'p1', plan: '# P', allowedPrompts: null },
+      { kind: 'plan_decision', forId: 'p1', approved: true },
+    ]
+    const r = resolveInteractive(msgs)
+    expect(r.answers.get('a1')).toEqual({ Q: 'opt' })
+    expect(r.plans.get('p1')).toBe(true)
+  })
+
+  it('maps subagent ids to their final error status', () => {
+    const r = resolveInteractive([
+      { kind: 'subagent', id: 's1', name: 'Explore', description: '', turnCount: 1, turns: [] },
+      { kind: 'subagent_result', forId: 's1', isError: false },
+      { kind: 'subagent', id: 's2', name: 'Explore', description: '', turnCount: 1, turns: [] },
+      { kind: 'subagent_result', forId: 's2', isError: true },
+    ])
+    expect(r.subagents.get('s1')).toBe(false)
+    expect(r.subagents.get('s2')).toBe(true)
+  })
+
+  it('leaves unresolved ids out of the maps', () => {
+    const r = resolveInteractive([{ kind: 'ask_user_question', id: 'pend', questions: [] }])
+    expect(r.answers.has('pend')).toBe(false)
+    expect(r.subagents.has('pend')).toBe(false)
+  })
+})
+
+describe('pendingInteractive', () => {
+  it('returns the kind of the last unanswered interactive moment', () => {
+    expect(pendingInteractive([{ kind: 'ask_user_question', id: 'a', questions: [] }])).toBe(
+      'question',
+    )
+    expect(
+      pendingInteractive([{ kind: 'exit_plan_mode', id: 'p', plan: '#', allowedPrompts: null }]),
+    ).toBe('plan')
+  })
+
+  it('is null once the last interactive moment is resolved', () => {
+    const msgs: ChatMessage[] = [
+      { kind: 'ask_user_question', id: 'a', questions: [] },
+      { kind: 'ask_user_question_answered', forId: 'a', answers: {} },
+    ]
+    expect(pendingInteractive(msgs)).toBeNull()
+  })
+
+  it('reflects the latest moment when an answered one precedes a pending one', () => {
+    const msgs: ChatMessage[] = [
+      { kind: 'exit_plan_mode', id: 'p', plan: '#', allowedPrompts: null },
+      { kind: 'plan_decision', forId: 'p', approved: true },
+      { kind: 'ask_user_question', id: 'a', questions: [] },
+    ]
+    expect(pendingInteractive(msgs)).toBe('question')
+  })
+
+  it('is null when there is no interactive moment', () => {
+    expect(pendingInteractive([user('hi'), assistant('yo')])).toBeNull()
+  })
+})
+
+describe('showTerminalWaitBanner', () => {
+  it('shows when waiting with no known interactive card (TTY-only prompt)', () => {
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: null })).toBe(true)
+  })
+
+  it('defers to the R5 card/banner when a question/plan is pending', () => {
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'question' })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'plan' })).toBe(false)
+  })
+
+  it('does not show for non-waiting statuses', () => {
+    expect(showTerminalWaitBanner({ status: 'working', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'idle', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'starting', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'ended', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: undefined, pending: null })).toBe(false)
   })
 })
 

@@ -7,8 +7,15 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { ChatMessage } from '../../../../shared/types/ipc'
+import { Clock, Loader, TerminalSquare } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
+import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { MessageBubble } from './MessageBubble'
+import { PlanCard } from './PlanCard'
+import { QuestionCard } from './QuestionCard'
+import { SubagentCard } from './SubagentCard'
+import { SystemCard } from './SystemCard'
+import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
 import {
@@ -16,7 +23,10 @@ import {
   isAtBottom,
   nextResolveAt,
   pendingEchoes,
+  pendingInteractive,
   resolveChatViewState,
+  resolveInteractive,
+  showTerminalWaitBanner,
   type Echo,
 } from './chat-logic'
 
@@ -27,12 +37,18 @@ export interface ChatViewHandle {
 
 interface Props {
   sessionId: string
+  // Status da sessão (do broadcast session:activity, via Terminal) pra mostrar um
+  // indicador discreto de "trabalhando" enquanto o claude computa a resposta.
+  status?: SessionActivity['status']
+  // Alterna pro modo terminal. Usado pelo banner de espera genérica (ex.: prompt
+  // de permissão y/n, TTY-only) pra levar o usuário ao único lugar que o renderiza.
+  onToggleMode?: () => void
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode }, ref) {
   const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -76,6 +92,15 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
   }, [rendered])
 
+  // Liga cada pergunta/plano (por id) à resposta/decisão posterior, pra fundir
+  // ambos no mesmo card e não renderizar a mensagem de resposta solta. Sobre as
+  // mensagens de disco: ecos otimistas são só texto do usuário.
+  const interactive = useMemo(() => resolveInteractive(messages), [messages])
+  const pendingPrompt = useMemo(() => pendingInteractive(messages), [messages])
+  // Espera que o chat não consegue representar (provável prompt de permissão
+  // y/n / menu TTY): status 'waiting' sem um card de pergunta/plano conhecido.
+  const waitInTerminal = showTerminalWaitBanner({ status, pending: pendingPrompt })
+
   const viewState = resolveChatViewState({
     loading,
     transcriptExists,
@@ -102,18 +127,88 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
       <div className="mx-auto flex max-w-3xl flex-col gap-3">
         {rendered.map((m, i) => {
           // Ecos otimistas vêm DEPOIS das mensagens de disco; marcamos como pendentes.
-          const pending = i >= messages.length
+          const echoPending = i >= messages.length
           switch (m.kind) {
             case 'user':
-              return <MessageBubble key={i} role="user" text={m.text} pending={pending} />
+              return <MessageBubble key={i} role="user" text={m.text} pending={echoPending} />
             case 'assistant':
               return <MessageBubble key={i} role="assistant" text={m.text} />
+            case 'thinking':
+              return <ThinkingCard key={i} text={m.text} />
+            case 'system':
+              return <SystemCard key={i} label={m.label} detail={m.detail} level={m.level} />
             case 'tool_use':
               return <ToolUseCard key={i} name={m.name} input={m.input} />
+            case 'subagent':
+              return (
+                <SubagentCard
+                  key={i}
+                  name={m.name}
+                  description={m.description}
+                  turnCount={m.turnCount}
+                  turns={m.turns}
+                  status={
+                    interactive.subagents.has(m.id)
+                      ? interactive.subagents.get(m.id)
+                        ? 'error'
+                        : 'ok'
+                      : undefined
+                  }
+                />
+              )
             case 'tool_result':
               return <ToolResultCard key={i} content={m.content} isError={m.isError} />
+            case 'ask_user_question':
+              return <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
+            case 'exit_plan_mode':
+              return <PlanCard key={i} plan={m.plan} decision={interactive.plans.get(m.id)} />
+            // Resposta/decisão/status são fundidos no card acima (por forId) — não
+            // renderizam sozinhos.
+            case 'ask_user_question_answered':
+            case 'plan_decision':
+            case 'subagent_result':
+              return null
           }
         })}
+        {pendingPrompt && (
+          <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-accent)]/50 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
+            <Icon as={Clock} size={14} className="shrink-0 text-[var(--color-accent)]" />
+            {pendingPrompt === 'plan'
+              ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
+              : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
+          </div>
+        )}
+        {/* Espera genérica (TTY-only): o chat não tem card pra mostrar. Direciona ao
+            terminal, único lugar que renderiza o prompt (ex.: permissão y/n). */}
+        {waitInTerminal && (
+          <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-warning)]/60 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-warning)]" />
+            <Icon as={Clock} size={14} className="shrink-0 text-[var(--color-warning)]" />
+            <span className="flex-1">
+              Claude está aguardando sua resposta no terminal (ex.: permissão). Abra o Terminal pra
+              responder.
+            </span>
+            {onToggleMode && (
+              <button
+                type="button"
+                onClick={onToggleMode}
+                className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs font-medium hover:border-[var(--color-warning)]"
+              >
+                <Icon as={TerminalSquare} size={13} />
+                Ir pro Terminal
+              </button>
+            )}
+          </div>
+        )}
+        {/* Indicador discreto de atividade. Suprimido quando há um prompt pendente
+            (status 'waiting'), pra não competir com o banner acima. */}
+        {status === 'working' && !pendingPrompt && (
+          <div className="flex items-center gap-2 px-1 text-xs text-[var(--color-text-dim)]">
+            <Icon as={Loader} size={13} className="animate-spin text-[var(--color-accent)]" />
+            Claude está trabalhando…
+          </div>
+        )}
       </div>
     </div>
   )

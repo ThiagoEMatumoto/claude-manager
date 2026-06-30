@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { CornerDownLeft, X } from 'lucide-react'
+import { CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
@@ -19,7 +19,9 @@ export interface ComposerHandle {
 
 // Imagem anexada ao draft atual: `path` é o caminho temp injetado no prompt;
 // `previewUrl` é um object URL (blob:) usado só pra renderizar o thumbnail —
-// precisa ser revogado ao remover/desmontar pra não vazar memória.
+// precisa ser revogado ao remover/desmontar pra não vazar memória. Vazio ('')
+// quando o anexo foi RESTAURADO da persistência: o object URL é efêmero (não
+// serializável) e não há IPC pra reler o binário, então o chip mostra um ícone.
 interface Attachment {
   name: string
   path: string
@@ -60,6 +62,12 @@ function pushHistory(sessionId: string, value: string) {
   histories.set(sessionId, [...list, v])
 }
 
+// Anexos persistidos por sessão: só a parte serializável ({name, path}). O
+// `previewUrl` (object URL) é efêmero e não viaja — ao restaurar, o chip aparece
+// sem thumbnail (com ícone). Mesma natureza dos drafts/histórico: memória.
+type PersistedAttachment = Pick<Attachment, 'name' | 'path'>
+const attachmentsBySession = new Map<string, PersistedAttachment[]>()
+
 const MAX_HEIGHT = 192
 
 // Dock de composição sempre visível abaixo do terminal. Um <textarea> de verdade
@@ -76,8 +84,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // guarda o rascunho ao entrar no histórico pra restaurá-lo ao voltar pro fim.
   const [histIndex, setHistIndex] = useState<number | null>(null)
   const savedDraftRef = useRef('')
-  // Imagens anexadas ao draft atual (thumbnail + nome).
-  const [attached, setAttached] = useState<Attachment[]>([])
+  // Imagens anexadas ao draft atual (thumbnail + nome). Restaura da persistência
+  // por sessão — sem object URL (chip com ícone até o usuário reanexar).
+  const [attached, setAttached] = useState<Attachment[]>(() =>
+    (attachmentsBySession.get(sessionId) ?? []).map((a) => ({ ...a, previewUrl: '' })),
+  )
   // Espelha `attached` pra revogar os object URLs no unmount sem recriar o efeito.
   const attachedRef = useRef<Attachment[]>([])
   const innerRef = useRef<HTMLTextAreaElement>(null)
@@ -100,10 +111,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     attachedRef.current = attached
   }, [attached])
 
+  // Persiste os anexos (só {name, path}) por sessão — sobrevive à troca de sessão,
+  // espelhando o draft. O previewUrl é descartado (efêmero).
+  useEffect(() => {
+    if (attached.length > 0) {
+      attachmentsBySession.set(
+        sessionId,
+        attached.map(({ name, path }) => ({ name, path })),
+      )
+    } else {
+      attachmentsBySession.delete(sessionId)
+    }
+  }, [sessionId, attached])
+
   // Revoga os object URLs ainda pendurados ao desmontar o composer.
   useEffect(() => {
     return () => {
-      for (const a of attachedRef.current) URL.revokeObjectURL(a.previewUrl)
+      for (const a of attachedRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
     }
   }, [])
 
@@ -194,12 +218,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   function removeAttachment(i: number) {
     const target = attachedRef.current[i]
-    if (target) URL.revokeObjectURL(target.previewUrl)
+    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
     setAttached((a) => a.filter((_, j) => j !== i))
   }
 
   function clearAttachments() {
-    for (const a of attachedRef.current) URL.revokeObjectURL(a.previewUrl)
+    for (const a of attachedRef.current) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
     setAttached([])
   }
 
@@ -267,11 +291,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               className="flex items-center gap-1.5 rounded bg-[var(--color-surface-2)] py-0.5 pl-0.5 pr-1.5 text-[10px] text-[var(--color-text-dim)]"
               title="Imagem anexada — o caminho foi inserido no prompt"
             >
-              <img
-                src={att.previewUrl}
-                alt={att.name}
-                className="h-7 w-7 rounded border border-[var(--color-border)] object-cover"
-              />
+              {att.previewUrl ? (
+                <img
+                  src={att.previewUrl}
+                  alt={att.name}
+                  className="h-7 w-7 rounded border border-[var(--color-border)] object-cover"
+                />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border)] text-[var(--color-text-dim)]">
+                  <Icon as={ImageIcon} size={14} />
+                </span>
+              )}
               <span className="max-w-32 truncate">{att.name}</span>
               <button
                 type="button"

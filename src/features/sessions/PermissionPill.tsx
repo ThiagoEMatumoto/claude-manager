@@ -1,32 +1,44 @@
 import { useState } from 'react'
-import { ChevronDown, ShieldCheck } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
+import type { PermissionMode } from '../../../shared/types/ipc'
 import { Icon } from '@/components/ui/Icon'
 import { Menu, type MenuSection } from '@/components/ui/Menu'
 import { PERMISSION_OPTIONS } from './permission-modes'
+import { permissionStyle } from './pill-state'
 
 interface Props {
-  /** Envia um passo de ciclo (Shift+Tab) ao PTY. */
-  onCycle: () => void
+  /** Modo ATIVO (refletido do rodapé da TUI). null = ainda não detectado → padrão seguro. */
+  currentMode: PermissionMode | null
+  /** Seleção direta de um modo (quando a fiação suportar set-exato). */
+  onSelect?: (mode: PermissionMode) => void
+  /** Fallback: envia um passo de ciclo (Shift+Tab) ao PTY. */
+  onCycle?: () => void
 }
 
-// Seletor VISÍVEL de modo de permissão (estilo "ajuste" do Claude Desktop),
-// substituindo o botão de ciclo cego. Lista os 6 modos da CLI via Menu+portal
-// (mesmo fix dos outros pills, pra não cortar na pane vizinha).
+// Seletor VISÍVEL de modo de permissão, colorido pelo modo ATIVO (permissionStyle):
+// default/plan = seguro (cor normal, ShieldCheck); acceptEdits = aviso (âmbar);
+// auto/bypass/dontAsk = perigo (vermelho, ShieldAlert). O ícone segue o estado.
 //
 // Aplicação: na CRIAÇÃO da sessão o modo é EXATO (SpawnSessionDialog → --permission-mode).
-// Em runtime a CLI NÃO tem set-exato (não há /permission) — só o ciclo nativo via
-// Shift+Tab. A ordem do ciclo da TUI não é confiável pra inferir um mapeamento
-// seleção→N passos, então clicar em QUALQUER modo envia UM Shift+Tab (um passo).
-// O modo ativo é refletido no rodapé do próprio Claude, que é a fonte da verdade.
-export function PermissionPill({ onCycle }: Props) {
+// Em runtime a CLI não tem set-exato (sem /permission) — só o ciclo nativo via Shift+Tab.
+// Por isso clicar num modo prefere onSelect (quando a fiação souber aplicar) e cai em
+// onCycle (UM passo do ciclo) como fallback. O modo ativo vem do rodapé do próprio Claude.
+export function PermissionPill({ currentMode, onSelect, onCycle }: Props) {
   const [open, setOpen] = useState(false)
+  const style = permissionStyle(currentMode)
+  const activeLabel =
+    PERMISSION_OPTIONS.find((opt) => opt.value === currentMode)?.label ?? 'Padrão'
 
   const sections: MenuSection[] = [
     {
-      title: 'Permissão · Shift+Tab cicla (1 passo)',
+      title: 'Permissão · modo ativo destacado',
       items: PERMISSION_OPTIONS.map((opt) => ({
         label: opt.label,
-        onClick: onCycle,
+        active: opt.value === currentMode,
+        onClick: () => {
+          if (onSelect) onSelect(opt.value)
+          else onCycle?.()
+        },
       })),
     },
   ]
@@ -36,11 +48,11 @@ export function PermissionPill({ onCycle }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="Modo de permissão. A CLI não permite definir um modo exato em runtime: clicar em qualquer modo envia Shift+Tab (um passo do ciclo nativo do Claude). O modo ativo aparece no rodapé do Claude; o modo exato é garantido na criação da sessão."
-        className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+        title="Modo de permissão (ativo refletido do rodapé do Claude). O modo exato é garantido na criação da sessão; em runtime, selecionar avança o ciclo nativo (Shift+Tab)."
+        className={`flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] transition hover:border-current/50 ${style.text}`}
       >
-        <Icon as={ShieldCheck} size={11} className="text-[var(--color-accent)]" />
-        <span className="whitespace-nowrap">Permissão</span>
+        <Icon as={style.icon} size={11} style={{ color: style.color }} />
+        <span className="whitespace-nowrap">{activeLabel}</span>
         <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />
       </button>
     </Menu>

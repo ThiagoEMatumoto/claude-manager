@@ -40,3 +40,12 @@ export function contextUsage(input: {
 export function formatContextUsage(u: ContextUsage): string {
   return `${fmtTokens(u.used)} / ${fmtTokens(u.limit)} · ${u.pct}%`
 }
+
+// Capacidade do nível xhigh (e do mecanismo nativo 'ultracode', que exige
+// xhigh) por modelo: opus e sonnet suportam; haiku não. Reusa o mesmo match de
+// alias do indicador de contexto. Modelo desconhecido (null) → false: sem
+// confirmar suporte, não habilitamos o nível.
+export function modelSupportsXhigh(model: string | null): boolean {
+  const alias = modelAliasFromId(model)
+  return alias === 'opus' || alias === 'sonnet'
+}

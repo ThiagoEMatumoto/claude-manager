@@ -9,6 +9,9 @@ export type ActivityStatus = SessionActivity['status']
 export interface PendingSelection {
   model?: ModelAlias
   effort?: EffortLevel
+  // Ativação enfileirada do mecanismo nativo `/effort ultracode` (não é um nível
+  // de --effort). Mutuamente exclusivo com `effort` — selecionar um cancela o outro.
+  ultracode?: boolean
 }
 
 export interface FlushResult {
@@ -19,7 +22,7 @@ export interface FlushResult {
 }
 
 export function isPendingEmpty(p: PendingSelection): boolean {
-  return p.model === undefined && p.effort === undefined
+  return p.model === undefined && p.effort === undefined && !p.ultracode
 }
 
 // Acumula uma nova troca sobre a pendência atual. Última troca de cada tipo

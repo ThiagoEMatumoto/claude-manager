@@ -1,6 +1,6 @@
 import { Clock, Loader, OctagonX } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import type { SessionActivity } from '../../../shared/types/ipc'
+import type { PermissionMode, SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
 import { EffortPill } from './EffortPill'
 import { PermissionPill } from './PermissionPill'
@@ -12,9 +12,17 @@ interface Props {
   canSwitch: boolean
   /** Troca enfileirada enquanto a sessão está ocupada. */
   pending: PendingSelection
+  /** Nível de esforço ATIVO da sessão (rastreado pelo que foi injetado). */
+  activeEffort: EffortLevel | null
+  /** Modelo ativo suporta xhigh → habilita 'ultracode' no menu do EffortPill. */
+  xhighCapable: boolean
+  /** `/effort ultracode` ativo nesta sessão (sobrepõe o nível exibido). */
+  ultracodeActive: boolean
+  /** Modo de permissão ATIVO, refletido do rodapé da TUI. null = padrão seguro. */
+  currentMode: PermissionMode | null
   onSelectModel: (alias: ModelAlias) => void
-  onSelectEffort: (level: EffortLevel) => void
-  /** Avança um passo do ciclo de permissão (envia Shift+Tab ao PTY). Ausente = sem o controle. */
+  onSelectEffort: (level: EffortLevel | 'ultracode') => void
+  /** Avança um passo do ciclo de permissão (envia Shift+Tab ao PTY). Ausente = sem o ciclo. */
   onCyclePermission?: () => void
   /** Interrompe o claude (envia Ctrl+C ao PTY). Ausente = sem o botão. */
   onInterrupt?: () => void
@@ -24,6 +32,7 @@ function pendingLabel(pending: PendingSelection): string {
   const parts: string[] = []
   if (pending.model) parts.push(pending.model)
   if (pending.effort) parts.push(pending.effort)
+  if (pending.ultracode) parts.push('ultracode')
   return parts.join(' · ')
 }
 
@@ -35,6 +44,10 @@ export function ComposerToolbar({
   activity,
   canSwitch,
   pending,
+  activeEffort,
+  xhighCapable,
+  ultracodeActive,
+  currentMode,
   onSelectModel,
   onSelectEffort,
   onCyclePermission,
@@ -50,8 +63,15 @@ export function ComposerToolbar({
         pending={pending}
         onSelectModel={onSelectModel}
       />
-      <EffortPill canSwitch={canSwitch} pending={pending} onSelectEffort={onSelectEffort} />
-      {onCyclePermission && <PermissionPill onCycle={onCyclePermission} />}
+      <EffortPill
+        effort={activeEffort}
+        pending={pending.effort}
+        xhighCapable={xhighCapable}
+        ultracodeActive={ultracodeActive}
+        onSelect={onSelectEffort}
+        canSwitch={canSwitch}
+      />
+      <PermissionPill currentMode={currentMode} onCycle={onCyclePermission} />
       {onInterrupt && (
         <button
           type="button"

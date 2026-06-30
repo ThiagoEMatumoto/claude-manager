@@ -75,14 +75,6 @@ const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
 // Pontuação de fim de frase grudada no path não faz parte dele.
 const TRAILING = /[.,:;)\]}>'"]+$/
 
-// Altura (px) da faixa que cobre o box de input da TUI do claude no modo terminal.
-// O composer é o input ÚNICO (modelo Warp), então o box que o claude desenha no
-// rodapé é redundante e gera dois campos visíveis. Cobrimos com uma faixa opaca
-// na cor de fundo do terminal. Heurística (~5 linhas do box) — AFINAR LIVE, pois a
-// altura do box varia com largura/conteúdo. Fallback documentado: se ficar janky,
-// esconder o composer no terminal ({!exited && mode === 'chat'}) em vez de cobrir.
-const TUI_INPUT_COVER_PX = 96
-
 // Resolução simples de path no renderer (sem `path` do node): junta um path
 // relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
 function resolvePath(raw: string, cwd: string | null): string | null {
@@ -321,12 +313,11 @@ export function Terminal({
       scrollback: useTerminalPrefsStore.getState().scrollback,
       cursorBlink: true,
       allowProposedApi: true,
-      // Modelo Warp: o xterm é DISPLAY-ONLY. disableStdin desliga o caminho de
-      // digitação→PTV (textarea readOnly, triggerDataEvent vira no-op) mantendo o
-      // render do TUI, seleção, scroll e copy vivos. O input único é o Composer; ele
-      // encaminha teclas de controle via write() (direto no PTY, fora do xterm) e o
-      // texto via insertPrompt (também write() direto no PTY, em bracketed-paste).
-      disableStdin: true,
+      // O xterm é INTERATIVO: digitar aqui flui via onData→write (abaixo) direto pro PTY.
+      // O Composer é um input ADITIVO/opcional que também escreve no PTY (texto via
+      // insertPrompt em bracketed-paste; teclas de controle via onForwardKey quando vazio)
+      // — útil pra prompt multilinha, mas não é o único input.
+      disableStdin: false,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -489,6 +480,12 @@ export function Terminal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
+
+  // Foco no xterm ao (re)entrar no modo terminal, pra digitar direto na TUI sem clicar
+  // primeiro. Em chat o host é invisible (não-focável), então não rouba foco lá.
+  useEffect(() => {
+    if (mode !== 'chat' && !exited) xtermRef.current?.focus()
+  }, [mode, exited])
 
   // Zoom ao vivo: atualiza a fonte do xterm já montado quando o store muda, sem
   // recriar o terminal (a criação lê o tamanho via getState()).
@@ -727,16 +724,6 @@ export function Terminal({
           className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'invisible' : ''}`}
         />
 
-        {/* Cobre o box de input da TUI no rodapé do xterm (só no modo terminal). O
-            composer é o input único, então o box do claude é redundante. pointer-events-none
-            preserva seleção/scroll/copy da área visível acima. */}
-        {!exited && mode !== 'chat' && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--color-bg)]"
-            style={{ height: TUI_INPUT_COVER_PX }}
-          />
-        )}
 
         {mode === 'chat' && (
           <ChatView

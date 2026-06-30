@@ -66,8 +66,9 @@ const NAV_SEQ: Record<string, string> = {
 // Decide se uma tecla do composer vira sequência pro PTY ou edição local do textarea.
 // `textareaEmpty` resolve os conflitos com a edição: navegação e Enter-cru só viram
 // controle quando não há rascunho; Ctrl+C só interrompe com o composer vazio (com
-// texto, Ctrl+C copia nativamente). Não existe histórico de prompts (↑) — então as
-// setas ↑/↓ podem ir direto pros menus do claude sem conflito.
+// texto, Ctrl+C copia nativamente). As setas ↑/↓ PURAS vão pros menus do claude;
+// Ctrl/Alt+↑/↓ são reservadas pro histórico de prompts (tratado no Composer, antes
+// deste forward) — por isso a navegação aqui exige ausência de ctrl/alt/meta.
 export function resolveForwardKey(e: ForwardKeyEvent, textareaEmpty: boolean): ForwardKeyResult {
   const { key } = e
 
@@ -91,8 +92,35 @@ export function resolveForwardKey(e: ForwardKeyEvent, textareaEmpty: boolean): F
     return textareaEmpty ? { seq: '\r' } : HANDLE_IN_TEXTAREA
   }
 
-  // Navegação: só encaminha com o textarea vazio (senão é movimentação do cursor).
-  if (textareaEmpty && key in NAV_SEQ) return { seq: NAV_SEQ[key] }
+  // Navegação: só encaminha com o textarea vazio (senão é movimentação do cursor) e
+  // sem ctrl/alt/meta (esses combos ficam pro histórico/edição, não pro TUI).
+  if (textareaEmpty && !e.ctrl && !e.alt && !e.meta && key in NAV_SEQ) {
+    return { seq: NAV_SEQ[key] }
+  }
 
   return HANDLE_IN_TEXTAREA
+}
+
+export interface HistoryNav {
+  value: string
+  index: number
+}
+
+// Navega o histórico de prompts enviados (estilo shell). `history` em ordem
+// cronológica (mais antigo primeiro); o índice vai de 0 a history.length, onde
+// `index === history.length` é a posição "rascunho atual" (fora do histórico).
+// 'prev' recua rumo ao prompt mais recente; 'next' avança de volta ao rascunho
+// (devolve '' nessa borda — o caller restaura o rascunho salvo). Pura/testável.
+export function navigateHistory(
+  history: string[],
+  index: number,
+  dir: 'prev' | 'next',
+): HistoryNav {
+  if (history.length === 0) return { value: '', index: 0 }
+  if (dir === 'prev') {
+    const next = Math.max(0, index - 1)
+    return { value: history[next] ?? '', index: next }
+  }
+  const next = Math.min(history.length, index + 1)
+  return { value: next < history.length ? history[next] : '', index: next }
 }

@@ -10,7 +10,7 @@ import { CornerDownLeft, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
-import { resolveComposerKey, resolveForwardKey } from './composer-keys'
+import { navigateHistory, resolveComposerKey, resolveForwardKey } from './composer-keys'
 import { insertPathToken, pickImageFiles, pickImageItems } from './image-paste'
 
 export interface ComposerHandle {
@@ -46,6 +46,20 @@ interface Props {
 // estável durante o ciclo de vida da instância.
 const drafts = new Map<string, string>()
 
+// Histórico de prompts despachados por sessão (em ordem cronológica). Mesma
+// natureza dos drafts: memória, por sessão, sobrevive ao remount do dock mas não
+// persiste em disco. Recuperável via Ctrl+↑/↓ no composer.
+const histories = new Map<string, string[]>()
+
+function pushHistory(sessionId: string, value: string) {
+  const v = value.trim()
+  if (!v) return
+  const list = histories.get(sessionId) ?? []
+  // Dedupe consecutivo (estilo shell) — não polui o histórico com repetições.
+  if (list[list.length - 1] === v) return
+  histories.set(sessionId, [...list, v])
+}
+
 const MAX_HEIGHT = 192
 
 // Dock de composição sempre visível abaixo do terminal. Um <textarea> de verdade
@@ -57,6 +71,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
+  // Navegação do histórico de prompts: `histIndex` null = editando o rascunho
+  // atual (fora do histórico); >= 0 = posição no histórico da sessão. `savedDraft`
+  // guarda o rascunho ao entrar no histórico pra restaurá-lo ao voltar pro fim.
+  const [histIndex, setHistIndex] = useState<number | null>(null)
+  const savedDraftRef = useRef('')
   // Imagens anexadas ao draft atual (thumbnail + nome).
   const [attached, setAttached] = useState<Attachment[]>([])
   // Espelha `attached` pra revogar os object URLs no unmount sem recriar o efeito.
@@ -99,6 +118,40 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   function refocus() {
     // onSend/onInsert focam o xterm; devolvemos o foco ao composer no próximo tick.
     requestAnimationFrame(() => innerRef.current?.focus())
+  }
+
+  // Move o cursor pro fim e foca — usado ao recuperar um prompt do histórico.
+  function caretToEnd() {
+    requestAnimationFrame(() => {
+      const node = innerRef.current
+      if (!node) return
+      node.focus()
+      const end = node.value.length
+      node.setSelectionRange(end, end)
+    })
+  }
+
+  // Ctrl+↑/↓ percorre o histórico de prompts da sessão (estilo shell). 'prev'
+  // recua pros mais recentes; 'next' avança de volta até o rascunho salvo. Binding
+  // distinto do ↑/↓ puro (que dirige a TUI do claude quando o composer está vazio).
+  function recallHistory(dir: 'prev' | 'next') {
+    const list = histories.get(sessionId) ?? []
+    if (list.length === 0) return
+    // Ao entrar no histórico a partir do rascunho, guarda o texto atual.
+    const cur = histIndex ?? list.length
+    if (histIndex === null) {
+      if (dir === 'next') return // já no fim; nada mais novo
+      savedDraftRef.current = text
+    }
+    const res = navigateHistory(list, cur, dir)
+    if (res.index >= list.length) {
+      setText(savedDraftRef.current)
+      setHistIndex(null)
+    } else {
+      setText(res.value)
+      setHistIndex(res.index)
+    }
+    caretToEnd()
   }
 
   // Salva cada imagem como temp (binário, via IPC) e injeta o(s) path(s) absoluto(s)
@@ -178,7 +231,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const value = text
     if (value.trim().length === 0) return
     onSend(value)
+    pushHistory(sessionId, value)
     setText('')
+    setHistIndex(null)
     clearAttachments()
     drafts.delete(sessionId)
     refocus()
@@ -188,7 +243,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const value = text
     if (value.trim().length === 0) return
     onInsert(value)
+    pushHistory(sessionId, value)
     setText('')
+    setHistIndex(null)
     clearAttachments()
     drafts.delete(sessionId)
     refocus()
@@ -232,7 +289,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         <textarea
           ref={innerRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            // Editar manualmente sai do modo histórico (vira um novo rascunho).
+            if (histIndex !== null) setHistIndex(null)
+          }}
           onPaste={handlePaste}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -242,6 +303,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onKeyDown={(e) => {
             // Não deixa atalhos globais/terminal interceptarem enquanto compõe.
             e.stopPropagation()
+            // Histórico de prompts: Ctrl+↑/↓ recupera prompts despachados na sessão.
+            // Vem ANTES do forward pro PTY pra não conflitar com o ↑/↓ puro (que
+            // dirige a TUI do claude quando o composer está vazio).
+            if (
+              (e.ctrlKey || e.altKey) &&
+              !e.metaKey &&
+              (e.key === 'ArrowUp' || e.key === 'ArrowDown')
+            ) {
+              e.preventDefault()
+              recallHistory(e.key === 'ArrowUp' ? 'prev' : 'next')
+              return
+            }
             // Modelo Warp: teclas de controle/navegação são encaminhadas pro PTY pra
             // dirigir a TUI do claude (menus, y/n, Shift+Tab, interrupção). O textarea
             // vazio é "modo de controle"; com texto, as teclas editam o draft.
@@ -293,7 +366,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>
         </div>
       </div>
-      <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">{hint}</div>
+      <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">
+        {hint} · Ctrl+↑/↓ histórico
+      </div>
     </div>
   )
 })

@@ -74,6 +74,14 @@ const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
 // Pontuação de fim de frase grudada no path não faz parte dele.
 const TRAILING = /[.,:;)\]}>'"]+$/
 
+// Altura (px) da faixa que cobre o box de input da TUI do claude no modo terminal.
+// O composer é o input ÚNICO (modelo Warp), então o box que o claude desenha no
+// rodapé é redundante e gera dois campos visíveis. Cobrimos com uma faixa opaca
+// na cor de fundo do terminal. Heurística (~5 linhas do box) — AFINAR LIVE, pois a
+// altura do box varia com largura/conteúdo. Fallback documentado: se ficar janky,
+// esconder o composer no terminal ({!exited && mode === 'chat'}) em vez de cobrir.
+const TUI_INPUT_COVER_PX = 96
+
 // Resolução simples de path no renderer (sem `path` do node): junta um path
 // relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
 function resolvePath(raw: string, cwd: string | null): string | null {
@@ -727,6 +735,17 @@ export function Terminal({
           ref={hostRef}
           className={`h-full bg-[var(--color-bg)] p-2 ${mode === 'chat' ? 'hidden' : ''}`}
         />
+
+        {/* Cobre o box de input da TUI no rodapé do xterm (só no modo terminal). O
+            composer é o input único, então o box do claude é redundante. pointer-events-none
+            preserva seleção/scroll/copy da área visível acima. */}
+        {!exited && mode !== 'chat' && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--color-bg)]"
+            style={{ height: TUI_INPUT_COVER_PX }}
+          />
+        )}
 
         {mode === 'chat' && (
           <ChatView ref={chatViewRef} sessionId={session.id} status={activity?.status} />

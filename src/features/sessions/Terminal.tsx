@@ -18,6 +18,7 @@ import { useAppStore, type PaneMode } from '@/store/appStore'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
+import { ContextUsageIndicator } from './ContextUsageIndicator'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
@@ -611,6 +612,10 @@ export function Terminal({
               )}
             </div>
           )}
+          {/* Monitor de contexto: mesmo header (compartilhado pelos dois modos) já
+              mostra o status acima; aqui repomos o uso da janela vs. o limite do
+              modelo. Auto-oculta sem tokens+modelo. */}
+          {!exited && <ContextUsageIndicator activity={activity} />}
           {exited &&
             (claudeNotFound ? (
               <span className="flex items-center gap-1 text-[var(--color-danger)]">

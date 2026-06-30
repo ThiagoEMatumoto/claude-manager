@@ -308,6 +308,47 @@ describe('parseChatMessages — interactive prompts', () => {
   })
 })
 
+// Blocos de raciocínio (extended thinking): texto não-vazio vira kind 'thinking';
+// bloco vazio (só assinatura) é descartado; redacted_thinking vira placeholder.
+const THINKING_FIXTURE = [
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Let me reason about this.', signature: 'abc' },
+        { type: 'text', text: 'Here is the answer.' },
+      ],
+    },
+  }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '', signature: 'def' }, // vazio → descartado
+        { type: 'redacted_thinking', data: 'encrypted' }, // → placeholder
+        { type: 'text', text: 'Done.' },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — thinking', () => {
+  const m = parseChatMessages(THINKING_FIXTURE)
+
+  it('emits thinking for non-empty blocks, drops empty, placeholders redacted', () => {
+    expect(m.map((x) => x.kind)).toEqual([
+      'thinking', // "Let me reason about this."
+      'assistant', // "Here is the answer."
+      'thinking', // redacted placeholder (bloco vazio anterior descartado)
+      'assistant', // "Done."
+    ])
+    expect(m[0]).toEqual({ kind: 'thinking', text: 'Let me reason about this.' })
+    expect(m[2]).toEqual({ kind: 'thinking', text: '(raciocínio oculto)' })
+  })
+})
+
 // Conteúdo de um agent-<hash>.jsonl: turnos do subagente (isSidechain). Cada linha
 // assistant é um turno; o resumo junta o texto, ou lista ferramentas se for só
 // tool_use. A 1ª linha user (o prompt) e linhas malformadas não contam como turno.

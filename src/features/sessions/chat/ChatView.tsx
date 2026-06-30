@@ -14,6 +14,7 @@ import { MessageBubble } from './MessageBubble'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
 import { SubagentCard } from './SubagentCard'
+import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
 import {
@@ -124,6 +125,8 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return <MessageBubble key={i} role="user" text={m.text} pending={echoPending} />
             case 'assistant':
               return <MessageBubble key={i} role="assistant" text={m.text} />
+            case 'thinking':
+              return <ThinkingCard key={i} text={m.text} />
             case 'tool_use':
               return <ToolUseCard key={i} name={m.name} input={m.input} />
             case 'subagent':

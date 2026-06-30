@@ -23,6 +23,9 @@ export interface ChatQuestion {
 export type ChatMessage =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
+  // Bloco de raciocínio (extended thinking). text vazio é descartado no parser;
+  // redacted_thinking (criptografado) vira um placeholder. Render colapsável.
+  | { kind: 'thinking'; text: string }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
   | { kind: 'tool_result'; forId: string; content: string; isError: boolean }
   // Subagente disparado via Task/Agent. Substitui o tool_use genérico quando há

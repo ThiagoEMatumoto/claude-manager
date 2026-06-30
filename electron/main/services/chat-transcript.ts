@@ -7,6 +7,8 @@ import type { ChatMessage, ChatQuestion } from '../../../shared/types/chat'
 interface RawContentItem {
   type?: string
   text?: string
+  // bloco de raciocínio (extended thinking); redacted_thinking não traz texto.
+  thinking?: string
   // tool_use (assistant)
   id?: string
   name?: string
@@ -228,6 +230,13 @@ export function parseChatMessages(
       for (const item of content) {
         if (item?.type === 'text' && typeof item.text === 'string') {
           if (item.text.trim()) out.push({ kind: 'assistant', text: item.text })
+        } else if (item?.type === 'thinking') {
+          // Blocos de thinking costumam vir vazios (só assinatura) quando o modelo
+          // não expõe o raciocínio — só emitimos quando há texto de fato.
+          const t = typeof item.thinking === 'string' ? item.thinking.trim() : ''
+          if (t) out.push({ kind: 'thinking', text: t })
+        } else if (item?.type === 'redacted_thinking') {
+          out.push({ kind: 'thinking', text: '(raciocínio oculto)' })
         } else if (item?.type === 'tool_use' && typeof item.name === 'string') {
           const id = typeof item.id === 'string' ? item.id : ''
           const sub = id ? subagents?.get(id) : undefined

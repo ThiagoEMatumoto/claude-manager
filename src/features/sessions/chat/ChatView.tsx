@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -92,6 +93,24 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
   }, [rendered])
 
+  // Re-pina no fim quando a ALTURA do conteúdo cresce de forma assíncrona (syntax
+  // highlight, imagens, web-font swap, expand de card) — o effect de [rendered] acima
+  // só roda no commit do React e perde esse crescimento. Observa o div de conteúdo via
+  // callback ref (que só existe no estado 'ready') e reusa o MESMO stickRef, então o
+  // scroll-up desengata daqui também.
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const contentRef = useCallback((node: HTMLDivElement | null) => {
+    observerRef.current?.disconnect()
+    if (!node) return
+    const ro = new ResizeObserver(() => {
+      const el = scrollRef.current
+      if (el && stickRef.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(node)
+    observerRef.current = ro
+  }, [])
+  useEffect(() => () => observerRef.current?.disconnect(), [])
+
   // Liga cada pergunta/plano (por id) à resposta/decisão posterior, pra fundir
   // ambos no mesmo card e não renderizar a mensagem de resposta solta. Sobre as
   // mensagens de disco: ecos otimistas são só texto do usuário.
@@ -109,7 +128,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
 
   if (viewState !== 'ready') {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-[var(--color-text-dim)]">
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--color-bg)] p-6 text-center text-sm text-[var(--color-text-dim)]">
         {(viewState === 'loading' || viewState === 'waiting') && (
           <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
         )}
@@ -123,8 +142,12 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   }
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="absolute inset-0 overflow-y-auto px-3 py-4">
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      className="absolute inset-0 z-10 overflow-y-auto bg-[var(--color-bg)] px-3 py-4"
+    >
+      <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-3">
         {rendered.map((m, i) => {
           // Ecos otimistas vêm DEPOIS das mensagens de disco; marcamos como pendentes.
           const echoPending = i >= messages.length

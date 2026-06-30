@@ -1,8 +1,9 @@
-import { Clock, OctagonX, ShieldCheck } from 'lucide-react'
+import { Clock, OctagonX } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
 import { EffortPill } from './EffortPill'
+import { PermissionPill } from './PermissionPill'
 import { isPendingEmpty, type PendingSelection } from './model-queue'
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
   pending: PendingSelection
   onSelectModel: (alias: ModelAlias) => void
   onSelectEffort: (level: EffortLevel) => void
-  /** Cicla o modo de permissão (envia Shift+Tab ao PTY). Ausente = sem o controle. */
+  /** Avança um passo do ciclo de permissão (envia Shift+Tab ao PTY). Ausente = sem o controle. */
   onCyclePermission?: () => void
   /** Interrompe o claude (envia Ctrl+C ao PTY). Ausente = sem o botão. */
   onInterrupt?: () => void
@@ -50,17 +51,7 @@ export function ComposerToolbar({
         onSelectModel={onSelectModel}
       />
       <EffortPill canSwitch={canSwitch} pending={pending} onSelectEffort={onSelectEffort} />
-      {onCyclePermission && (
-        <button
-          type="button"
-          onClick={onCyclePermission}
-          title="Ciclar o modo de permissão — envia Shift+Tab ao Claude (o mesmo atalho do TUI). A CLI não permite definir um modo exato em runtime: este botão só alterna entre os modos; o modo atual aparece no rodapé do Claude."
-          className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
-        >
-          <Icon as={ShieldCheck} size={11} className="text-[var(--color-accent)]" />
-          <span className="whitespace-nowrap">Permissão ⇧⇥</span>
-        </button>
-      )}
+      {onCyclePermission && <PermissionPill onCycle={onCyclePermission} />}
       {onInterrupt && (
         <button
           type="button"

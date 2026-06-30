@@ -6,6 +6,7 @@ import { featuresApi } from '@/lib/ipc'
 import { suggestFeatures } from '@/features/features/fuzzy'
 import { STATUS_META } from '@/features/features/status'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
+import { PERMISSION_OPTIONS } from './permission-modes'
 import type { EffortLevel, Feature, PermissionMode, Repo } from '../../../shared/types/ipc'
 
 // Opções do segmented control de modelo. '' = Padrão (sem --model no spawn).
@@ -25,17 +26,6 @@ const EFFORT_OPTIONS = [
   { value: 'xhigh', label: 'X-High' },
   { value: 'max', label: 'Max' },
 ] as const
-
-// Opções do segmented de permissão. Espelha os 6 choices da CLI; 'default' é o
-// modo padrão da própria CLI (pergunta tudo), então é o selecionado inicial.
-const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
-  { value: 'default', label: 'Padrão' },
-  { value: 'plan', label: 'Plano' },
-  { value: 'acceptEdits', label: 'Aceitar edições' },
-  { value: 'auto', label: 'Auto' },
-  { value: 'bypassPermissions', label: 'Bypass' },
-  { value: 'dontAsk', label: 'Não perguntar' },
-]
 
 interface Props {
   open: boolean

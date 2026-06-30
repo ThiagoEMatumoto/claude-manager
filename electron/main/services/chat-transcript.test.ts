@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseChatMessages } from './chat-transcript'
+import { parseChatMessages, parseSubagentTurns, type SubagentInfo } from './chat-transcript'
 
 // Fixture representativo: prompt do usuário, resposta assistant com texto +
 // tool_use, tool_result do usuário (string e array), uma linha não-mensagem, uma
@@ -305,5 +305,81 @@ describe('parseChatMessages — interactive prompts', () => {
       }),
     )
     expect(plan).toEqual({ kind: 'exit_plan_mode', id: 'p', plan: 'X', allowedPrompts: null })
+  })
+})
+
+// Conteúdo de um agent-<hash>.jsonl: turnos do subagente (isSidechain). Cada linha
+// assistant é um turno; o resumo junta o texto, ou lista ferramentas se for só
+// tool_use. A 1ª linha user (o prompt) e linhas malformadas não contam como turno.
+const SUBAGENT_JSONL = [
+  JSON.stringify({ type: 'user', isSidechain: true, message: { role: 'user', content: 'go' } }),
+  JSON.stringify({
+    type: 'assistant',
+    isSidechain: true,
+    message: { role: 'assistant', content: [{ type: 'text', text: 'Looking into it.' }] },
+  }),
+  '{ broken',
+  JSON.stringify({
+    type: 'assistant',
+    isSidechain: true,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }] },
+  }),
+].join('\n')
+
+describe('parseSubagentTurns', () => {
+  it('counts assistant turns and summarizes text / tool-only turns', () => {
+    const { turnCount, turns } = parseSubagentTurns(SUBAGENT_JSONL)
+    expect(turnCount).toBe(2) // dois assistant; user e linha quebrada não contam
+    expect(turns).toEqual(['Looking into it.', '⚙ Bash'])
+  })
+
+  it('returns zeroes for empty input', () => {
+    expect(parseSubagentTurns('')).toEqual({ turnCount: 0, turns: [] })
+  })
+})
+
+// Invocação Task/Agent no JSONL principal + dados do subagente (montados a partir
+// de SUBAGENT_JSONL) → o tool_use vira o kind 'subagent'.
+const MAIN_WITH_TASK = [
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'investigate' } }),
+  JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_sub',
+          name: 'Agent',
+          input: { subagent_type: 'Explore', description: 'Map the area' },
+        },
+      ],
+    },
+  }),
+].join('\n')
+
+describe('parseChatMessages — subagents', () => {
+  function subMap(): Map<string, SubagentInfo> {
+    const { turnCount, turns } = parseSubagentTurns(SUBAGENT_JSONL)
+    return new Map([['toolu_sub', { name: 'Explore', description: 'Map the area', turnCount, turns }]])
+  }
+
+  it('emits a subagent kind with name/turnCount when data is provided', () => {
+    const m = parseChatMessages(MAIN_WITH_TASK, subMap())
+    expect(m.map((x) => x.kind)).toEqual(['user', 'subagent'])
+    expect(m[1]).toEqual({
+      kind: 'subagent',
+      id: 'toolu_sub',
+      name: 'Explore',
+      description: 'Map the area',
+      turnCount: 2,
+      turns: ['Looking into it.', '⚙ Bash'],
+    })
+  })
+
+  it('falls back to a generic tool_use when no subagent data matches the id', () => {
+    const m = parseChatMessages(MAIN_WITH_TASK)
+    expect(m[1].kind).toBe('tool_use')
+    expect(m[1]).toMatchObject({ kind: 'tool_use', id: 'toolu_sub', name: 'Agent' })
   })
 })

@@ -25,6 +25,17 @@ export type ChatMessage =
   | { kind: 'assistant'; text: string }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
   | { kind: 'tool_result'; forId: string; content: string; isError: boolean }
+  // Subagente disparado via Task/Agent. Substitui o tool_use genérico quando há
+  // dados do subagente (lidos de <dir>/<sessionId>/subagents/agent-*). id = o
+  // toolUseId da invocação; turns = resumos de cada turno (assistant) pra expandir.
+  | {
+      kind: 'subagent'
+      id: string
+      name: string
+      description: string
+      turnCount: number
+      turns: string[]
+    }
   | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
   | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
   | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }

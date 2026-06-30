@@ -13,6 +13,7 @@ import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { MessageBubble } from './MessageBubble'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
+import { SubagentCard } from './SubagentCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
 import {
@@ -125,6 +126,16 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return <MessageBubble key={i} role="assistant" text={m.text} />
             case 'tool_use':
               return <ToolUseCard key={i} name={m.name} input={m.input} />
+            case 'subagent':
+              return (
+                <SubagentCard
+                  key={i}
+                  name={m.name}
+                  description={m.description}
+                  turnCount={m.turnCount}
+                  turns={m.turns}
+                />
+              )
             case 'tool_result':
               return <ToolResultCard key={i} content={m.content} isError={m.isError} />
             case 'ask_user_question':

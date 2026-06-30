@@ -39,6 +39,10 @@ export type ChatMessage =
       turnCount: number
       turns: string[]
     }
+  // Linha type:'system' do transcript, CURADA: só subtypes úteis (compactação,
+  // erro de API, comando local, info) viram um chip discreto colapsado. O ruído
+  // de alto volume (stop_hook_summary, turn_duration, …) é descartado no parser.
+  | { kind: 'system'; label: string; detail: string; level: 'info' | 'warning' | 'error' }
   | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
   | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
   | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }

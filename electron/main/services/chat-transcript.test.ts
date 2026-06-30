@@ -349,6 +349,36 @@ describe('parseChatMessages — thinking', () => {
   })
 })
 
+// Linhas type:'system': só subtypes whitelistados viram chip; o ruído de alto
+// volume (stop_hook_summary, turn_duration) é descartado.
+const SYSTEM_FIXTURE = [
+  JSON.stringify({ type: 'system', subtype: 'stop_hook_summary', level: 'suggestion' }), // ruído → fora
+  JSON.stringify({ type: 'system', subtype: 'turn_duration', isMeta: false }), // ruído → fora
+  JSON.stringify({ type: 'system', subtype: 'compact_boundary', level: 'info', content: 'Conversation compacted' }),
+  JSON.stringify({ type: 'system', subtype: 'api_error', level: 'error', error: 'rate limited' }),
+  JSON.stringify({
+    type: 'system',
+    subtype: 'local_command',
+    level: 'info',
+    content: '<command-name>/model</command-name>\n<command-args></command-args>',
+  }),
+  JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
+].join('\n')
+
+describe('parseChatMessages — system context (curated)', () => {
+  const m = parseChatMessages(SYSTEM_FIXTURE)
+
+  it('keeps whitelisted subtypes as system chips, drops noise', () => {
+    expect(m.map((x) => x.kind)).toEqual(['system', 'system', 'system', 'user'])
+  })
+
+  it('maps subtype to label/detail/level (local_command extracts the name)', () => {
+    expect(m[0]).toEqual({ kind: 'system', label: 'Conversa compactada', detail: 'Conversation compacted', level: 'info' })
+    expect(m[1]).toEqual({ kind: 'system', label: 'Erro de API', detail: 'rate limited', level: 'error' })
+    expect(m[2]).toMatchObject({ kind: 'system', label: 'Comando /model', level: 'info' })
+  })
+})
+
 // Conteúdo de um agent-<hash>.jsonl: turnos do subagente (isSidechain). Cada linha
 // assistant é um turno; o resumo junta o texto, ou lista ferramentas se for só
 // tool_use. A 1ª linha user (o prompt) e linhas malformadas não contam como turno.

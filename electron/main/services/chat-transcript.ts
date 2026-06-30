@@ -23,6 +23,12 @@ interface RawLine {
   type?: string
   // Turnos de subagente (Task) vivem inline com isSidechain:true.
   isSidechain?: boolean
+  // Linhas type:'system': metadados de nível de linha (sem `message`). subtype
+  // classifica; content/error trazem o texto; level a severidade.
+  subtype?: string
+  content?: string
+  level?: string
+  error?: unknown
   message?: {
     role?: string
     content?: string | RawContentItem[]
@@ -135,6 +141,41 @@ export function parseSubagentTurns(jsonl: string): { turnCount: number; turns: s
   return { turnCount, turns }
 }
 
+// Subtypes de linha type:'system' que VALEM mostrar no chat (curadoria). O resto
+// (stop_hook_summary, turn_duration, scheduled_task_fire, away_summary, …) é
+// telemetria/ruído de alto volume e fica de fora — nada de despejar cru.
+const SYSTEM_LABELS: Record<string, string> = {
+  compact_boundary: 'Conversa compactada',
+  api_error: 'Erro de API',
+  informational: 'Sistema',
+  local_command: 'Comando local',
+}
+
+function asLevel(v: unknown): 'info' | 'warning' | 'error' {
+  return v === 'warning' || v === 'error' ? v : 'info'
+}
+
+// PURO: linha system → chip curado, ou null se for um subtype não-whitelistado.
+// label = texto curto do chip (sempre visível); detail = conteúdo expandido.
+function parseSystemLine(
+  obj: RawLine,
+): { label: string; detail: string; level: 'info' | 'warning' | 'error' } | null {
+  const sub = obj.subtype
+  if (!sub || !(sub in SYSTEM_LABELS)) return null
+  let label = SYSTEM_LABELS[sub]
+  const content = typeof obj.content === 'string' ? obj.content : ''
+  if (sub === 'api_error') {
+    const detail = typeof obj.error === 'string' ? obj.error : content || JSON.stringify(obj.error ?? '')
+    return { label, detail, level: 'error' }
+  }
+  if (sub === 'local_command') {
+    // content vem como <command-name>/x</command-name>… — extrai o nome pro chip.
+    const name = /<command-name>([^<]*)<\/command-name>/.exec(content)?.[1]?.trim()
+    if (name) label = `Comando ${name}`
+  }
+  return { label, detail: content || label, level: asLevel(obj.level) }
+}
+
 // Normaliza o content de um tool_result para string: a CLI grava ou uma string
 // crua ou um array de blocos { type:'text', text }. Junta os blocos de texto;
 // ignora blocos não-textuais (ex.: imagens), que a F5b trataria à parte.
@@ -182,6 +223,11 @@ export function parseChatMessages(
       continue // malformada / escrita parcial — pula a linha, nunca o arquivo.
     }
     if (obj.isSidechain === true) continue
+    if (obj.type === 'system') {
+      const sys = parseSystemLine(obj)
+      if (sys) out.push({ kind: 'system', ...sys })
+      continue
+    }
     if (obj.type !== 'user' && obj.type !== 'assistant') continue
 
     const content = obj.message?.content

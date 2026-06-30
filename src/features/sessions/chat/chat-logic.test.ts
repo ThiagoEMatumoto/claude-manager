@@ -8,6 +8,7 @@ import {
   pendingInteractive,
   resolveChatViewState,
   resolveInteractive,
+  showTerminalWaitBanner,
   type Echo,
 } from './chat-logic'
 
@@ -160,6 +161,25 @@ describe('pendingInteractive', () => {
 
   it('is null when there is no interactive moment', () => {
     expect(pendingInteractive([user('hi'), assistant('yo')])).toBeNull()
+  })
+})
+
+describe('showTerminalWaitBanner', () => {
+  it('shows when waiting with no known interactive card (TTY-only prompt)', () => {
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: null })).toBe(true)
+  })
+
+  it('defers to the R5 card/banner when a question/plan is pending', () => {
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'question' })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'plan' })).toBe(false)
+  })
+
+  it('does not show for non-waiting statuses', () => {
+    expect(showTerminalWaitBanner({ status: 'working', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'idle', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'starting', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'ended', pending: null })).toBe(false)
+    expect(showTerminalWaitBanner({ status: undefined, pending: null })).toBe(false)
   })
 })
 

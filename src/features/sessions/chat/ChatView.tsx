@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Clock, Loader } from 'lucide-react'
+import { Clock, Loader, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { MessageBubble } from './MessageBubble'
@@ -26,6 +26,7 @@ import {
   pendingInteractive,
   resolveChatViewState,
   resolveInteractive,
+  showTerminalWaitBanner,
   type Echo,
 } from './chat-logic'
 
@@ -39,12 +40,15 @@ interface Props {
   // Status da sessão (do broadcast session:activity, via Terminal) pra mostrar um
   // indicador discreto de "trabalhando" enquanto o claude computa a resposta.
   status?: SessionActivity['status']
+  // Alterna pro modo terminal. Usado pelo banner de espera genérica (ex.: prompt
+  // de permissão y/n, TTY-only) pra levar o usuário ao único lugar que o renderiza.
+  onToggleMode?: () => void
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode }, ref) {
   const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -93,6 +97,9 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   // mensagens de disco: ecos otimistas são só texto do usuário.
   const interactive = useMemo(() => resolveInteractive(messages), [messages])
   const pendingPrompt = useMemo(() => pendingInteractive(messages), [messages])
+  // Espera que o chat não consegue representar (provável prompt de permissão
+  // y/n / menu TTY): status 'waiting' sem um card de pergunta/plano conhecido.
+  const waitInTerminal = showTerminalWaitBanner({ status, pending: pendingPrompt })
 
   const viewState = resolveChatViewState({
     loading,
@@ -170,6 +177,28 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             {pendingPrompt === 'plan'
               ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
               : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
+          </div>
+        )}
+        {/* Espera genérica (TTY-only): o chat não tem card pra mostrar. Direciona ao
+            terminal, único lugar que renderiza o prompt (ex.: permissão y/n). */}
+        {waitInTerminal && (
+          <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-warning)]/60 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-warning)]" />
+            <Icon as={Clock} size={14} className="shrink-0 text-[var(--color-warning)]" />
+            <span className="flex-1">
+              Claude está aguardando sua resposta no terminal (ex.: permissão). Abra o Terminal pra
+              responder.
+            </span>
+            {onToggleMode && (
+              <button
+                type="button"
+                onClick={onToggleMode}
+                className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs font-medium hover:border-[var(--color-warning)]"
+              >
+                <Icon as={TerminalSquare} size={13} />
+                Ir pro Terminal
+              </button>
+            )}
           </div>
         )}
         {/* Indicador discreto de atividade. Suprimido quando há um prompt pendente

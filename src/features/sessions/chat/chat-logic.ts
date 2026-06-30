@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../../../shared/types/ipc'
+import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 
 // Eco otimista de uma mensagem do usuário enviada pelo composer em modo chat. O
 // transcript de disco tem atraso (o claude grava o turno do usuário no JSONL
@@ -70,6 +70,19 @@ export function pendingInteractive(messages: ChatMessage[]): 'question' | 'plan'
     else if (m.kind === 'exit_plan_mode') pending = plans.has(m.id) ? null : 'plan'
   }
   return pending
+}
+
+// Decisão pura: mostrar o banner genérico de "aguardando no terminal"? Verdadeiro
+// quando a sessão está 'waiting' MAS não há um momento interativo conhecido
+// (pergunta/plano) já renderizado como card. Ou seja: é uma espera que o chat NÃO
+// consegue representar a partir do transcript — provável prompt de permissão y/n
+// ou menu TTY que só existe no PTY. O banner do R5 (pendingInteractive) tem
+// precedência; este é o fallback que direciona o usuário ao terminal.
+export function showTerminalWaitBanner(input: {
+  status: SessionActivity['status'] | undefined
+  pending: 'question' | 'plan' | null
+}): boolean {
+  return input.status === 'waiting' && input.pending === null
 }
 
 // resolveAt de um eco novo: resolve quando a contagem de usuário no disco chega a

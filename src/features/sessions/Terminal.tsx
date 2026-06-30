@@ -748,7 +748,12 @@ export function Terminal({
         )}
 
         {mode === 'chat' && (
-          <ChatView ref={chatViewRef} sessionId={session.id} status={activity?.status} />
+          <ChatView
+            ref={chatViewRef}
+            sessionId={session.id}
+            status={activity?.status}
+            onToggleMode={onToggleMode}
+          />
         )}
 
         {searchOpen && (

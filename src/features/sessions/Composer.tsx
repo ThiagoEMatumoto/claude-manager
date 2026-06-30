@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
+import { ChevronRight, CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
@@ -40,6 +40,10 @@ interface Props {
   // Barra de controles acima do textarea (switcher de modelo, anexar, etc).
   // Slot agnóstico: o pai compõe o conteúdo (compartilhado entre terminal e chat).
   toolbar?: ReactNode
+  // Habilita o controle de recolher o dock (só faz sentido no modo terminal). O
+  // valor recolhido é global e persistido (useSessionPrefsStore); este flag só
+  // liga/desliga o controle — em chat o dock fica sempre expandido.
+  collapsible?: boolean
 }
 
 // Drafts em memória por sessão — princípio "nunca perder input". Sobrevive ao
@@ -75,7 +79,7 @@ const MAX_HEIGHT = 192
 // resolvendo a dor do Enter/Shift+Enter do input nativo do claude no xterm. É
 // aditivo: o input direto na TUI continua funcionando.
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { sessionId, onSend, onInsert, onForwardKey, toolbar },
+  { sessionId, onSend, onInsert, onForwardKey, toolbar, collapsible = false },
   ref,
 ) {
   const [text, setText] = useState(() => drafts.get(sessionId) ?? '')
@@ -94,6 +98,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const loadPrefs = useSessionPrefsStore((s) => s.load)
+  const composerCollapsed = useSessionPrefsStore((s) => s.composerCollapsed)
+  const setComposerCollapsed = useSessionPrefsStore((s) => s.setComposerCollapsed)
+  // Recolhido só vale no modo terminal (collapsible); em chat o dock é sempre completo.
+  const collapsed = collapsible && composerCollapsed
 
   useImperativeHandle(ref, () => ({ focus: () => innerRef.current?.focus() }), [])
 
@@ -282,8 +290,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-2 pb-1 pt-2">
-      {toolbar}
-      {attached.length > 0 && (
+      <div className="flex items-center gap-1">
+        {collapsible && (
+          <button
+            type="button"
+            onClick={() => void setComposerCollapsed(!composerCollapsed)}
+            title={collapsed ? 'Expandir o compositor' : 'Recolher o compositor (mantém a barra de controles)'}
+            aria-label={collapsed ? 'Expandir o compositor' : 'Recolher o compositor'}
+            className="flex shrink-0 items-center rounded p-0.5 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
+          >
+            <Icon
+              as={ChevronRight}
+              size={14}
+              className={`transition-transform ${collapsed ? '' : 'rotate-90'}`}
+            />
+          </button>
+        )}
+        <div className="min-w-0 flex-1">{toolbar}</div>
+      </div>
+      {!collapsed && attached.length > 0 && (
         <div className="mb-1 flex flex-wrap gap-1.5 px-1">
           {attached.map((att, i) => (
             <span
@@ -315,6 +340,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           ))}
         </div>
       )}
+      {!collapsed && (
+        <>
       <div className="flex items-end gap-2">
         <textarea
           ref={innerRef}
@@ -399,6 +426,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">
         {hint} · Ctrl+↑/↓ histórico
       </div>
+        </>
+      )}
     </div>
   )
 })

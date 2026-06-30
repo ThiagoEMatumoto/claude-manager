@@ -23,11 +23,13 @@ import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
+import { parsePermissionMode } from './permission-mode-parser'
+import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
 import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
-import type { Session, SessionActivity } from '../../../shared/types/ipc'
+import type { PermissionMode, Session, SessionActivity } from '../../../shared/types/ipc'
 
 interface Props {
   session: Session
@@ -74,6 +76,11 @@ function activityStatusView(status: SessionActivity['status'] | undefined): Stat
 const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
 // Pontuação de fim de frase grudada no path não faz parte dele.
 const TRAILING = /[.,:;)\]}>'"]+$/
+
+// Cauda do PTY mantida pra detectar o modo de permissão (parsePermissionMode lê o
+// rodapé da TUI). O rodapé re-renderiza com frequência, então um indicador raramente
+// parte no corte do buffer — e se auto-corrige no próximo redraw.
+const PERM_TAIL_MAX = 16_384
 
 // Resolução simples de path no renderer (sem `path` do node): junta um path
 // relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
@@ -128,12 +135,23 @@ export function Terminal({
   const gotDataRef = useRef(false)
   // Instante do exit, pra medir quanto tempo a sessão viveu (heurístico abaixo).
   const exitAtRef = useRef<number | null>(null)
+  // Detecção do modo de permissão: mantemos uma cauda do PTY e relemos o indicador
+  // mais recente do rodapé. `sawModeRef` evita que o seed do backlog (histórico)
+  // sobrescreva uma detecção ao vivo que já tenha ocorrido.
+  const permBufRef = useRef('')
+  const sawModeRef = useRef(false)
 
   const [title, setTitle] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
+  // Modo de permissão ativo (refletido do rodapé da TUI via parsePermissionMode).
+  const [currentMode, setCurrentMode] = useState<PermissionMode | null>(null)
+  // Esforço ativo e ultracode são rastreados localmente — não há campo no transcript
+  // pra eles. Refletem o último valor que ESTE app injetou (null = ainda não definido).
+  const [activeEffort, setActiveEffort] = useState<EffortLevel | null>(null)
+  const [ultracodeActive, setUltracodeActive] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -198,6 +216,10 @@ export function Terminal({
   // responderia o prompt errado.
   const canSwitchModel = !exited && activity?.status === 'idle'
 
+  // O modelo ativo suporta xhigh? Gate do 'ultracode' no menu do EffortPill
+  // (opus/sonnet sim, haiku não; modelo ainda desconhecido → false).
+  const xhighCapable = modelSupportsXhigh(activity?.model ?? null)
+
   // Injeção sanitizada: os valores vêm EXCLUSIVAMENTE das whitelists literais
   // do ModelPill — nunca texto livre. \x15 (Ctrl+U) limpa a linha do prompt
   // antes, pra não concatenar com algo já digitado (mesmo padrão do /rename).
@@ -206,6 +228,11 @@ export function Terminal({
   }
   function injectEffort(level: EffortLevel) {
     if (EFFORT_LEVELS.includes(level)) write('\x15/effort ' + level + '\r')
+  }
+  // 'ultracode' é um comando literal (não interpola texto livre) — mesmo padrão de
+  // \x15 (Ctrl+U) pra limpar a linha antes. Exige modelo xhigh-capable (gate no menu).
+  function injectUltracode() {
+    write('\x15/effort ultracode\r')
   }
 
   // Troca enfileirada enquanto a sessão está ocupada; aplicada no próximo idle.
@@ -220,10 +247,27 @@ export function Terminal({
     if (canSwitchModel) injectModel(alias)
     else setPending((p) => mergePending(p, { model: alias }))
   }
-  function selectEffort(level: EffortLevel) {
+  // Cobre os níveis de --effort e o pseudo-nível nativo 'ultracode'. São mutuamente
+  // exclusivos: escolher um nível numérico desliga o ultracode e vice-versa. Em idle
+  // injeta direto; ocupada, enfileira (aplicado no próximo idle pelo flush abaixo).
+  function selectEffort(level: EffortLevel | 'ultracode') {
+    if (level === 'ultracode') {
+      if (canSwitchModel) {
+        injectUltracode()
+        setUltracodeActive(true)
+      } else {
+        setPending((p) => mergePending(p, { effort: undefined, ultracode: true }))
+      }
+      return
+    }
     if (!EFFORT_LEVELS.includes(level)) return
-    if (canSwitchModel) injectEffort(level)
-    else setPending((p) => mergePending(p, { effort: level }))
+    if (canSwitchModel) {
+      injectEffort(level)
+      setActiveEffort(level)
+      setUltracodeActive(false)
+    } else {
+      setPending((p) => mergePending(p, { effort: level, ultracode: false }))
+    }
   }
 
   // Flush da fila na transição → idle (único estado seguro p/ injetar), uma vez.
@@ -236,7 +280,15 @@ export function Terminal({
     const { apply, pending: rest } = nextPendingApply(prev, current, pendingRef.current)
     if (!apply) return
     if (apply.model) injectModel(apply.model)
-    if (apply.effort) injectEffort(apply.effort)
+    if (apply.effort) {
+      injectEffort(apply.effort)
+      setActiveEffort(apply.effort)
+      setUltracodeActive(false)
+    }
+    if (apply.ultracode) {
+      injectUltracode()
+      setUltracodeActive(true)
+    }
     setPending(rest)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.status, exited])
@@ -379,6 +431,15 @@ export function Terminal({
     let liveTotal = ''
     setDataHandler((data) => {
       gotDataRef.current = true
+      // Modo de permissão: acumula a cauda do PTY e relê o indicador mais recente do
+      // rodapé. Só sobrescreve quando há indicador (null = mantém o anterior/default).
+      const tail = (permBufRef.current + data).slice(-PERM_TAIL_MAX)
+      permBufRef.current = tail
+      const detected = parsePermissionMode(tail)
+      if (detected) {
+        sawModeRef.current = true
+        setCurrentMode(detected)
+      }
       if (flushed) term.write(data)
       else liveTotal += data
     })
@@ -390,6 +451,12 @@ export function Terminal({
       if (liveTotal.length > backlog.length) term.write(liveTotal.slice(backlog.length))
       liveTotal = ''
       flushed = true
+      // Seed do modo de permissão: numa sessão ociosa o rodapé só existe no histórico
+      // (nunca re-impresso ao vivo). Só semeia se o live ainda não detectou nada.
+      if (!sawModeRef.current) {
+        const seeded = parsePermissionMode(backlog)
+        if (seeded) setCurrentMode(seeded)
+      }
     })
 
     // Copy-on-select: copiar automaticamente o que for selecionado.
@@ -802,11 +869,17 @@ export function Terminal({
           // Modelo Warp: o composer encaminha teclas de controle/navegação direto pro
           // PTY (write escreve no pty, fora do xterm display-only).
           onForwardKey={(seq) => write(seq)}
+          // Recolher o dock só faz sentido no modo terminal (em chat o dock é completo).
+          collapsible={mode === 'terminal'}
           toolbar={
             <ComposerToolbar
               activity={activity}
               canSwitch={canSwitchModel}
               pending={pending}
+              activeEffort={activeEffort}
+              xhighCapable={xhighCapable}
+              ultracodeActive={ultracodeActive}
+              currentMode={currentMode}
               onSelectModel={selectModel}
               onSelectEffort={selectEffort}
               // Shift+Tab (CSI Z) cicla o modo de permissão no TUI do claude. A CLI

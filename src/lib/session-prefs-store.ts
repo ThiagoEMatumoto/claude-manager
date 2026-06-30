@@ -6,6 +6,7 @@ const DEFAULT_MODEL_KEY = 'session.defaultModel'
 const DEFAULT_EFFORT_KEY = 'session.defaultEffort'
 const DEFAULT_PERMISSION_KEY = 'session.defaultPermission'
 const KEYBOARD_MODE_KEY = 'session.keyboardMode'
+const COMPOSER_COLLAPSED_KEY = 'session.composerCollapsed'
 
 // Preferência de teclado do composer (consumida pela Fase 2). 'enter-sends' =
 // Enter envia / Shift+Enter quebra; 'enter-newline' inverte (Enter quebra /
@@ -35,12 +36,16 @@ interface SessionPrefsState {
   defaultEffort: EffortDefault
   defaultPermission: PermissionMode
   keyboardMode: KeyboardSendMode
+  // Dock do composer recolhido (só usado no modo terminal). Preferência global,
+  // persistida em app_prefs como 'true'/'false'.
+  composerCollapsed: boolean
   loaded: boolean
   load: () => Promise<void>
   setDefaultModel: (m: ModelDefault) => Promise<void>
   setDefaultEffort: (e: EffortDefault) => Promise<void>
   setDefaultPermission: (p: PermissionMode) => Promise<void>
   setKeyboardMode: (k: KeyboardSendMode) => Promise<void>
+  setComposerCollapsed: (v: boolean) => Promise<void>
 }
 
 // Defaults de criação de sessão (modelo + effort) e preferência de teclado do
@@ -51,15 +56,17 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
   defaultEffort: '',
   defaultPermission: DEFAULT_PERMISSION,
   keyboardMode: DEFAULT_KEYBOARD_MODE,
+  composerCollapsed: false,
   loaded: false,
 
   load: async () => {
     if (get().loaded) return
-    const [model, effort, permission, keyboard] = await Promise.all([
+    const [model, effort, permission, keyboard, collapsed] = await Promise.all([
       prefsApi.get<string>(DEFAULT_MODEL_KEY),
       prefsApi.get<string>(DEFAULT_EFFORT_KEY),
       prefsApi.get<string>(DEFAULT_PERMISSION_KEY),
       prefsApi.get<string>(KEYBOARD_MODE_KEY),
+      prefsApi.get<string>(COMPOSER_COLLAPSED_KEY),
     ])
     set({
       defaultModel: model && MODEL_WHITELIST.has(model) ? (model as ModelDefault) : '',
@@ -69,6 +76,7 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
           ? (permission as PermissionMode)
           : DEFAULT_PERMISSION,
       keyboardMode: keyboard === 'enter-newline' ? 'enter-newline' : DEFAULT_KEYBOARD_MODE,
+      composerCollapsed: collapsed === 'true',
       loaded: true,
     })
   },
@@ -91,5 +99,10 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
   setKeyboardMode: async (k) => {
     set({ keyboardMode: k })
     await prefsApi.set(KEYBOARD_MODE_KEY, k)
+  },
+
+  setComposerCollapsed: async (v) => {
+    set({ composerCollapsed: v })
+    await prefsApi.set(COMPOSER_COLLAPSED_KEY, v ? 'true' : 'false')
   },
 }))

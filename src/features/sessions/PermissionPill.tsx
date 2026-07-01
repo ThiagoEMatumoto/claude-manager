@@ -32,8 +32,11 @@ export function PermissionPill({ currentMode, onSelect, onCycle }: Props) {
   const sections: MenuSection[] = [
     {
       title: 'Permissão · modo ativo destacado',
+      // TODOS os modos são clicáveis. 'dontAsk' fica fora do ciclo nativo (Shift+Tab),
+      // então não é alcançável em runtime: clicar nele "pula" sem achar e volta ao
+      // modo atual (no-op gracioso) — o sufixo "spawn-only" sinaliza isso.
       items: PERMISSION_OPTIONS.map((opt) => ({
-        label: opt.label,
+        label: opt.value === 'dontAsk' ? `${opt.label} · spawn-only` : opt.label,
         active: opt.value === currentMode,
         onClick: () => {
           if (onSelect) onSelect(opt.value)

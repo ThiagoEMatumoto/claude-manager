@@ -33,3 +33,11 @@ export function parsePermissionMode(text: string): PermissionMode | null {
   }
   return bestMode
 }
+
+// Detecta o modo a partir do RODAPÉ ATUAL renderizado (não de bytes acumulados). Como o
+// modo 'default' não tem indicador, "nenhum indicador no rodapé agora" => 'default'. Use
+// sobre as últimas linhas do buffer do xterm: assim cruzar/parar em 'default' é detectável
+// (parsePermissionMode-sobre-stream nunca vê default — retém indicadores antigos).
+export function detectFooterMode(footer: string): PermissionMode {
+  return parsePermissionMode(footer) ?? 'default'
+}

@@ -23,7 +23,8 @@ import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
-import { parsePermissionMode } from './permission-mode-parser'
+import { detectFooterMode } from './permission-mode-parser'
+import { jumpDecision } from './permission-jump'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
@@ -77,11 +78,6 @@ const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
 // Pontuação de fim de frase grudada no path não faz parte dele.
 const TRAILING = /[.,:;)\]}>'"]+$/
 
-// Cauda do PTY mantida pra detectar o modo de permissão (parsePermissionMode lê o
-// rodapé da TUI). O rodapé re-renderiza com frequência, então um indicador raramente
-// parte no corte do buffer — e se auto-corrige no próximo redraw.
-const PERM_TAIL_MAX = 16_384
-
 // Resolução simples de path no renderer (sem `path` do node): junta um path
 // relativo ao cwd e colapsa segmentos `.`/`..`. Não toca em absolutos/`~`.
 function resolvePath(raw: string, cwd: string | null): string | null {
@@ -105,6 +101,21 @@ function formatRelative(ms: number): string {
   if (m < 60) return `há ${m}min`
   const h = Math.round(m / 60)
   return `há ${h}h`
+}
+
+// Lê as últimas linhas do viewport do xterm (input box / rodapé da TUI do claude) como
+// texto plano, pra detectar o modo de permissão ATUAL (inclusive 'default', que não tem
+// indicador) sem depender de bytes acumulados do PTY.
+function readFooterText(term: Xterm): string {
+  const buf = term.buffer.active
+  const rows = term.rows
+  const startY = buf.baseY + Math.max(0, rows - 10)
+  let text = ''
+  for (let y = startY; y < buf.baseY + rows; y++) {
+    const line = buf.getLine(y)
+    if (line) text += line.translateToString(true) + '\n'
+  }
+  return text
 }
 
 export function Terminal({
@@ -135,18 +146,21 @@ export function Terminal({
   const gotDataRef = useRef(false)
   // Instante do exit, pra medir quanto tempo a sessão viveu (heurístico abaixo).
   const exitAtRef = useRef<number | null>(null)
-  // Detecção do modo de permissão: mantemos uma cauda do PTY e relemos o indicador
-  // mais recente do rodapé. `sawModeRef` evita que o seed do backlog (histórico)
-  // sobrescreva uma detecção ao vivo que já tenha ocorrido.
-  const permBufRef = useRef('')
-  const sawModeRef = useRef(false)
+  // Detecção do modo de permissão: lemos o rodapé REAL renderizado no xterm (detectFooterMode),
+  // não bytes acumulados — assim 'default' (sem indicador) é detectável e indicadores velhos não
+  // grudam. permTimerRef = debounce; statusRef gateia (não lê durante 'working': rodapé escondido).
+  const permTimerRef = useRef<number | null>(null)
+  const statusRef = useRef<SessionActivity['status'] | undefined>(undefined)
+  // Timer do "pular até o modo alvo" (loop em selectPermission que lê o rodapé do xterm
+  // após cada Shift+Tab). Permite cancelar um jump em voo. null = nenhum em curso.
+  const jumpTimerRef = useRef<number | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
-  // Modo de permissão ativo (refletido do rodapé da TUI via parsePermissionMode).
+  // Modo de permissão ativo (lido do rodapé do xterm via detectFooterMode).
   const [currentMode, setCurrentMode] = useState<PermissionMode | null>(null)
   // Esforço ativo e ultracode são rastreados localmente — não há campo no transcript
   // pra eles. Refletem o último valor que ESTE app injetou (null = ainda não definido).
@@ -175,7 +189,10 @@ export function Terminal({
     if (!ccSessionId || exited) return
     void sessionsApi.watchActivity(ccSessionId)
     const off = sessionsApi.onActivity((a) => {
-      if (a.ccSessionId === ccSessionId) setActivity(a)
+      if (a.ccSessionId === ccSessionId) {
+        setActivity(a)
+        statusRef.current = a.status
+      }
     })
     return () => {
       off()
@@ -292,6 +309,47 @@ export function Terminal({
     setPending(rest)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.status, exited])
+
+  // Seleção DIRETA de modo de permissão: a CLI só cicla (Shift+Tab), sem set-exato. "Pulamos"
+  // mandando Shift+Tab e, APÓS cada um, lendo o modo do rodapé REAL renderizado no buffer do
+  // xterm (detectFooterMode: sem indicador = 'default'). Robusto a cruzar/parar no 'default'
+  // (que o parser-sobre-stream não enxerga). Trava pelo helper puro jumpDecision (max passos +
+  // voltou ao início = alvo inalcançável). Atualiza o pill a cada passo. jumpTimerRef cancela
+  // um jump em voo (clique novo / unmount).
+  function selectPermission(target: PermissionMode) {
+    if (jumpTimerRef.current != null) {
+      clearTimeout(jumpTimerRef.current)
+      jumpTimerRef.current = null
+    }
+    const term = xtermRef.current
+    if (!term) return
+    const start = detectFooterMode(readFooterText(term))
+    if (start === target) return
+    let steps = 0
+    write('\x1b[Z')
+    const tick = () => {
+      const t = xtermRef.current
+      if (!t) return
+      steps += 1
+      const cur = detectFooterMode(readFooterText(t))
+      setCurrentMode(cur)
+      if (jumpDecision(cur, target, start, steps) !== 'step') {
+        jumpTimerRef.current = null
+        return
+      }
+      write('\x1b[Z')
+      jumpTimerRef.current = window.setTimeout(tick, 140)
+    }
+    jumpTimerRef.current = window.setTimeout(tick, 140)
+  }
+
+  // Cancela os timers de permissão (jump + debounce do tracking) ao desmontar.
+  useEffect(() => {
+    return () => {
+      if (jumpTimerRef.current != null) clearTimeout(jumpTimerRef.current)
+      if (permTimerRef.current != null) clearTimeout(permTimerRef.current)
+    }
+  }, [])
 
   const statusView = activityStatusView(activity?.status)
   const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
@@ -431,15 +489,16 @@ export function Terminal({
     let liveTotal = ''
     setDataHandler((data) => {
       gotDataRef.current = true
-      // Modo de permissão: acumula a cauda do PTY e relê o indicador mais recente do
-      // rodapé. Só sobrescreve quando há indicador (null = mantém o anterior/default).
-      const tail = (permBufRef.current + data).slice(-PERM_TAIL_MAX)
-      permBufRef.current = tail
-      const detected = parsePermissionMode(tail)
-      if (detected) {
-        sawModeRef.current = true
-        setCurrentMode(detected)
-      }
+      // Modo de permissão: relê o rodapé REAL do xterm (debounced) depois que a saída assenta.
+      // detectFooterMode enxerga inclusive 'default' (sem indicador). O gate de status evita ler
+      // durante 'working'/'starting' (quando o input box/rodapé não está visível).
+      if (permTimerRef.current != null) clearTimeout(permTimerRef.current)
+      permTimerRef.current = window.setTimeout(() => {
+        const t = xtermRef.current
+        if (!t) return
+        if (statusRef.current === 'working' || statusRef.current === 'starting') return
+        setCurrentMode(detectFooterMode(readFooterText(t)))
+      }, 150)
       if (flushed) term.write(data)
       else liveTotal += data
     })
@@ -451,11 +510,10 @@ export function Terminal({
       if (liveTotal.length > backlog.length) term.write(liveTotal.slice(backlog.length))
       liveTotal = ''
       flushed = true
-      // Seed do modo de permissão: numa sessão ociosa o rodapé só existe no histórico
-      // (nunca re-impresso ao vivo). Só semeia se o live ainda não detectou nada.
-      if (!sawModeRef.current) {
-        const seeded = parsePermissionMode(backlog)
-        if (seeded) setCurrentMode(seeded)
+      // Seed do modo de permissão a partir do rodapé já renderizado (o backlog acabou de ser
+      // escrito no term). Gate de status: não lê durante 'working'/'starting'.
+      if (statusRef.current !== 'working' && statusRef.current !== 'starting') {
+        setCurrentMode(detectFooterMode(readFooterText(term)))
       }
     })
 
@@ -885,6 +943,9 @@ export function Terminal({
               // Shift+Tab (CSI Z) cicla o modo de permissão no TUI do claude. A CLI
               // não tem set-exato em runtime (sem /permission) — só este ciclo nativo.
               onCyclePermission={() => write('\x1b[Z')}
+              // Seleção direta: "pula" até o modo escolhido ciclando Shift+Tab e
+              // observando o modo parseado (selectPermission + effect acima).
+              onSelectPermission={selectPermission}
               // Ctrl+C interrompe o claude (descoberta da ação que antes era só teclado).
               onInterrupt={() => write('\x03')}
             />

@@ -24,6 +24,8 @@ interface Props {
   onSelectEffort: (level: EffortLevel | 'ultracode') => void
   /** Avança um passo do ciclo de permissão (envia Shift+Tab ao PTY). Ausente = sem o ciclo. */
   onCyclePermission?: () => void
+  /** Seleção direta de modo: "pula" até o alvo ciclando Shift+Tab até o modo parseado bater. */
+  onSelectPermission?: (mode: PermissionMode) => void
   /** Interrompe o claude (envia Ctrl+C ao PTY). Ausente = sem o botão. */
   onInterrupt?: () => void
 }
@@ -51,6 +53,7 @@ export function ComposerToolbar({
   onSelectModel,
   onSelectEffort,
   onCyclePermission,
+  onSelectPermission,
   onInterrupt,
 }: Props) {
   const hasPending = !isPendingEmpty(pending)
@@ -71,7 +74,11 @@ export function ComposerToolbar({
         onSelect={onSelectEffort}
         canSwitch={canSwitch}
       />
-      <PermissionPill currentMode={currentMode} onCycle={onCyclePermission} />
+      <PermissionPill
+        currentMode={currentMode}
+        onCycle={onCyclePermission}
+        onSelect={onSelectPermission}
+      />
       {onInterrupt && (
         <button
           type="button"

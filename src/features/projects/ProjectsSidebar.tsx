@@ -1,5 +1,12 @@
-import { useState } from 'react'
-import { FolderOpen, GripVertical, MoreHorizontal, PanelLeftClose, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import {
+  DownloadCloud,
+  FolderOpen,
+  GripVertical,
+  MoreHorizontal,
+  PanelLeftClose,
+  Zap,
+} from 'lucide-react'
 import {
   DndContext,
   PointerSensor,
@@ -22,7 +29,8 @@ import { Menu } from '@/components/ui/Menu'
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { useAppStore } from '@/store/appStore'
-import type { Project, UpdateProjectInput } from '../../../shared/types/ipc'
+import { repoApi } from '@/lib/ipc'
+import type { MissingRepo, Project, UpdateProjectInput } from '../../../shared/types/ipc'
 
 export function ProjectsSidebar() {
   const { projects, create, update, remove, reorder } = useProjects()
@@ -36,6 +44,24 @@ export function ProjectsSidebar() {
   // só faz toggle; setActiveProject segue como "último usado"/hint, sem gatear
   // a visibilidade dos repos.
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set())
+  // Repos registrados no DB (sincronizados de outra máquina) que ainda não estão
+  // no disco desta — candidatos a auto-clone.
+  const [missingRepos, setMissingRepos] = useState<MissingRepo[]>([])
+  const [cloningMissing, setCloningMissing] = useState(false)
+
+  useEffect(() => {
+    void repoApi.listMissing().then(setMissingRepos)
+  }, [projects.length])
+
+  async function cloneMissing() {
+    setCloningMissing(true)
+    try {
+      await repoApi.cloneMissing()
+      setMissingRepos(await repoApi.listMissing())
+    } finally {
+      setCloningMissing(false)
+    }
+  }
 
   // Limiar de 4px pra distinguir clique de arraste — mesmo com handle dedicado,
   // evita que um clique trêmulo no grip dispare um drag.
@@ -79,6 +105,25 @@ export function ProjectsSidebar() {
           + Novo
         </button>
       </div>
+
+      {missingRepos.length > 0 && (
+        <div className="flex flex-col gap-2 border-b border-[var(--color-border)] bg-[var(--color-warning-bg,var(--color-surface-2))] px-3 py-2">
+          <div className="text-xs text-[var(--color-text-dim)]">
+            {missingRepos.length} repositório{missingRepos.length === 1 ? '' : 's'} registrado
+            {missingRepos.length === 1 ? '' : 's'} não {missingRepos.length === 1 ? 'está' : 'estão'}{' '}
+            no disco.
+          </div>
+          <button
+            type="button"
+            onClick={() => void cloneMissing()}
+            disabled={cloningMissing}
+            className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface)] disabled:opacity-60"
+          >
+            <Icon as={DownloadCloud} size={13} />
+            {cloningMissing ? 'Clonando…' : 'Clonar faltantes'}
+          </button>
+        </div>
+      )}
 
       {/* Sessão avulsa: spawn sem repo, cwd = scratch dir (pref scratch_dir). */}
       <div className="border-b border-[var(--color-border)] px-3 py-2">

@@ -113,6 +113,7 @@ function GeneralTab({ open }: { open: boolean }) {
   const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
   const showHandoffsInline = useProjectsPrefsStore((s) => s.showHandoffsInline)
   const setShowHandoffsInline = useProjectsPrefsStore((s) => s.setShowHandoffsInline)
+  const [autoCloneMissing, setAutoCloneMissing] = useState(true)
   const [autoApproveHandoffs, setAutoApproveHandoffs] = useState(false)
   const [maxActiveHandoffs, setMaxActiveHandoffs] = useState(HANDOFFS_MAX_ACTIVE_DEFAULT)
   const [heartbeatTtlHours, setHeartbeatTtlHours] = useState(HANDOFFS_HEARTBEAT_TTL_DEFAULT)
@@ -122,6 +123,7 @@ function GeneralTab({ open }: { open: boolean }) {
     if (!open) return
     void vaultApi.getRoot().then(setRoot)
     void prefsApi.get<string>('scratch_dir').then((dir) => setScratchDir(dir ?? ''))
+    void prefsApi.get<boolean>('autoCloneMissing').then((v) => setAutoCloneMissing(v ?? true))
     void prefsApi
       .get<boolean>('handoffs.autoApprove')
       .then((v) => setAutoApproveHandoffs(v ?? false))
@@ -139,6 +141,11 @@ function GeneralTab({ open }: { open: boolean }) {
     void useTerminalPrefsStore.getState().load()
     void useProjectsPrefsStore.getState().load()
   }, [open])
+
+  function updateAutoCloneMissing(v: boolean) {
+    setAutoCloneMissing(v)
+    void prefsApi.set('autoCloneMissing', v)
+  }
 
   function updateAutoApprove(v: boolean) {
     setAutoApproveHandoffs(v)
@@ -342,6 +349,24 @@ function GeneralTab({ open }: { open: boolean }) {
             type="checkbox"
             checked={showHandoffsInline}
             onChange={(e) => void setShowHandoffsInline(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
+
+        <label className="mt-3 flex items-start justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">
+              Clonar repos faltantes automaticamente
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              No boot, clona os repositórios registrados (sincronizados de outra máquina) que
+              ainda não existem no disco desta, usando a origin do git. Ligado por padrão.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoCloneMissing}
+            onChange={(e) => updateAutoCloneMissing(e.target.checked)}
             className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
           />
         </label>

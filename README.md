@@ -13,9 +13,9 @@ Chat *and* terminal views per session · multi-repo orchestration with cross-ses
 
 <br/>
 
-<img src="docs/assets/hero.png" alt="Claude Manager — repository architecture graph" width="900" />
+<img src="docs/assets/demo.gif" alt="Claude Manager demo — architecture graph, multi-repo orchestration and planning boards" width="900" />
 
-<sub>The architecture view: repositories wired into a dependency graph that Claude Manager injects into each session's context. <em>(Screenshots use a fictional dataset.)</em></sub>
+<sub>A quick tour: repository dependency graphs, multi-repo orchestration, and planning boards. <em>(Screens use a fictional dataset · <a href="docs/assets/demo.mp4">watch the MP4</a>)</em></sub>
 
 </div>
 

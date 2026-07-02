@@ -101,6 +101,7 @@ export function SettingsDialog({ open, onClose }: Props) {
 const SCRATCH_DIR_DEFAULT = '~/ClaudeManager/scratch'
 const HANDOFFS_MAX_ACTIVE_DEFAULT = 5
 const HANDOFFS_HEARTBEAT_TTL_DEFAULT = 2
+const AUTO_PULL_INTERVAL_DEFAULT = 30
 
 function GeneralTab({ open }: { open: boolean }) {
   const [root, setRoot] = useState('')
@@ -114,6 +115,8 @@ function GeneralTab({ open }: { open: boolean }) {
   const showHandoffsInline = useProjectsPrefsStore((s) => s.showHandoffsInline)
   const setShowHandoffsInline = useProjectsPrefsStore((s) => s.setShowHandoffsInline)
   const [autoCloneMissing, setAutoCloneMissing] = useState(true)
+  const [autoPullEnabled, setAutoPullEnabled] = useState(false)
+  const [autoPullIntervalMinutes, setAutoPullIntervalMinutes] = useState(AUTO_PULL_INTERVAL_DEFAULT)
   const [autoApproveHandoffs, setAutoApproveHandoffs] = useState(false)
   const [maxActiveHandoffs, setMaxActiveHandoffs] = useState(HANDOFFS_MAX_ACTIVE_DEFAULT)
   const [heartbeatTtlHours, setHeartbeatTtlHours] = useState(HANDOFFS_HEARTBEAT_TTL_DEFAULT)
@@ -124,6 +127,10 @@ function GeneralTab({ open }: { open: boolean }) {
     void vaultApi.getRoot().then(setRoot)
     void prefsApi.get<string>('scratch_dir').then((dir) => setScratchDir(dir ?? ''))
     void prefsApi.get<boolean>('autoCloneMissing').then((v) => setAutoCloneMissing(v ?? true))
+    void prefsApi.get<boolean>('autoPullEnabled').then((v) => setAutoPullEnabled(v ?? false))
+    void prefsApi
+      .get<number>('autoPullIntervalMinutes')
+      .then((v) => setAutoPullIntervalMinutes(v ?? AUTO_PULL_INTERVAL_DEFAULT))
     void prefsApi
       .get<boolean>('handoffs.autoApprove')
       .then((v) => setAutoApproveHandoffs(v ?? false))
@@ -145,6 +152,16 @@ function GeneralTab({ open }: { open: boolean }) {
   function updateAutoCloneMissing(v: boolean) {
     setAutoCloneMissing(v)
     void prefsApi.set('autoCloneMissing', v)
+  }
+
+  function updateAutoPullEnabled(v: boolean) {
+    setAutoPullEnabled(v)
+    void prefsApi.set('autoPullEnabled', v)
+  }
+
+  function updateAutoPullInterval(v: number) {
+    setAutoPullIntervalMinutes(v)
+    if (Number.isFinite(v) && v >= 1) void prefsApi.set('autoPullIntervalMinutes', v)
   }
 
   function updateAutoApprove(v: boolean) {
@@ -370,6 +387,42 @@ function GeneralTab({ open }: { open: boolean }) {
             className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
           />
         </label>
+
+        <label className="mt-3 flex items-start justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">
+              Atualizar repos automaticamente
+            </div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Periodicamente dá `git pull --ff-only` em todos os repos locais, pulando os que têm
+              alterações não-commitadas ou commits locais adiante. Desligado por padrão.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoPullEnabled}
+            onChange={(e) => updateAutoPullEnabled(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
+
+        {autoPullEnabled && (
+          <label className="mt-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm text-[var(--color-text)]">Intervalo (minutos)</div>
+              <div className="text-xs text-[var(--color-text-dim)]">
+                A cada quantos minutos rodar o auto-pull.
+              </div>
+            </div>
+            <input
+              type="number"
+              min={1}
+              value={autoPullIntervalMinutes}
+              onChange={(e) => updateAutoPullInterval(Number(e.target.value))}
+              className="w-20 shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-sm text-[var(--color-text)]"
+            />
+          </label>
+        )}
       </div>
 
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">

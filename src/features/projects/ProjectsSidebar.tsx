@@ -5,6 +5,7 @@ import {
   GripVertical,
   MoreHorizontal,
   PanelLeftClose,
+  RefreshCw,
   Zap,
 } from 'lucide-react'
 import {
@@ -48,6 +49,7 @@ export function ProjectsSidebar() {
   // no disco desta — candidatos a auto-clone.
   const [missingRepos, setMissingRepos] = useState<MissingRepo[]>([])
   const [cloningMissing, setCloningMissing] = useState(false)
+  const [pullingAll, setPullingAll] = useState(false)
 
   useEffect(() => {
     void repoApi.listMissing().then(setMissingRepos)
@@ -60,6 +62,17 @@ export function ProjectsSidebar() {
       setMissingRepos(await repoApi.listMissing())
     } finally {
       setCloningMissing(false)
+    }
+  }
+
+  // O resumo (X atualizados, Y pulados) sai via toast do main; aqui só gerimos
+  // o estado de "em andamento" do botão.
+  async function pullAll() {
+    setPullingAll(true)
+    try {
+      await repoApi.pullAll()
+    } finally {
+      setPullingAll(false)
     }
   }
 
@@ -97,13 +110,24 @@ export function ProjectsSidebar() {
           </button>
           <div className="text-sm font-semibold tracking-tight">Projetos</div>
         </div>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-        >
-          + Novo
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void pullAll()}
+            disabled={pullingAll}
+            title="git pull --ff-only em todos os repos (pula sujos/divergentes)"
+            className="rounded-md p-1 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-60"
+          >
+            <Icon as={RefreshCw} size={14} className={pullingAll ? 'animate-spin' : undefined} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
+          >
+            + Novo
+          </button>
+        </div>
       </div>
 
       {missingRepos.length > 0 && (

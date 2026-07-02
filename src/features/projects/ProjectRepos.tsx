@@ -27,6 +27,7 @@ import { SessionsModal } from '@/features/sessions/SessionsModal'
 import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore, ACTIVE_HANDOFF_STATUSES } from '@/store/handoffsStore'
 import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
+import { repoApi } from '@/lib/ipc'
 import type { Handoff, LinkKind, Project, Repo, UpdateRepoInput } from '../../../shared/types/ipc'
 
 // Quantos handoffs terminais (done/failed) recentes mostrar — os ativos sempre
@@ -207,6 +208,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
               onClick: () => void openSession(repo, project.name, project.icon, project.color),
             },
             { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
+            { label: 'git pull', onClick: () => void repoApi.pullOne({ repoId: repo.id }) },
             { label: 'Editar', onClick: () => setEditOpen(true) },
             {
               label: 'Remover repo',

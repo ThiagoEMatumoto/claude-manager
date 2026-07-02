@@ -10,7 +10,10 @@ import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc, sweepOrphanImageTemps } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
-import { registerGitIpc } from './ipc/git'
+import { registerGitIpc, cloneMissingWithToasts } from './ipc/git'
+import { backfillRepoRemotes } from './services/git-remote'
+import { listMissingRepos } from './services/repo-clone'
+import { getPref } from './services/prefs-store'
 import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
@@ -101,6 +104,20 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
+// Backfill idempotente das origins + (se a pref permitir) clone dos repos
+// registrados que não estão no disco. Best-effort: qualquer falha é logada e o
+// boot segue.
+async function autoCloneMissingOnBoot(): Promise<void> {
+  try {
+    await backfillRepoRemotes()
+    if (getPref('autoCloneMissing', true) && listMissingRepos().length > 0) {
+      await cloneMissingWithToasts()
+    }
+  } catch (err) {
+    console.error('[repo-sync] auto-clone no boot falhou:', err)
+  }
+}
+
 app.whenReady().then(async () => {
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
@@ -178,12 +195,16 @@ app.whenReady().then(async () => {
   // coordinator). Se IMPORTOU (mudou dados), faz broadcast dos canais das
   // entidades sincronizadas para o renderer recarregar ao vivo — as stores de
   // features/objectives/tasks tratam um payload-sinal como "refresh()".
-  void syncOnBoot().then((imported) => {
-    if (!imported) return
-    broadcast('feature:updated', { backfill: true })
-    broadcast('objective:updated', { reload: true })
-    broadcast('task:updated', { reload: true })
-  })
+  void syncOnBoot()
+    .then((imported) => {
+      if (!imported) return
+      broadcast('feature:updated', { backfill: true })
+      broadcast('objective:updated', { reload: true })
+      broadcast('task:updated', { reload: true })
+    })
+    // Auto-clone dos repos faltantes DEPOIS do import do boot (o sync pode ter
+    // trazido registros novos de outra máquina). Best-effort e não-bloqueante.
+    .finally(() => void autoCloneMissingOnBoot())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

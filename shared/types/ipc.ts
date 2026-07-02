@@ -40,6 +40,25 @@ export interface Repo {
   defaultBranch?: string | null
 }
 
+// Repo registrado no DB cujo path não existe no disco desta máquina mas tem
+// remote_url — candidato a auto-clone (Fase 1 do repo-sync).
+export interface MissingRepo {
+  repoId: string
+  label: string
+  path: string
+  remoteUrl: string
+}
+
+// Resultado por-repo de um clone-missing. 'skipped' = o path já existia no disco
+// na hora do clone (registrado noutra rodada); 'error' = falha no git clone.
+export interface CloneMissingResult {
+  repoId: string
+  label: string
+  path: string
+  status: 'cloned' | 'skipped' | 'error'
+  detail?: string
+}
+
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----
 
 export type RepoDependencyKind =
@@ -1638,6 +1657,8 @@ export interface Api {
     removeSymlink(target: string): Promise<{ removed: boolean }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
     createBlank(vaultPath: string, name: string, gitInit: boolean): Promise<{ path: string }>
+    listMissing(): Promise<MissingRepo[]>
+    cloneMissing(): Promise<CloneMissingResult[]>
   }
   workspace: {
     getActive(): Promise<string | null>

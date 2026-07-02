@@ -7,7 +7,10 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/promises'
 import { getDb } from '../services/db'
 import { backfillRepoRemotes } from '../services/git-remote'
+import { cloneMissingRepos, listMissingRepos } from '../services/repo-clone'
+import { emitToast } from '../services/notifications'
 import { validateBlankRepoName } from './blank-repo'
+import type { CloneMissingResult } from '../../../shared/types/ipc'
 
 const VAULT_ROOT_KEY = 'vault_root'
 
@@ -40,6 +43,23 @@ const createBlankSchema = z.object({
 function repoNameFromUrl(url: string): string {
   const base = url.replace(/\/+$/, '').split('/').pop() ?? 'repo'
   return base.replace(/\.git$/, '')
+}
+
+// Clona os repos faltantes emitindo toast de progresso por-repo + um resumo
+// final. Compartilhado pelo handler manual (repos:clone-missing) e pelo gatilho
+// de boot (index.ts). No-op silencioso quando não há nada a clonar.
+export async function cloneMissingWithToasts(): Promise<CloneMissingResult[]> {
+  const results = await cloneMissingRepos(({ index, total, label }) => {
+    emitToast('Clonando repositórios', `Clonando ${index} de ${total}: ${label}`)
+  })
+  const cloned = results.filter((r) => r.status === 'cloned').length
+  const errored = results.filter((r) => r.status === 'error').length
+  if (results.length > 0) {
+    const parts = [`${cloned} repo${cloned === 1 ? '' : 's'} clonado${cloned === 1 ? '' : 's'}`]
+    if (errored > 0) parts.push(`${errored} com erro`)
+    emitToast('Repositórios sincronizados', parts.join(' · '))
+  }
+  return results
 }
 
 export function registerGitIpc(): void {
@@ -145,6 +165,13 @@ export function registerGitIpc(): void {
   // existe no disco. Exposto pra ser acionado no boot (gatilho ligado em fase
   // posterior) ou manualmente. Retorna { scanned, updated }.
   ipcMain.handle('repos:backfill-remotes', () => backfillRepoRemotes())
+
+  // Repos registrados no DB cujo path não existe no disco mas têm remote_url.
+  ipcMain.handle('repos:list-missing', () => listMissingRepos())
+
+  // Clona os faltantes (concorrência limitada, credential-helper gh) com
+  // progresso via toast. Retorna o resumo por-repo.
+  ipcMain.handle('repos:clone-missing', () => cloneMissingWithToasts())
 
   ipcMain.handle('repo:create-blank', async (_e, payload: unknown) => {
     const { vaultPath, name, gitInit } = createBlankSchema.parse(payload)

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/promises'
 import { getDb } from '../services/db'
+import { backfillRepoRemotes } from '../services/git-remote'
 import { validateBlankRepoName } from './blank-repo'
 
 const VAULT_ROOT_KEY = 'vault_root'
@@ -134,8 +135,16 @@ export function registerGitIpc(): void {
     const { url, vaultPath } = cloneSchema.parse(payload)
     const dest = path.join(vaultPath, repoNameFromUrl(url))
     await simpleGit().clone(url, dest)
-    return { path: dest }
+    // A persistência de remote_url/default_branch acontece no registro
+    // (projects:repos:create), que deriva a origin do disco recém-clonado.
+    // Devolvemos a URL usada só por transparência ao caller.
+    return { path: dest, url }
   })
+
+  // Idempotente: preenche remote_url/default_branch de repos ainda nulos cujo path
+  // existe no disco. Exposto pra ser acionado no boot (gatilho ligado em fase
+  // posterior) ou manualmente. Retorna { scanned, updated }.
+  ipcMain.handle('repos:backfill-remotes', () => backfillRepoRemotes())
 
   ipcMain.handle('repo:create-blank', async (_e, payload: unknown) => {
     const { vaultPath, name, gitInit } = createBlankSchema.parse(payload)

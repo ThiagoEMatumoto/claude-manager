@@ -34,6 +34,10 @@ export interface Repo {
   canvasY: number | null
   // Repo "hub": coordena/conecta os demais repos (vista de arquitetura).
   isHub: boolean
+  // Origin do git (migration 027): URL do remote e branch default. Machine-independent
+  // (sincroniza verbatim). null em repos blank/local-only sem remote.
+  remoteUrl?: string | null
+  defaultBranch?: string | null
 }
 
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----

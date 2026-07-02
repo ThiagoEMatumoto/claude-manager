@@ -11,6 +11,12 @@ Chat *and* terminal views per session · multi-repo orchestration with cross-ses
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Built with Electron](https://img.shields.io/badge/built%20with-Electron%20%2B%20React-47848F)](https://www.electronjs.org/)
 
+<br/>
+
+<img src="docs/assets/demo.gif" alt="Claude Manager demo — architecture graph, multi-repo orchestration and planning boards" width="900" />
+
+<sub>A quick tour: repository dependency graphs, multi-repo orchestration, and planning boards. <em>(Screens use a fictional dataset · <a href="docs/assets/demo.mp4">watch the MP4</a>)</em></sub>
+
 </div>
 
 ---
@@ -37,9 +43,13 @@ Claude Code is a terminal-first agent. **Claude Manager** wraps it in a desktop 
 - Model **dependencies between repositories** as an interactive architecture graph (`@xyflow/react`); the architecture context is injected into each session's system prompt.
 - **Cross-repo handoffs**: a "mother" session can delegate a scoped task to a "child" session in another repo, with a human approval step and progress/result streaming back.
 
+<img src="docs/assets/architecture.png" alt="Global multi-repo architecture graph" width="900" />
+
 ### 🎯 Planning: objectives, key results, tasks & features
 - Track **objectives → key results**, **tasks**, and **features** in dedicated boards backed by local SQLite.
 - Everything is exposed through a built-in **Model Context Protocol (MCP) server**, so Claude Code sessions can read and update your objectives, tasks, features and handoffs directly as tools.
+
+<img src="docs/assets/features.png" alt="Features planning board" width="900" />
 
 ### 🎙️ Meeting Intelligence
 - Record and **transcribe meetings locally** via a Python sidecar (`faster-whisper` large-v3 + speaker diarization with `sherpa-onnx`), with a live transcript view and a guided installer.

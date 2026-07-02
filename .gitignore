@@ -19,3 +19,6 @@ playwright-report
 # Python
 __pycache__/
 *.pyc
+
+# README media generation (anonymized userData copy — never commit)
+.readme-media-anon/

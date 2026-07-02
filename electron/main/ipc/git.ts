@@ -8,9 +8,10 @@ import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/
 import { getDb } from '../services/db'
 import { backfillRepoRemotes } from '../services/git-remote'
 import { cloneMissingRepos, listMissingRepos } from '../services/repo-clone'
+import { pullAllRepos, pullOneRepo } from '../services/repo-pull'
 import { emitToast } from '../services/notifications'
 import { validateBlankRepoName } from './blank-repo'
-import type { CloneMissingResult } from '../../../shared/types/ipc'
+import type { CloneMissingResult, PullRepoResult } from '../../../shared/types/ipc'
 
 const VAULT_ROOT_KEY = 'vault_root'
 
@@ -61,6 +62,31 @@ export async function cloneMissingWithToasts(): Promise<CloneMissingResult[]> {
   }
   return results
 }
+
+// Puxa (ff-only) todos os repos emitindo toast de progresso por-repo + um resumo
+// final. Compartilhado pelo handler manual (repos:pull-all) e pelo cron opt-in
+// (index.ts). Silencioso quando não há repos a atualizar.
+export async function pullAllWithToasts(): Promise<PullRepoResult[]> {
+  const results = await pullAllRepos(({ index, total, label }) => {
+    emitToast('Atualizando repositórios', `git pull ${index} de ${total}: ${label}`)
+  })
+  const pulled = results.filter((r) => r.status === 'pulled').length
+  const skipped = results.filter((r) => r.status === 'skipped').length
+  const errored = results.filter((r) => r.status === 'error').length
+  if (pulled > 0 || errored > 0) {
+    const parts = [`${pulled} atualizado${pulled === 1 ? '' : 's'}`]
+    if (skipped > 0) parts.push(`${skipped} pulado${skipped === 1 ? '' : 's'}`)
+    if (errored > 0) parts.push(`${errored} com erro`)
+    emitToast('Repositórios atualizados', parts.join(' · '))
+  }
+  return results
+}
+
+const pullOneSchema = z
+  .object({ repoId: z.string().min(1).optional(), path: z.string().min(1).optional() })
+  .refine((v) => Boolean(v.repoId) || Boolean(v.path), {
+    message: 'informe repoId ou path',
+  })
 
 export function registerGitIpc(): void {
   ipcMain.handle('vault:get-root', () => {
@@ -172,6 +198,16 @@ export function registerGitIpc(): void {
   // Clona os faltantes (concorrência limitada, credential-helper gh) com
   // progresso via toast. Retorna o resumo por-repo.
   ipcMain.handle('repos:clone-missing', () => cloneMissingWithToasts())
+
+  // Pull ff-only de todos os repos locais (pula sujos/divergentes) com progresso
+  // via toast. Retorna o resumo por-repo.
+  ipcMain.handle('repos:pull-all', () => pullAllWithToasts())
+
+  // Pull ff-only de um único repo, resolvido por repoId ou path.
+  ipcMain.handle('repos:pull-one', (_e, payload: unknown) => {
+    const sel = pullOneSchema.parse(payload)
+    return pullOneRepo(sel)
+  })
 
   ipcMain.handle('repo:create-blank', async (_e, payload: unknown) => {
     const { vaultPath, name, gitInit } = createBlankSchema.parse(payload)

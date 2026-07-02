@@ -59,6 +59,17 @@ export interface CloneMissingResult {
   detail?: string
 }
 
+// Resultado por-repo de um pull-all/pull-one (Fase 2 do repo-sync). 'skipped'
+// carrega o motivo em detail ('dirty' | 'diverged' | 'sem .git'); 'pulled' = o
+// HEAD avançou; 'up-to-date' = já estava em dia; 'error' = falha no git pull.
+export interface PullRepoResult {
+  repoId: string
+  label: string
+  path: string
+  status: 'pulled' | 'up-to-date' | 'skipped' | 'error'
+  detail?: string
+}
+
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----
 
 export type RepoDependencyKind =
@@ -1659,6 +1670,8 @@ export interface Api {
     createBlank(vaultPath: string, name: string, gitInit: boolean): Promise<{ path: string }>
     listMissing(): Promise<MissingRepo[]>
     cloneMissing(): Promise<CloneMissingResult[]>
+    pullAll(): Promise<PullRepoResult[]>
+    pullOne(selector: { repoId?: string; path?: string }): Promise<PullRepoResult>
   }
   workspace: {
     getActive(): Promise<string | null>

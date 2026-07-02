@@ -164,6 +164,11 @@ const api: Api = {
       invoke('repo:clone-url', { url, vaultPath }),
     createBlank: (vaultPath: string, name: string, gitInit: boolean) =>
       invoke('repo:create-blank', { vaultPath, name, gitInit }),
+    listMissing: () => invoke('repos:list-missing'),
+    cloneMissing: () => invoke('repos:clone-missing'),
+    pullAll: () => invoke('repos:pull-all'),
+    pullOne: (selector: { repoId?: string; path?: string }) =>
+      invoke('repos:pull-one', selector),
   },
   workspace: {
     getActive: () => invoke('workspace:get-active'),

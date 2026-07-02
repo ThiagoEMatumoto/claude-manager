@@ -37,6 +37,16 @@ export function getNotifPrefs(): NotificationPrefs {
   }
 }
 
+// Toast só-no-renderer (canal notify:event), SEM notificação nativa. Usado para
+// progresso de fundo (ex: clone de repos faltantes) que não deve pipocar o SO a
+// cada passo. Ignora a pref `enabled` (é feedback in-app de uma ação/boot).
+export function emitToast(title: string, body: string): void {
+  const event: NotificationEvent = { title, body, at: Date.now() }
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('notify:event', event)
+  }
+}
+
 export function notify({ title, body }: { title: string; body: string }): void {
   const prefs = getNotifPrefs()
   if (!prefs.enabled) return

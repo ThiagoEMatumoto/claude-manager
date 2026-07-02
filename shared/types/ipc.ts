@@ -34,6 +34,40 @@ export interface Repo {
   canvasY: number | null
   // Repo "hub": coordena/conecta os demais repos (vista de arquitetura).
   isHub: boolean
+  // Origin do git (migration 027): URL do remote e branch default. Machine-independent
+  // (sincroniza verbatim). null em repos blank/local-only sem remote.
+  remoteUrl?: string | null
+  defaultBranch?: string | null
+}
+
+// Repo registrado no DB cujo path não existe no disco desta máquina mas tem
+// remote_url — candidato a auto-clone (Fase 1 do repo-sync).
+export interface MissingRepo {
+  repoId: string
+  label: string
+  path: string
+  remoteUrl: string
+}
+
+// Resultado por-repo de um clone-missing. 'skipped' = o path já existia no disco
+// na hora do clone (registrado noutra rodada); 'error' = falha no git clone.
+export interface CloneMissingResult {
+  repoId: string
+  label: string
+  path: string
+  status: 'cloned' | 'skipped' | 'error'
+  detail?: string
+}
+
+// Resultado por-repo de um pull-all/pull-one (Fase 2 do repo-sync). 'skipped'
+// carrega o motivo em detail ('dirty' | 'diverged' | 'sem .git'); 'pulled' = o
+// HEAD avançou; 'up-to-date' = já estava em dia; 'error' = falha no git pull.
+export interface PullRepoResult {
+  repoId: string
+  label: string
+  path: string
+  status: 'pulled' | 'up-to-date' | 'skipped' | 'error'
+  detail?: string
 }
 
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----
@@ -1634,6 +1668,10 @@ export interface Api {
     removeSymlink(target: string): Promise<{ removed: boolean }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
     createBlank(vaultPath: string, name: string, gitInit: boolean): Promise<{ path: string }>
+    listMissing(): Promise<MissingRepo[]>
+    cloneMissing(): Promise<CloneMissingResult[]>
+    pullAll(): Promise<PullRepoResult[]>
+    pullOne(selector: { repoId?: string; path?: string }): Promise<PullRepoResult>
   }
   workspace: {
     getActive(): Promise<string | null>

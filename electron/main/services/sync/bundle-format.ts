@@ -99,6 +99,13 @@ export const PATH_COLUMNS: Partial<Record<SyncedTable, readonly string[]>> = {
   feature_repos: ['worktree_path'],
 }
 
+// Colunas de `repos` que sincronizam VERBATIM (migration 027): `remote_url` e
+// `default_branch` são machine-independent e DEVEM ser copiadas sem tocar — por
+// isso ficam FORA de PATH_COLUMNS (nada de <CM_ROOT>). O exporter usa SELECT * +
+// PRAGMA table_info, então elas já entram no bundle automaticamente; esta nota
+// documenta a decisão e serve de âncora contra alguém portabilizá-las por engano.
+
+
 // Remove uma única barra final de `p` (mantém intacto se já não tiver). Usado
 // para normalizar a raiz antes de comparar/cortar — evita `//` no resultado e
 // trata `root` com ou sem `/` final de forma idêntica.

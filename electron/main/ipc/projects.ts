@@ -4,6 +4,7 @@ import { mkdirSync, lstatSync, unlinkSync, readdirSync } from 'node:fs'
 import { z } from 'zod'
 import { getDb } from '../services/db'
 import { pingSyncMutation } from '../services/notify'
+import { readOriginUrl } from '../services/git-remote'
 import { normalizePath, selectUntracked } from './untracked-folders'
 import type {
   Project,
@@ -57,6 +58,8 @@ interface RepoRow {
   canvas_x: number | null
   canvas_y: number | null
   is_hub: number
+  remote_url: string | null
+  default_branch: string | null
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -83,6 +86,8 @@ const toRepo = (row: RepoRow): Repo => ({
   canvasX: row.canvas_x ?? null,
   canvasY: row.canvas_y ?? null,
   isHub: row.is_hub === 1,
+  remoteUrl: row.remote_url ?? null,
+  defaultBranch: row.default_branch ?? null,
 })
 
 export function registerProjectIpc(): void {
@@ -190,7 +195,7 @@ export function registerProjectIpc(): void {
     return rows.map(toRepo)
   })
 
-  ipcMain.handle('projects:repos:create', (_e, input: CreateRepoInput) => {
+  ipcMain.handle('projects:repos:create', async (_e, input: CreateRepoInput) => {
     const db = getDb()
     // Guard anti-duplicata: o schema não tem UNIQUE(project_id, path), então a
     // adoção de uma pasta existente precisa ser idempotente. Se já houver repo no
@@ -202,6 +207,10 @@ export function registerProjectIpc(): void {
         .all(input.projectId) as RepoRow[]
     ).find((r) => normalizePath(r.path) === target)
     if (existing) return toRepo(existing)
+
+    // Adopt/clone: o path já existe no disco → deriva a origin (URL + branch).
+    // Repos blank/local-only sem remote ficam null (o backfill os ignora).
+    const { remoteUrl, defaultBranch } = await readOriginUrl(input.path)
 
     const maxPos = db
       .prepare('SELECT COALESCE(MAX(position), -1) as max FROM repos WHERE project_id = ?')
@@ -219,9 +228,11 @@ export function registerProjectIpc(): void {
       canvas_x: null,
       canvas_y: null,
       is_hub: 0,
+      remote_url: remoteUrl,
+      default_branch: defaultBranch,
     }
     db.prepare(
-      'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at, remote_url, default_branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       row.id,
       row.project_id,
@@ -232,6 +243,8 @@ export function registerProjectIpc(): void {
       row.source,
       row.position,
       row.created_at,
+      row.remote_url,
+      row.default_branch,
     )
     pingSyncMutation()
     return toRepo(row)

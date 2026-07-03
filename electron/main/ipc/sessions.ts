@@ -272,6 +272,12 @@ function buildFeatureContextOrNull(featureId: string): string | null {
 // resolvidos (claudeCmd, sessionId já validado, name, mcpConfigArg pronto, modelo
 // já validado contra whitelist ou null, e o path opcional do system-prompt-file
 // já escrito). Mantém a ordem das flags do handler original.
+//
+// `initialPrompt` (opcional): prompt posicional entregue no COMANDO de spawn, não
+// injetado no PTY. `claude "<prompt>"` em modo interativo faz auto-submit do 1º
+// turno — é o caminho confiável pra background (o kickoff colado no PTY é
+// descartado quando ninguém dá resize no TUI). Como posicional, TEM que ser o
+// último token, depois de todas as flags.
 export function buildSpawnInnerCmd(parts: {
   claudeCmd: string
   sessionId: string
@@ -282,6 +288,7 @@ export function buildSpawnInnerCmd(parts: {
   systemPromptFilePath: string | null
   permissionMode?: string | null
   disallowedTools?: string[] | null
+  initialPrompt?: string | null
 }): string {
   let innerCmd = `${parts.claudeCmd} --session-id ${parts.sessionId} -n ${shquote(parts.name)}${parts.mcpConfigArg}`
   if (parts.model) {
@@ -298,6 +305,10 @@ export function buildSpawnInnerCmd(parts: {
   }
   if (parts.systemPromptFilePath) {
     innerCmd += ` --append-system-prompt-file ${shquote(parts.systemPromptFilePath)}`
+  }
+  // Posicional por último: `claude [flags] "<prompt>"` auto-submete o 1º turno.
+  if (parts.initialPrompt?.trim()) {
+    innerCmd += ` ${shquote(parts.initialPrompt.trim())}`
   }
   return innerCmd
 }
@@ -561,6 +572,7 @@ export function registerSessionIpc(): void {
       systemPromptFilePath,
       permissionMode,
       disallowedTools,
+      initialPrompt: input.initialPrompt,
     })
 
     return startSession({

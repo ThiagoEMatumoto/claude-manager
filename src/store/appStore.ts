@@ -252,6 +252,8 @@ interface AppState {
     name?: string
     featureId?: string
     initialCommand?: string
+    // Prompt posicional entregue no comando de spawn (auto-submit do 1º turno).
+    initialPrompt?: string
     systemPromptText?: string
     permissionMode?: PermissionMode
     disallowedTools?: string[]
@@ -411,6 +413,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       name: input.name,
       featureId: input.featureId,
       initialCommand: input.initialCommand,
+      initialPrompt: input.initialPrompt,
       systemPromptText: input.systemPromptText,
       permissionMode: input.permissionMode,
       disallowedTools: input.disallowedTools,

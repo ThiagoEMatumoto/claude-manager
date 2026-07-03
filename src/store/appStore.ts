@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
 import type {
+  AdvisorModel,
   EffortLevel,
   LiveSessionInfo,
   PaneSnapshot,
@@ -241,6 +242,9 @@ interface AppState {
     // Modo de permissão inicial (--permission-mode); validado no main. Trailing/
     // opcional: callers que não escolhem permissão omitem (= default da CLI).
     permissionMode?: PermissionMode,
+    // Modelo do advisor tool (--advisor <model>); validado no main. Trailing/
+    // opcional: callers existentes omitem (= advisor desligado).
+    advisorModel?: AdvisorModel,
     // Retorna o id da sessão criada. Callers existentes ignoram o retorno; o fluxo
     // de handoff usa pra marcar mark-running com o childSessionId.
   ) => Promise<string>
@@ -373,6 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     effort,
     systemPromptText,
     permissionMode,
+    advisorModel,
   ) => {
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
@@ -385,6 +390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       effort,
       systemPromptText,
       permissionMode,
+      advisorModel,
     })
     set((s) => ({
       panes: [

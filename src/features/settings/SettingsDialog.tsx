@@ -20,6 +20,7 @@ import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
 import { useSessionPrefsStore, type KeyboardSendMode } from '@/lib/session-prefs-store'
+import { MODEL_OPTIONS, EFFORT_OPTIONS, ADVISOR_OPTIONS } from '@/features/sessions/spawn-options'
 import { applyThemePref, loadThemePref, saveThemePref } from '@/app/useTheme'
 import { DEFAULT_PRESET_ID, PRESETS, getPreset, type ThemePref } from '@/lib/themes'
 
@@ -492,22 +493,6 @@ function GeneralTab({ open }: { open: boolean }) {
   )
 }
 
-const SESSION_MODEL_OPTIONS = [
-  { value: '', label: 'Padrão' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' },
-] as const
-
-const SESSION_EFFORT_OPTIONS = [
-  { value: '', label: 'Padrão' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'X-High' },
-  { value: 'max', label: 'Max' },
-] as const
-
 const SESSION_PERMISSION_OPTIONS = [
   { value: 'default', label: 'Padrão' },
   { value: 'plan', label: 'Plano' },
@@ -555,10 +540,12 @@ function SessionTab({ open }: { open: boolean }) {
   const defaultModel = useSessionPrefsStore((s) => s.defaultModel)
   const defaultEffort = useSessionPrefsStore((s) => s.defaultEffort)
   const defaultPermission = useSessionPrefsStore((s) => s.defaultPermission)
+  const defaultAdvisor = useSessionPrefsStore((s) => s.defaultAdvisor)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const setDefaultModel = useSessionPrefsStore((s) => s.setDefaultModel)
   const setDefaultEffort = useSessionPrefsStore((s) => s.setDefaultEffort)
   const setDefaultPermission = useSessionPrefsStore((s) => s.setDefaultPermission)
+  const setDefaultAdvisor = useSessionPrefsStore((s) => s.setDefaultAdvisor)
   const setKeyboardMode = useSessionPrefsStore((s) => s.setKeyboardMode)
 
   useEffect(() => {
@@ -580,7 +567,7 @@ function SessionTab({ open }: { open: boolean }) {
             </div>
           </div>
           <Segmented
-            options={SESSION_MODEL_OPTIONS}
+            options={MODEL_OPTIONS}
             value={defaultModel}
             onChange={(v) => void setDefaultModel(v)}
           />
@@ -594,7 +581,7 @@ function SessionTab({ open }: { open: boolean }) {
             </div>
           </div>
           <Segmented
-            options={SESSION_EFFORT_OPTIONS}
+            options={EFFORT_OPTIONS}
             value={defaultEffort}
             onChange={(v) => void setDefaultEffort(v)}
           />
@@ -611,6 +598,21 @@ function SessionTab({ open }: { open: boolean }) {
             options={SESSION_PERMISSION_OPTIONS}
             value={defaultPermission}
             onChange={(v) => void setDefaultPermission(v)}
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Advisor padrão</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Segunda opinião (--advisor) pré-selecionada. Experimental — só Anthropic API
+              direta.
+            </div>
+          </div>
+          <Segmented
+            options={ADVISOR_OPTIONS}
+            value={defaultAdvisor}
+            onChange={(v) => void setDefaultAdvisor(v)}
           />
         </div>
       </div>

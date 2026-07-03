@@ -25,7 +25,7 @@ vi.mock('../handoff/inject', () => ({
 }))
 
 // PTY vivo? controlável por teste.
-const isRunning = vi.fn(() => true)
+const isRunning = vi.fn((_id: string) => true)
 vi.mock('../pty-manager', () => ({
   ptyManager: { isRunning: (id: string) => isRunning(id) },
 }))

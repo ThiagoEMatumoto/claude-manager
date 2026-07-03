@@ -72,6 +72,12 @@ function pushHistory(sessionId: string, value: string) {
 type PersistedAttachment = Pick<Attachment, 'name' | 'path'>
 const attachmentsBySession = new Map<string, PersistedAttachment[]>()
 
+// Recolhido do dock, por sessão — mesma natureza dos drafts/histórico/anexos
+// acima (memória, sobrevive ao remount, não persiste em disco). Era uma
+// preferência GLOBAL em session-prefs-store; virou por-sessão pra colapsar um
+// terminal não afetar os outros abertos ao lado.
+const collapsedBySession = new Map<string, boolean>()
+
 const MAX_HEIGHT = 192
 
 // Dock de composição sempre visível abaixo do terminal. Um <textarea> de verdade
@@ -98,8 +104,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
   const loadPrefs = useSessionPrefsStore((s) => s.load)
-  const composerCollapsed = useSessionPrefsStore((s) => s.composerCollapsed)
-  const setComposerCollapsed = useSessionPrefsStore((s) => s.setComposerCollapsed)
+  // Recolhido do dock, POR SESSÃO (collapsedBySession acima) — só em memória,
+  // reseta ao reabrir o app. O Composer é montado uma vez por sessão (mesma
+  // premissa dos drafts/histórico), então a chave é estável no ciclo de vida.
+  const [composerCollapsed, setComposerCollapsedState] = useState(
+    () => collapsedBySession.get(sessionId) ?? false,
+  )
+  function setComposerCollapsed(v: boolean) {
+    collapsedBySession.set(sessionId, v)
+    setComposerCollapsedState(v)
+  }
   // Recolhido só vale no modo terminal (collapsible); em chat o dock é sempre completo.
   const collapsed = collapsible && composerCollapsed
 
@@ -294,7 +308,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         {collapsible && (
           <button
             type="button"
-            onClick={() => void setComposerCollapsed(!composerCollapsed)}
+            onClick={() => setComposerCollapsed(!composerCollapsed)}
             title={collapsed ? 'Expandir o compositor' : 'Recolher o compositor (mantém a barra de controles)'}
             aria-label={collapsed ? 'Expandir o compositor' : 'Recolher o compositor'}
             className="flex shrink-0 items-center rounded p-0.5 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"

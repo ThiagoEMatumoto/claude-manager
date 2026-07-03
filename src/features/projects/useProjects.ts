@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { arrayMove } from '@dnd-kit/sortable'
-import { projectsApi, vaultApi } from '@/lib/ipc'
+import { projectsApi, repoApi, vaultApi } from '@/lib/ipc'
 import type {
   CreateProjectInput,
   CreateRepoInput,
@@ -129,6 +129,16 @@ export function useRepos(projectId: string | null) {
     [refresh],
   )
 
+  // Restaura (clona) um repo cujo diretório sumiu do disco. Propaga erro pro
+  // caller (a UI de disparo mostra a mensagem); atualiza a lista no sucesso.
+  const restoreMissing = useCallback(
+    async (id: string) => {
+      await repoApi.restoreMissing(id)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const reorder = useCallback(
     async (activeId: string, overId: string) => {
       if (!projectId) return
@@ -146,5 +156,5 @@ export function useRepos(projectId: string | null) {
     [projectId],
   )
 
-  return { repos, untracked, loading, refresh, create, adopt, update, remove, reorder }
+  return { repos, untracked, loading, refresh, create, adopt, update, remove, restoreMissing, reorder }
 }

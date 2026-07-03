@@ -4,7 +4,7 @@ import { simpleGit } from 'simple-git'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink } from 'node:fs/promises'
+import { mkdir, readdir, rename, cp, rm, symlink, lstat, unlink, readlink } from 'node:fs/promises'
 import { getDb } from '../services/db'
 import { validateBlankRepoName } from './blank-repo'
 
@@ -30,6 +30,38 @@ const moveSchema = z.object({
 const symlinkSchema = moveSchema
 const removeSymlinkSchema = z.object({ target: z.string().min(1) })
 const cloneSchema = z.object({ url: z.string().min(1), vaultPath: z.string().min(1) })
+const restoreMissingSchema = z.object({ repoId: z.string().min(1) })
+
+interface RestoreRepoRow {
+  id: string
+  path: string
+  link_kind: string
+  source: string | null
+  remote_url: string | null
+}
+
+// Resolve a URL de restauração: remote_url capturado na exportação tem
+// prioridade; senão, se source for 'git-clone:<url>' extrai a URL de lá.
+function resolveRestoreUrl(remoteUrl: string | null, source: string | null): string | null {
+  if (remoteUrl && remoteUrl.trim()) return remoteUrl.trim()
+  if (source && source.startsWith('git-clone:')) {
+    const url = source.slice('git-clone:'.length).trim()
+    return url || null
+  }
+  return null
+}
+
+// Esquemas aceitos para clone: https/http/ssh/git, SCP-like (git@host:path) e path
+// absoluto local. Recusa URLs que virariam flag do git (começam com '-') e esquemas
+// perigosos como `ext::` (executa comando arbitrário) ou `file://`.
+function isSafeCloneUrl(url: string): boolean {
+  if (url.startsWith('-')) return false
+  if (/^(https?|ssh|git):\/\//.test(url)) return true
+  // SCP-like: user@host:path (sem '://'); exige host antes do ':' e algo depois.
+  if (/^[^/\s]+@[^/\s]+:.+$/.test(url) && !url.includes('://')) return true
+  if (url.startsWith('/')) return true
+  return false
+}
 const createBlankSchema = z.object({
   vaultPath: z.string().min(1),
   name: z.string().min(1),
@@ -135,6 +167,59 @@ export function registerGitIpc(): void {
     const dest = path.join(vaultPath, repoNameFromUrl(url))
     await simpleGit().clone(url, dest)
     return { path: dest }
+  })
+
+  // Restaura (clona) um repo cujo diretório sumiu do disco — caso pós-migração/sync,
+  // onde a linha volta mas o diretório git não. Nunca sobrescreve dir existente.
+  ipcMain.handle('repo:restore-missing', async (_e, payload: unknown) => {
+    const { repoId } = restoreMissingSchema.parse(payload)
+    const row = getDb()
+      .prepare('SELECT id, path, link_kind, source, remote_url FROM repos WHERE id = ?')
+      .get(repoId) as RestoreRepoRow | undefined
+    if (!row) {
+      throw new Error(`Repo não encontrado: ${repoId}`)
+    }
+
+    const url = resolveRestoreUrl(row.remote_url, row.source)
+    if (!url) {
+      throw new Error(
+        `Repo sem remote conhecido; restaure o diretório manualmente em ${row.path}.`,
+      )
+    }
+    if (!isSafeCloneUrl(url)) {
+      throw new Error(`URL de origem inválida para clone: ${url}`)
+    }
+
+    // lstat (não stat): detecta também o symlink no vault, quebrado ou não.
+    const existing = await lstat(row.path).catch(() => null)
+    if (existing && existing.isDirectory()) {
+      throw new Error(`O diretório já existe em ${row.path}; nada a restaurar.`)
+    }
+
+    if (row.link_kind === 'symlink') {
+      // O alvo externo de um symlink não é sincronizado entre máquinas; só o
+      // recuperamos quando o próprio link ainda existe no disco (caso típico
+      // pós-migração na MESMA máquina: link presente, alvo apagado). Clonamos no
+      // alvo e o symlink volta a resolver sem precisar recriá-lo.
+      if (existing && existing.isSymbolicLink()) {
+        const target = await readlink(row.path)
+        if (existsSync(target)) {
+          throw new Error(`O alvo do symlink já existe em ${target}; nada a restaurar.`)
+        }
+        await mkdir(path.dirname(target), { recursive: true })
+        await simpleGit().clone(url, target)
+        return { path: row.path }
+      }
+      // Link ausente (repo veio de outra máquina) → alvo externo desconhecido.
+      throw new Error(
+        `Symlink ausente e alvo externo desconhecido; restaure o diretório manualmente em ${row.path}.`,
+      )
+    }
+
+    // inside / external: clona direto no path exato do DB.
+    await mkdir(path.dirname(row.path), { recursive: true })
+    await simpleGit().clone(url, row.path)
+    return { path: row.path }
   })
 
   ipcMain.handle('repo:create-blank', async (_e, payload: unknown) => {

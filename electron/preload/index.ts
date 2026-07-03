@@ -132,6 +132,7 @@ const api: Api = {
     removeSymlink: (target: string) => invoke('repo:remove-symlink', { target }),
     cloneUrl: (url: string, vaultPath: string) =>
       invoke('repo:clone-url', { url, vaultPath }),
+    restoreMissing: (repoId: string) => invoke('repo:restore-missing', { repoId }),
     createBlank: (vaultPath: string, name: string, gitInit: boolean) =>
       invoke('repo:create-blank', { vaultPath, name, gitInit }),
   },

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, lstatSync, unlinkSync, readdirSync } from 'node:fs'
+import { mkdirSync, lstatSync, statSync, unlinkSync, readdirSync } from 'node:fs'
 import { z } from 'zod'
 import { getDb } from '../services/db'
 import { pingSyncMutation } from '../services/notify'
@@ -57,6 +57,7 @@ interface RepoRow {
   canvas_x: number | null
   canvas_y: number | null
   is_hub: number
+  remote_url: string | null
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -69,6 +70,16 @@ const toProject = (row: ProjectRow): Project => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
+
+// stat (não existsSync): um symlink quebrado passa em lstat mas falha em stat — é o
+// caso típico pós-migração/sync, onde a linha do repo volta mas o diretório-alvo sumiu.
+const dirExists = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
 
 const toRepo = (row: RepoRow): Repo => ({
   id: row.id,
@@ -83,6 +94,8 @@ const toRepo = (row: RepoRow): Repo => ({
   canvasX: row.canvas_x ?? null,
   canvasY: row.canvas_y ?? null,
   isHub: row.is_hub === 1,
+  existsOnDisk: dirExists(row.path),
+  remoteUrl: row.remote_url ?? null,
 })
 
 export function registerProjectIpc(): void {
@@ -219,6 +232,7 @@ export function registerProjectIpc(): void {
       canvas_x: null,
       canvas_y: null,
       is_hub: 0,
+      remote_url: null,
     }
     db.prepare(
       'INSERT INTO repos (id, project_id, label, path, role, link_kind, source, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

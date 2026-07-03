@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { ArrowUpRight, FolderInput, GripVertical, Link2, MoreHorizontal } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowUpRight,
+  FolderInput,
+  GripVertical,
+  Link2,
+  MoreHorizontal,
+} from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import {
@@ -37,7 +44,9 @@ const LINK_BADGE: Record<LinkKind, { icon: ComponentType<LucideProps>; title: st
 }
 
 export function ProjectRepos({ project }: Props) {
-  const { repos, untracked, create, adopt, update, remove, reorder } = useRepos(project.id)
+  const { repos, untracked, create, adopt, update, remove, restoreMissing, reorder } = useRepos(
+    project.id,
+  )
   const [adding, setAdding] = useState(false)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -74,6 +83,7 @@ export function ProjectRepos({ project }: Props) {
                     project={project}
                     onUpdate={update}
                     onRemove={remove}
+                    onRestore={restoreMissing}
                   />
                 ))}
               </ul>
@@ -107,13 +117,36 @@ interface RepoRowProps {
   project: Project
   onUpdate: (input: UpdateRepoInput) => Promise<void>
   onRemove: (id: string) => Promise<void>
+  onRestore: (id: string) => Promise<void>
 }
 
-function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
+// Só dá pra clonar de volta um repo ausente se conhecemos um remote: URL capturada
+// na exportação, ou origem `git-clone:<url>`.
+function hasRecoverableRemote(repo: Repo): boolean {
+  return !!repo.remoteUrl || !!repo.source?.startsWith('git-clone:')
+}
+
+function RepoRow({ repo, project, onUpdate, onRemove, onRestore }: RepoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState<string | null>(null)
   const openSession = useAppStore((s) => s.openSession)
+
+  const canRestore = hasRecoverableRemote(repo)
+
+  async function handleRestore() {
+    setRestoreError(null)
+    setRestoring(true)
+    try {
+      await onRestore(repo.id)
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRestoring(false)
+    }
+  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: repo.id,
   })
@@ -139,13 +172,27 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
         <button
           type="button"
           onClick={() => void openSession(repo, project.name, project.icon, project.color)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
-          title={`Nova sessão · ${repo.path}`}
+          disabled={!repo.existsOnDisk}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[var(--color-text-dim)]"
+          title={
+            repo.existsOnDisk
+              ? `Nova sessão · ${repo.path}`
+              : `Faltando no disco · ${repo.path}`
+          }
         >
           <span className="shrink-0" title={LINK_BADGE[repo.linkKind].title}>
             <Icon as={LINK_BADGE[repo.linkKind].icon} size={14} />
           </span>
           <span className="truncate">{repo.label}</span>
+          {!repo.existsOnDisk && (
+            <span
+              className="flex shrink-0 items-center gap-0.5 rounded border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-1 text-[10px] font-medium text-[var(--color-danger)]"
+              title="Diretório do repo não existe no disco"
+            >
+              <Icon as={AlertCircle} size={11} />
+              {restoring ? 'restaurando…' : 'faltando no disco'}
+            </span>
+          )}
         </button>
 
         <Menu
@@ -157,6 +204,22 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
               onClick: () => void openSession(repo, project.name, project.icon, project.color),
             },
             { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
+            ...(!repo.existsOnDisk
+              ? [
+                  canRestore
+                    ? {
+                        label: restoring ? 'Restaurando…' : 'Restaurar repo (clonar)',
+                        disabled: restoring,
+                        onClick: () => void handleRestore(),
+                      }
+                    : {
+                        label: 'Restaurar repo (clonar)',
+                        disabled: true,
+                        title: 'Sem remote conhecido — restaure o diretório manualmente',
+                        onClick: () => {},
+                      },
+                ]
+              : []),
             { label: 'Editar', onClick: () => setEditOpen(true) },
             {
               label: 'Remover repo',
@@ -177,6 +240,12 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
           </button>
         </Menu>
       </div>
+
+      {restoreError && (
+        <div className="mb-1 ml-6 mr-1 break-words rounded border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-2 py-1 text-[10px] text-[var(--color-danger)]">
+          Falha ao restaurar: {restoreError}
+        </div>
+      )}
 
       <SessionsModal
         repo={repo}

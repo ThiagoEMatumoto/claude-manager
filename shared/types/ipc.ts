@@ -29,6 +29,11 @@ export interface Repo {
   canvasY: number | null
   // Repo "hub": coordena/conecta os demais repos (vista de arquitetura).
   isHub: boolean
+  // Diretório em `path` existe no disco (false = symlink quebrado / dir ausente pós-migração).
+  existsOnDisk: boolean
+  // URL do remote `origin`, capturada na exportação. Usada para restaurar (clonar)
+  // o diretório quando ele some. null = remote desconhecido.
+  remoteUrl: string | null
 }
 
 // ---- Grafo de dependências entre repos (multi-repo orchestration) ----
@@ -1152,6 +1157,7 @@ export interface Api {
     symlinkIntoVault(source: string, vaultPath: string, label: string): Promise<{ path: string }>
     removeSymlink(target: string): Promise<{ removed: boolean }>
     cloneUrl(url: string, vaultPath: string): Promise<{ path: string }>
+    restoreMissing(repoId: string): Promise<{ path: string }>
     createBlank(vaultPath: string, name: string, gitInit: boolean): Promise<{ path: string }>
   }
   workspace: {

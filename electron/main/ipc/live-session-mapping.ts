@@ -2,7 +2,17 @@
 // repo/projeto do LiveSessionInfo. Fora do handler IPC pra ser testável sem
 // Electron (mesmo padrão de blank-repo.ts / untracked-folders.ts).
 
+import { statSync } from 'node:fs'
 import type { LinkKind, Repo } from '../../../shared/types/ipc'
+
+// stat (não existsSync): symlink quebrado passa em lstat mas falha em stat — caso pós-migração/sync.
+function dirExists(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
 
 // Sessão avulsa (repo_id null) → todas as colunas do JOIN vêm null.
 export interface LiveSessionJoinRow {
@@ -48,6 +58,9 @@ export function mapLiveSessionRepo(row: LiveSessionJoinRow): LiveSessionRepoInfo
       canvasX: null,
       canvasY: null,
       isHub: false,
+      existsOnDisk: dirExists(row.repo_path ?? ''),
+      // O join de live-session não busca remote_url (não é usado no card de sessão).
+      remoteUrl: null,
     },
     projectName: row.project_name,
     projectIcon: row.project_icon,

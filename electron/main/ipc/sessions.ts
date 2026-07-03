@@ -45,6 +45,23 @@ interface RepoPathRow {
   label: string
 }
 
+// stat (não existsSync): symlink quebrado passa em lstat mas falha em stat — caso
+// típico pós-migração/sync. Bloqueia o spawn cedo, com erro amigável, em vez de
+// deixar o pty estourar tarde com "cwd does not exist".
+function assertRepoDirExists(path: string): void {
+  let isDir = false
+  try {
+    isDir = statSync(path).isDirectory()
+  } catch {
+    isDir = false
+  }
+  if (!isDir) {
+    throw new Error(
+      `Repositório não existe no disco: ${path}. Restaure o diretório antes de abrir uma sessão.`,
+    )
+  }
+}
+
 // O name é input do usuário e entra na linha de `zsh -c '<innerCmd>'`.
 // Aspas simples POSIX impedem qualquer interpretação pelo shell; o único caractere
 // perigoso dentro de '...' é a própria aspa simples, fechada com '\'' e reaberta.
@@ -321,6 +338,7 @@ export function registerSessionIpc(): void {
         .prepare('SELECT path, label FROM repos WHERE id = ?')
         .get(repoId) as RepoPathRow | undefined
       if (!repo) throw new Error(`repo not found: ${repoId}`)
+      assertRepoDirExists(repo.path)
       cwd = repo.path
       defaultName = repo.label
     } else {
@@ -397,6 +415,7 @@ export function registerSessionIpc(): void {
         .prepare('SELECT path, label FROM repos WHERE id = ?')
         .get(repoId) as RepoPathRow | undefined
       if (!repo) throw new Error(`repo not found: ${repoId}`)
+      assertRepoDirExists(repo.path)
       cwd = repo.path
       defaultName = repo.label
     } else {

@@ -1,6 +1,15 @@
 import type Database from 'better-sqlite3'
 import { app } from 'electron'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -128,6 +137,51 @@ function copyFeatures(bundleDir: string, srcRoot: string): void {
   }
 }
 
+// stat (não existsSync): symlink quebrado passa em lstat mas falha em stat —
+// caso pós-migração/sync onde a linha do repo volta mas o diretório-alvo sumiu.
+function dirExists(p: string): boolean {
+  try {
+    return statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// Lê a URL do remote `origin` de um repo no disco (equivale ao refs.fetch).
+// Síncrono de propósito: exportBundle é sync e é chamado por exportBackup (que
+// também é sync, num finally de cleanup) — torná-lo async criaria ripple. Sem
+// origin / não é repo git → null.
+function readOriginUrl(repoPath: string): string | null {
+  try {
+    const out = execFileSync('git', ['-C', repoPath, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const url = out.trim()
+    return url || null
+  } catch {
+    return null
+  }
+}
+
+// Antes de exportar, captura o remote origin de cada repo presente no disco e o
+// persiste em repos.remote_url. Assim o dump SELECT * carrega a URL entre
+// máquinas e a restauração (repo:restore-missing) funciona a qualquer momento.
+// Só grava quando encontra um origin — NUNCA apaga uma URL já herdada de outra
+// máquina; repo sem origin conhecido permanece com o valor atual (tipicamente NULL).
+function captureRemoteUrls(db: Database.Database): void {
+  const repos = db.prepare('SELECT id, path FROM repos').all() as Array<{
+    id: string
+    path: string
+  }>
+  const update = db.prepare('UPDATE repos SET remote_url = ? WHERE id = ?')
+  for (const r of repos) {
+    if (!dirExists(r.path)) continue
+    const url = readOriginUrl(r.path)
+    if (url) update.run(url, r.id)
+  }
+}
+
 function maxSchemaVersion(db: Database.Database): number {
   const row = db.prepare('SELECT MAX(version) AS v FROM _migrations').get() as { v: number | null }
   return row.v ?? 0
@@ -144,6 +198,10 @@ export function exportBundle(
   // Garante que o WAL foi aplicado ao .db antes de ler (relevante quando o
   // mesmo processo escreveu há pouco). TRUNCATE encolhe o -wal.
   db.pragma('wal_checkpoint(TRUNCATE)')
+
+  // Popula repos.remote_url a partir do disco ANTES do dump, para que o
+  // SELECT * das tabelas já inclua a URL de restauração.
+  captureRemoteUrls(db)
 
   mkdirSync(tablesDir(bundleDir), { recursive: true })
 

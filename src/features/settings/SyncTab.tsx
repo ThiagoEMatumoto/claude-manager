@@ -11,11 +11,24 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { dialogApi, syncApi } from '@/lib/ipc'
-import type { SyncStatus, SyncNowResult, SyncBackupResult } from '../../../shared/types/ipc'
+import { dialogApi, projectsApi, repoApi, syncApi } from '@/lib/ipc'
+import type { Repo, SyncStatus, SyncNowResult, SyncBackupResult } from '../../../shared/types/ipc'
 
 interface Props {
   open: boolean
+}
+
+// Um repo ausente só é clonável de volta se conhecemos um remote (URL capturada
+// na exportação ou origem `git-clone:<url>`).
+function hasRecoverableRemote(repo: Repo): boolean {
+  return !!repo.remoteUrl || !!repo.source?.startsWith('git-clone:')
+}
+
+interface RestoreOutcome {
+  id: string
+  label: string
+  ok: boolean
+  error?: string
 }
 
 type ActionKey = 'configure' | 'now' | 'export' | 'import' | 'resolve' | 'backup'
@@ -56,6 +69,11 @@ export function SyncTab({ open }: Props) {
   const [message, setMessage] = useState<string | null>(null)
   const [conflict, setConflict] = useState<{ ahead: number; behind: number } | null>(null)
   const [pending, setPending] = useState<PendingConfirm>(null)
+  // Resumo pós-import: repos cujo diretório não existe nesta máquina, separados
+  // entre clonáveis (têm remote) e sem-remote (ação manual).
+  const [missing, setMissing] = useState<{ clonable: Repo[]; noRemote: Repo[] } | null>(null)
+  const [restoringAll, setRestoringAll] = useState(false)
+  const [restoreLog, setRestoreLog] = useState<RestoreOutcome[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -84,6 +102,46 @@ export function SyncTab({ open }: Props) {
     setMessage(describeResult(r))
     if (r.state === 'conflict') setConflict({ ahead: r.ahead, behind: r.behind })
     else setConflict(null)
+  }
+
+  // Após um import (pull/force-import/backup-import), os repos vindos do outro
+  // dispositivo podem não ter diretório nesta máquina. Levanta esse resumo para
+  // que o usuário possa restaurá-los. Auxiliar: falha silenciosa não mascara o
+  // resultado do import em si.
+  async function checkMissingRepos() {
+    try {
+      const missingRepos = (await projectsApi.listAllRepos()).filter((r) => !r.existsOnDisk)
+      if (missingRepos.length === 0) {
+        setMissing(null)
+        return
+      }
+      setMissing({
+        clonable: missingRepos.filter(hasRecoverableRemote),
+        noRemote: missingRepos.filter((r) => !hasRecoverableRemote(r)),
+      })
+      setRestoreLog([])
+    } catch {
+      // ignora: o resumo é informativo, não deve derrubar o fluxo de sync
+    }
+  }
+
+  // Clona em sequência todos os repos clonáveis, reportando sucesso/falha por repo.
+  async function restoreAllMissing() {
+    if (!missing || restoringAll) return
+    setRestoringAll(true)
+    const log: RestoreOutcome[] = []
+    for (const repo of missing.clonable) {
+      try {
+        await repoApi.restoreMissing(repo.id)
+        log.push({ id: repo.id, label: repo.label, ok: true })
+      } catch (e) {
+        log.push({ id: repo.id, label: repo.label, ok: false, error: errorText(e) })
+      }
+      setRestoreLog([...log])
+    }
+    setRestoringAll(false)
+    // Recomputa: os que clonaram com sucesso saem da lista.
+    await checkMissingRepos()
   }
 
   async function run(key: ActionKey, fn: () => Promise<void>) {
@@ -126,6 +184,7 @@ export function SyncTab({ open }: Props) {
     await run('now', async () => {
       const r = await syncApi.now()
       applyResult(r)
+      if (r.state === 'pulled') await checkMissingRepos()
     })
   }
 
@@ -179,12 +238,14 @@ export function SyncTab({ open }: Props) {
       await run('import', async () => {
         const r = await syncApi.importForce()
         applyResult(r)
+        if (r.state === 'pulled') await checkMissingRepos()
       })
     } else if (action.kind === 'backup-import') {
       await run('backup', async () => {
         const r = await syncApi.backupImport()
         const msg = describeBackup(r)
         if (msg) setMessage(msg)
+        if (r.state === 'imported') await checkMissingRepos()
       })
     } else {
       await run('resolve', async () => {
@@ -215,6 +276,16 @@ export function SyncTab({ open }: Props) {
           pending={pending}
           onConfirm={confirmPending}
           onCancel={() => setPending(null)}
+        />
+      )}
+
+      {missing && (
+        <MissingReposSummary
+          missing={missing}
+          restoringAll={restoringAll}
+          restoreLog={restoreLog}
+          onRestoreAll={restoreAllMissing}
+          onDismiss={() => setMissing(null)}
         />
       )}
 
@@ -539,6 +610,91 @@ function ConfirmBanner({
         <Button variant="danger" className="h-7 px-2 text-xs" onClick={onConfirm}>
           Sim, sobrescrever
         </Button>
+      </div>
+    </div>
+  )
+}
+
+function MissingReposSummary({
+  missing,
+  restoringAll,
+  restoreLog,
+  onRestoreAll,
+  onDismiss,
+}: {
+  missing: { clonable: Repo[]; noRemote: Repo[] }
+  restoringAll: boolean
+  restoreLog: RestoreOutcome[]
+  onRestoreAll: () => void
+  onDismiss: () => void
+}) {
+  const total = missing.clonable.length + missing.noRemote.length
+  const logById = new Map(restoreLog.map((o) => [o.id, o]))
+
+  return (
+    <div className="rounded-md border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/10 p-3">
+      <div className="mb-2 flex items-start gap-2 text-sm text-[var(--color-text)]">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-danger)]" />
+        <span>
+          {total} repo(s) importado(s) não existe(m) no disco desta máquina.{' '}
+          {missing.clonable.length > 0
+            ? `${missing.clonable.length} pode(m) ser clonado(s) automaticamente.`
+            : 'Nenhum tem remote conhecido.'}
+        </span>
+      </div>
+
+      {missing.clonable.length > 0 && (
+        <div className="mb-2">
+          <div className="mb-1 text-xs font-medium text-[var(--color-text)]">
+            Clonáveis ({missing.clonable.length})
+          </div>
+          <ul className="space-y-0.5 text-xs text-[var(--color-text-dim)]">
+            {missing.clonable.map((r) => {
+              const outcome = logById.get(r.id)
+              return (
+                <li key={r.id} className="flex items-center gap-1.5">
+                  <span className="truncate">{r.label}</span>
+                  {outcome?.ok && <span className="text-[var(--color-accent)]">✓ restaurado</span>}
+                  {outcome && !outcome.ok && (
+                    <span className="break-words text-[var(--color-danger)]" title={outcome.error}>
+                      ✗ falhou
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      {missing.noRemote.length > 0 && (
+        <div className="mb-2">
+          <div className="mb-1 text-xs font-medium text-[var(--color-text)]">
+            Sem remote — restaure manualmente ({missing.noRemote.length})
+          </div>
+          <ul className="space-y-0.5 text-xs text-[var(--color-text-dim)]">
+            {missing.noRemote.map((r) => (
+              <li key={r.id} className="truncate" title={r.path}>
+                {r.label} · <span className="font-mono">{r.path}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-2 flex justify-end gap-2">
+        <Button variant="ghost" className="h-7 px-2 text-xs" onClick={onDismiss}>
+          Dispensar
+        </Button>
+        {missing.clonable.length > 0 && (
+          <Button
+            className="h-7 px-2 text-xs"
+            loading={restoringAll}
+            onClick={onRestoreAll}
+          >
+            Restaurar todos
+          </Button>
+        )}
       </div>
     </div>
   )

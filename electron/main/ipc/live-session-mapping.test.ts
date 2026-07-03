@@ -60,6 +60,8 @@ describe('mapLiveSessionRepo', () => {
         canvasX: null,
         canvasY: null,
         isHub: false,
+        existsOnDisk: false,
+        remoteUrl: null,
       },
       projectName: 'Projeto X',
       projectIcon: '🚀',

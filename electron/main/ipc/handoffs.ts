@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { statSync } from 'node:fs'
 import { z } from 'zod'
 import * as store from '../services/handoff-store'
 import { getDb } from '../services/db'
@@ -18,9 +19,19 @@ interface RepoJoinRow {
   canvas_x: number | null
   canvas_y: number | null
   is_hub: number
+  remote_url: string | null
   project_name: string
   project_icon: string | null
   project_color: string | null
+}
+
+// stat (não existsSync): symlink quebrado passa em lstat mas falha em stat — caso pós-migração/sync.
+function dirExists(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 function toRepo(row: RepoJoinRow): Repo {
@@ -37,6 +48,8 @@ function toRepo(row: RepoJoinRow): Repo {
     canvasX: row.canvas_x ?? null,
     canvasY: row.canvas_y ?? null,
     isHub: row.is_hub === 1,
+    existsOnDisk: dirExists(row.path),
+    remoteUrl: row.remote_url ?? null,
   }
 }
 

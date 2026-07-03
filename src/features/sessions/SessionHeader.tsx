@@ -136,13 +136,26 @@ export function SessionHeader({
     onCommitRename(next)
   }
 
+  // Fecha o menu E desarma a confirmação pendente — usado como onClose do <Menu>,
+  // que dispara tanto no clique-fora/Escape quanto (via MenuButton) ANTES de todo
+  // item.onClick(). Sem isso, fechar o menu por fora enquanto "Encerrar" está
+  // armado deixava confirmingEnd=true pendurado: reabrir o menu dentro da janela
+  // do timeout mostrava direto "Confirmar encerramento" e UM clique encerrava a
+  // sessão, quebrando a garantia de 2 cliques explícitos.
+  function closeMenu() {
+    setMenuOpen(false)
+    if (confirmTimeoutRef.current != null) clearTimeout(confirmTimeoutRef.current)
+    setConfirmingEnd(false)
+  }
+
   // 2º clique confirma — mesmo padrão de `confirmingBypass` do SpawnSessionDialog
-  // (armar no 1º clique, exigir um 2º clique explícito pra executar). O Menu fecha
-  // a cada clique de item (MenuButton chama onClose() antes de item.onClick());
-  // reabrimos ele no mesmo clique (setMenuOpen(true) depois do onClose() já ter
-  // rodado) — o batching automático do React 18 funde os dois setState num único
-  // render, então o menu nunca pisca fechado: o usuário vê "Encerrar" virar
-  // "Confirmar encerramento" ali mesmo, sem precisar reabrir manualmente.
+  // (armar no 1º clique, exigir um 2º clique explícito pra executar). O Menu chama
+  // closeMenu() (acima) antes de todo item.onClick(); reabrimos e re-armamos no
+  // mesmo clique (setMenuOpen(true)/setConfirmingEnd(true) depois do closeMenu() já
+  // ter rodado) — o batching do React 18 funde os setState da mesma tick num único
+  // render, e a ÚLTIMA escrita de cada estado vence, então este handler ainda vê o
+  // confirmingEnd do render anterior (closure) e decide certo mesmo com o
+  // closeMenu() tendo rodado um instante antes na mesma tick.
   function handleEndClick() {
     if (!confirmingEnd) {
       setConfirmingEnd(true)
@@ -371,7 +384,7 @@ export function SessionHeader({
             </div>
           ))}
         {tier === 'narrow' ? (
-          <Menu open={menuOpen} onClose={() => setMenuOpen(false)} items={overflowItems} portal align="right">
+          <Menu open={menuOpen} onClose={closeMenu} items={overflowItems} portal align="right">
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}

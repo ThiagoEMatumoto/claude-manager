@@ -152,6 +152,20 @@ function resolveClaudeCommand(): string {
 const SCRATCH_DIR_KEY = 'scratch_dir'
 const QUICK_SESSION_NAME = 'Sessão rápida'
 
+// Guard antes de lançar o PTY: se o diretório do repo não existe, o spawn falha
+// tarde com erro opaco. statSync (não existsSync) segue symlinks e lança em link
+// quebrado — assim detectamos também repos apontando pra symlink morto.
+function assertRepoDirExists(path: string): void {
+  try {
+    if (statSync(path).isDirectory()) return
+  } catch {
+    // cai no throw abaixo
+  }
+  throw new Error(
+    `Repositório não existe no disco: ${path}. Restaure o diretório (ou ative o auto-clone) antes de abrir uma sessão.`,
+  )
+}
+
 // Sessão avulsa (sem repo) roda numa pasta scratch dedicada — configurável via
 // app_prefs (mesmo padrão de claude_command), default ~/ClaudeManager/scratch.
 // Garante a existência antes do spawn (PTY com cwd inexistente falha).
@@ -475,6 +489,7 @@ export function registerSessionIpc(): void {
         .prepare('SELECT path, label FROM repos WHERE id = ?')
         .get(repoId) as RepoPathRow | undefined
       if (!repo) throw new Error(`repo not found: ${repoId}`)
+      assertRepoDirExists(repo.path)
       cwd = repo.path
       defaultName = repo.label
     } else {
@@ -571,6 +586,7 @@ export function registerSessionIpc(): void {
         .prepare('SELECT path, label FROM repos WHERE id = ?')
         .get(repoId) as RepoPathRow | undefined
       if (!repo) throw new Error(`repo not found: ${repoId}`)
+      assertRepoDirExists(repo.path)
       cwd = repo.path
       defaultName = repo.label
     } else {

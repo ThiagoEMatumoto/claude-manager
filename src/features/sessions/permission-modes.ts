@@ -15,3 +15,15 @@ export const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
   { value: 'bypassPermissions', label: 'Bypass' },
   { value: 'dontAsk', label: 'Não perguntar' },
 ]
+
+// Labels curtos pro modo compacto do PermissionPill (painel estreito): mantém o
+// valor sempre glanceable (nunca escondido atrás de um menu), só encurtando o
+// texto dos modos mais longos ("Aceitar edições", "Não perguntar").
+export const PERMISSION_SHORT_LABELS: Record<PermissionMode, string> = {
+  default: 'Padrão',
+  acceptEdits: 'Edições',
+  plan: 'Plano',
+  auto: 'Auto',
+  bypassPermissions: 'Bypass',
+  dontAsk: 'S/ pergunta',
+}

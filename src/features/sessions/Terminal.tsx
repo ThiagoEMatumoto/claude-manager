@@ -1,12 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Circle, Clock, Loader, Moon, Pencil, Zap } from 'lucide-react'
-import type { LucideProps } from 'lucide-react'
-import type { ComponentType } from 'react'
 import { Terminal as Xterm } from '@xterm/xterm'
-import { Icon } from '@/components/ui/Icon'
-import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
@@ -18,7 +13,7 @@ import { useAppStore, type PaneMode } from '@/store/appStore'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
-import { ContextUsageIndicator } from './ContextUsageIndicator'
+import { SessionHeader } from './SessionHeader'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
@@ -49,29 +44,6 @@ interface Props {
   onOpenSettings?: () => void
 }
 
-interface StatusView {
-  label: string
-  icon: ComponentType<LucideProps>
-  className: string
-  spin?: boolean
-}
-
-function activityStatusView(status: SessionActivity['status'] | undefined): StatusView | null {
-  switch (status) {
-    case 'working':
-      return { label: 'trabalhando', icon: Zap, className: 'text-[var(--color-accent)]' }
-    case 'waiting':
-      return { label: 'aguardando você', icon: Clock, className: 'text-[var(--color-warning)]' }
-    case 'idle':
-      return { label: 'ocioso', icon: Moon, className: 'text-[var(--color-text-dim)]' }
-    case 'starting':
-      return { label: 'iniciando', icon: Loader, className: 'text-[var(--color-text-dim)]', spin: true }
-    case 'ended':
-    default:
-      return null
-  }
-}
-
 // Casa paths impressos no terminal: absolutos (/...), home (~/...) e relativos
 // (./..., ../..., ou sem prefixo). Exige conter `/` (o `\/` no meio garante isso).
 const PATH_RE = /(?:~|\.{1,2})?\/[\w./\-+@]+/g
@@ -92,15 +64,6 @@ function resolvePath(raw: string, cwd: string | null): string | null {
     else out.push(seg)
   }
   return '/' + out.join('/')
-}
-
-function formatRelative(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return `há ${s}s`
-  const m = Math.round(s / 60)
-  if (m < 60) return `há ${m}min`
-  const h = Math.round(m / 60)
-  return `há ${h}h`
 }
 
 // Lê as últimas linhas do viewport do xterm (input box / rodapé da TUI do claude) como
@@ -156,8 +119,6 @@ export function Terminal({
   const jumpTimerRef = useRef<number | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   // Modo de permissão ativo (lido do rodapé do xterm via detectFooterMode).
@@ -351,9 +312,6 @@ export function Terminal({
     }
   }, [])
 
-  const statusView = activityStatusView(activity?.status)
-  const relTime = activity?.lastActivityAt ? formatRelative(now - activity.lastActivityAt) : null
-
   // Saiu em < 3s do start, com código != 0 e sem nunca ter emitido bytes →
   // tratamos como "claude não encontrado". Não é detecção perfeita, mas evita o
   // críptico "exited (127)" pro caso mais comum (comando não instalado / errado).
@@ -386,14 +344,13 @@ export function Terminal({
     if (mode === 'chat') chatViewRef.current?.pushEcho(text)
   }
 
-  function commitRename() {
-    setEditing(false)
-    const next = draft.replace(/[\r\n]+/g, ' ').trim()
-    if (next.length === 0) return
-    // Cache no nosso DB (Fase 4/listagem). A exibição prioriza activity.name.
+  // Chamado pelo SessionHeader ao commitar um rename (Enter/blur no input com
+  // valor não-vazio). Cache no nosso DB (Fase 4/listagem) — a exibição prioriza
+  // activity.name; fonte de verdade do nome é o próprio claude via /rename.
+  // \x15 (Ctrl+U) limpa a linha atual do prompt pra não concatenar com algo que
+  // o usuário digitou.
+  function commitRename(next: string) {
     void sessionsApi.rename(session.id, next)
-    // Fonte de verdade do nome é o claude: injeta /rename. \x15 (Ctrl+U) limpa a
-    // linha atual do prompt pra não concatenar com algo que o usuário digitou.
     if (canRename) write('\x15/rename ' + next + '\r')
   }
 
@@ -633,174 +590,28 @@ export function Terminal({
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="flex items-start justify-between gap-3 border-b border-l-2 border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-4 py-2 text-xs"
-        style={projectColor ? { borderLeftColor: projectColor } : undefined}
-      >
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex items-center gap-2">
-            {projectName && (
-              <span className="flex shrink-0 items-center gap-1.5 font-medium text-[var(--color-text-dim)]">
-                <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>
-                <span className="max-w-40 truncate">{projectName}</span>
-              </span>
-            )}
-            {editing ? (
-              <>
-                {projectName && <span className="text-[var(--color-border)]">·</span>}
-                <input
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename()
-                    if (e.key === 'Escape') setEditing(false)
-                  }}
-                  placeholder={repoLabel}
-                  className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1 py-0.5 font-medium outline-none focus:border-[var(--color-accent)]"
-                />
-              </>
-            ) : isNamed || !projectName ? (
-              // Nome custom (ou sem projeto pra contextualizar): mostra o título, clicável pra renomear.
-              <>
-                {projectName && <span className="text-[var(--color-border)]">·</span>}
-                <button
-                  type="button"
-                  disabled={!canRename}
-                  onClick={() => {
-                    setDraft(activity?.name ?? title ?? '')
-                    setEditing(true)
-                  }}
-                  className="truncate font-medium enabled:hover:text-[var(--color-accent)] disabled:cursor-not-allowed"
-                  title={canRename ? 'Renomear sessão' : 'Aguarde a sessão ficar ociosa pra renomear'}
-                >
-                  {displayTitle}
-                </button>
-              </>
-            ) : (
-              // Sem nome custom: a aba já mostra o nome da pasta — aqui só um lápis discreto pra nomear.
-              canRename && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft('')
-                    setEditing(true)
-                  }}
-                  className="shrink-0 text-[var(--color-text-dim)] hover:text-[var(--color-accent)]"
-                  title="Nomear esta sessão"
-                  aria-label="Nomear esta sessão"
-                >
-                  <Icon as={Pencil} size={12} />
-                </button>
-              )
-            )}
-          </div>
-          <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
-        </div>
-        <div className="flex items-center gap-3 text-[var(--color-text-dim)]">
-          {!exited && (
-            <div className="flex min-w-0 items-center gap-2">
-              {statusView ? (
-                <span
-                  className={`flex items-center gap-1 text-[11px] uppercase tracking-wider ${statusView.className}`}
-                >
-                  <Icon
-                    as={statusView.icon}
-                    size={13}
-                    className={
-                      statusView.spin ? 'animate-spin' : 'drop-shadow-[0_0_4px_currentColor]'
-                    }
-                  />
-                  {statusView.label}
-                </span>
-              ) : activity?.status === 'ended' ? (
-                <span className="text-[11px] uppercase tracking-wider text-[var(--color-text-dim)]">
-                  encerrada
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-[var(--color-success)]">
-                  <Icon as={Circle} size={9} className="fill-current drop-shadow-[0_0_4px_currentColor]" />
-                  running
-                </span>
-              )}
-              {relTime && <span className="text-[10px]">{relTime}</span>}
-              {activity?.title && (
-                <span className="max-w-40 truncate text-[10px] text-[var(--color-text-dim)]">
-                  {activity.title}
-                </span>
-              )}
-            </div>
-          )}
-          {/* Monitor de contexto: mesmo header (compartilhado pelos dois modos) já
-              mostra o status acima; aqui repomos o uso da janela vs. o limite do
-              modelo. Auto-oculta sem tokens+modelo. */}
-          {!exited && <ContextUsageIndicator activity={activity} />}
-          {exited &&
-            (claudeNotFound ? (
-              <span className="flex items-center gap-1 text-[var(--color-danger)]">
-                <Icon as={AlertCircle} size={13} />
-                claude não encontrado
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-[var(--color-danger)]">
-                <Icon as={Circle} size={9} className="fill-current" />
-                encerrada ({exitCode ?? '?'})
-              </span>
-            ))}
-          {error && !claudeNotFound && (
-            <span className="flex items-center gap-1 text-[var(--color-danger)]">
-              <Icon as={AlertCircle} size={13} />
-              {error}
-            </span>
-          )}
-          {onToggleMode && (
-            <div className="inline-flex overflow-hidden rounded border border-[var(--color-border)]">
-              <button
-                type="button"
-                onClick={() => mode !== 'terminal' && onToggleMode()}
-                title="Terminal cru (PTY)"
-                className={`px-2 py-0.5 transition ${
-                  mode === 'terminal'
-                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
-                    : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-                }`}
-              >
-                Terminal
-              </button>
-              <button
-                type="button"
-                onClick={() => mode !== 'chat' && onToggleMode()}
-                title="Chat renderizado do transcript (PTY segue vivo por baixo)"
-                className={`px-2 py-0.5 transition ${
-                  mode === 'chat'
-                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
-                    : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
-                }`}
-              >
-                Chat
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            title="Minimizar — mantém a sessão rodando em background, acessível no strip de sessões"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
-          >
-            Minimizar
-          </button>
-          <button
-            type="button"
-            onClick={() => endSession(session.id)}
-            disabled={exited}
-            title="Encerrar o processo claude e fechar a sessão (some do strip)"
-            className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40"
-          >
-            Encerrar
-          </button>
-        </div>
-      </div>
+      <SessionHeader
+        projectName={projectName}
+        projectIcon={projectIcon}
+        projectColor={projectColor}
+        repoLabel={repoLabel}
+        repoPath={repoPath}
+        displayTitle={displayTitle}
+        nameValue={activity?.name ?? title ?? ''}
+        isNamed={isNamed}
+        canRename={canRename}
+        onCommitRename={commitRename}
+        exited={exited}
+        activity={activity}
+        now={now}
+        claudeNotFound={claudeNotFound}
+        exitCode={exitCode}
+        error={error}
+        mode={mode}
+        onToggleMode={onToggleMode}
+        onMinimize={onClose}
+        onEndSession={() => endSession(session.id)}
+      />
 
       {exited && (
         <div

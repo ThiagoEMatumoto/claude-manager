@@ -137,12 +137,16 @@ export function SessionHeader({
   }
 
   // 2º clique confirma — mesmo padrão de `confirmingBypass` do SpawnSessionDialog
-  // (armar no 1º clique, exigir um 2º clique explícito pra executar). Como o Menu
-  // fecha a cada clique de item, o 2º clique reabre o menu (label já mostra
-  // "Confirmar encerramento") e confirma ali.
+  // (armar no 1º clique, exigir um 2º clique explícito pra executar). O Menu fecha
+  // a cada clique de item (MenuButton chama onClose() antes de item.onClick());
+  // reabrimos ele no mesmo clique (setMenuOpen(true) depois do onClose() já ter
+  // rodado) — o batching automático do React 18 funde os dois setState num único
+  // render, então o menu nunca pisca fechado: o usuário vê "Encerrar" virar
+  // "Confirmar encerramento" ali mesmo, sem precisar reabrir manualmente.
   function handleEndClick() {
     if (!confirmingEnd) {
       setConfirmingEnd(true)
+      setMenuOpen(true)
       if (confirmTimeoutRef.current != null) clearTimeout(confirmTimeoutRef.current)
       confirmTimeoutRef.current = window.setTimeout(() => setConfirmingEnd(false), END_CONFIRM_TIMEOUT_MS)
       return

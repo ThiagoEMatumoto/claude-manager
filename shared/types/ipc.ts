@@ -500,6 +500,11 @@ export interface SpawnSessionInput {
   // o nome de uma skill). Escrito no PTY no primeiro `data` da sessão, não como
   // flag de CLI — slash commands são input interativo do REPL.
   initialCommand?: string
+  // Prompt inicial entregue como POSICIONAL no comando de spawn (`claude "<prompt>"`),
+  // não injetado no PTY. Em modo interativo o claude auto-submete esse posicional e
+  // roda o 1º turno — caminho confiável pro handoff em background (a colagem no PTY
+  // é descartada quando ninguém dá resize no TUI). Distinto de initialCommand.
+  initialPrompt?: string
   // Modelo inicial da sessão (alias: 'opus' | 'sonnet' | 'haiku'). Validado
   // contra whitelist no main e anexado ao spawn como `--model <alias>`.
   // Ausente = default do claude.

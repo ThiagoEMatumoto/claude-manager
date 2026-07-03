@@ -95,8 +95,9 @@ export const useHandoffsStore = create<HandoffsState>((set, get) => ({
       await handoffsApi.approve({ id, composedPrompt: editedPrompt })
       const ctx = await handoffsApi.spawnContext(id)
       // O prompt completo (editado) vai por arquivo de system-prompt (íntegro,
-      // multi-linha); no REPL injetamos só uma linha de kickoff que aponta pro
-      // contexto e instrui a reportar via MCP ao terminar.
+      // multi-linha); o kickoff abaixo vira o 1º turno REAL da filha, entregue como
+      // prompt posicional no comando de spawn (`claude "<kickoff>"` auto-submete) —
+      // não colado no PTY, que em background é descartado sem resize do TUI.
       const kickoff = `Comece a tarefa do handoff descrita no seu contexto de sistema. Ao terminar, chame a MCP tool handoff_report com handoffId="${id}".`
       // Background spawn: a filha sobe SEM abrir pane/xterm. Vira só um chip no
       // rollup (abrível sob demanda). O modo do handoff vira permissionMode.
@@ -104,7 +105,7 @@ export const useHandoffsStore = create<HandoffsState>((set, get) => ({
         repoId: ctx.repo.id,
         name: `handoff: ${ctx.repo.label}`,
         featureId: handoff?.featureId ?? undefined,
-        initialCommand: kickoff,
+        initialPrompt: kickoff,
         systemPromptText: editedPrompt,
         permissionMode: permissionModeFor(handoff?.mode ?? 'interactive'),
       })

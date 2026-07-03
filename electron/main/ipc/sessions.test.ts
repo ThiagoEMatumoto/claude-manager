@@ -132,6 +132,29 @@ describe('buildSpawnInnerCmd', () => {
     expect(buildSpawnInnerCmd({ ...base, disallowedTools: [] })).not.toContain('--disallowedTools')
     expect(buildSpawnInnerCmd(base)).not.toContain('--disallowedTools')
   })
+
+  it('anexa o initialPrompt como posicional quotado no FIM (auto-submit do 1º turno)', () => {
+    const cmd = buildSpawnInnerCmd({
+      ...base,
+      systemPromptFilePath: '/tmp/cm/handoff-1.md',
+      initialPrompt: 'Comece a tarefa do handoff',
+    })
+    // Posicional TEM que ser o último token, depois de todas as flags.
+    expect(cmd.endsWith("'Comece a tarefa do handoff'")).toBe(true)
+    // E vem depois do --append-system-prompt-file (não antes de nenhuma flag).
+    expect(cmd.indexOf('--append-system-prompt-file')).toBeLessThan(
+      cmd.indexOf("'Comece a tarefa do handoff'"),
+    )
+  })
+
+  it('NÃO anexa posicional quando initialPrompt é ausente/vazio', () => {
+    expect(buildSpawnInnerCmd(base)).toContain('--mcp-config /tmp/mcp.json')
+    // Sem initialPrompt o comando termina numa flag, não num posicional quotado.
+    expect(buildSpawnInnerCmd(base).endsWith('/tmp/mcp.json')).toBe(true)
+    expect(buildSpawnInnerCmd({ ...base, initialPrompt: '   ' }).endsWith('/tmp/mcp.json')).toBe(
+      true,
+    )
+  })
 })
 
 describe('resolvePermissionMode', () => {

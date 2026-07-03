@@ -18,6 +18,9 @@ interface Props {
   onSelect: (level: EffortLevel | 'ultracode') => void
   /** Sessão ociosa — único estado seguro pra injetar /effort. Default true. */
   canSwitch?: boolean
+  /** Painel estreito: aperta padding/gap e esconde o chevron — o valor (ícone +
+   * texto curto) continua sempre visível, nunca escondido atrás de um menu. */
+  compact?: boolean
 }
 
 // Controle de esforço como pill próprio, ao lado do ModelPill (estilo barra do
@@ -32,6 +35,7 @@ export function EffortPill({
   ultracodeActive,
   onSelect,
   canSwitch = true,
+  compact,
 }: Props) {
   const [open, setOpen] = useState(false)
 
@@ -86,13 +90,13 @@ export function EffortPill({
             ? 'Trocar o esforço desta sessão'
             : 'Sessão ocupada — a troca será aplicada quando ela ficar ociosa'
         }
-        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)] ${
-          hasPending ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'
-        } ${textClass}`}
+        className={`flex items-center gap-1 rounded-full border py-0.5 text-[10px] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)] ${
+          compact ? 'px-1.5' : 'px-2'
+        } ${hasPending ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'} ${textClass}`}
       >
         <Icon as={LeadingIcon} size={11} className={iconClass} />
         <span className="whitespace-nowrap">{label}</span>
-        <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />
+        {!compact && <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />}
       </button>
     </Menu>
   )

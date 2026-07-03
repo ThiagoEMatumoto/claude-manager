@@ -40,9 +40,12 @@ interface Props {
   /** Troca escolhida enquanto a sessão estava ocupada, aguardando o próximo idle. */
   pending: PendingSelection
   onSelectModel: (alias: ModelAlias) => void
+  /** Painel estreito: aperta padding/gap e esconde o chevron — o valor (ícone +
+   * texto curto) continua sempre visível, nunca escondido atrás de um menu. */
+  compact?: boolean
 }
 
-export function ModelPill({ activity, canSwitch, pending, onSelectModel }: Props) {
+export function ModelPill({ activity, canSwitch, pending, onSelectModel, compact }: Props) {
   const [open, setOpen] = useState(false)
   // Alvo da troca otimista de modelo; null = sem troca em voo.
   const [switching, setSwitching] = useState<ModelAlias | null>(null)
@@ -114,9 +117,11 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel }: Props
             ? 'Trocar modelo ou esforço desta sessão'
             : 'Sessão ocupada — a troca será aplicada quando ela ficar ociosa'
         }
-        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)] ${
-          hasPending ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'
-        } ${dim ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'}`}
+        className={`flex items-center gap-1 rounded-full border py-0.5 text-[10px] transition hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)] ${
+          compact ? 'px-1.5' : 'px-2'
+        } ${hasPending ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'} ${
+          dim ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text)]'
+        }`}
       >
         <Icon
           as={switching ? Loader : hasPending ? Clock : Sparkles}
@@ -124,7 +129,7 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel }: Props
           className={switching ? 'animate-spin' : 'text-[var(--color-accent)]'}
         />
         <span className="whitespace-nowrap">{label}</span>
-        <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />
+        {!compact && <Icon as={ChevronDown} size={10} className="text-[var(--color-text-dim)]" />}
       </button>
     </Menu>
   )

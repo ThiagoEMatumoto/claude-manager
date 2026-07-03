@@ -5,6 +5,7 @@ import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
 import { EffortPill } from './EffortPill'
 import { PermissionPill } from './PermissionPill'
 import { isPendingEmpty, type PendingSelection } from './model-queue'
+import { usePanelTier } from './use-panel-tier'
 
 interface Props {
   activity: SessionActivity | null
@@ -57,14 +58,19 @@ export function ComposerToolbar({
   onInterrupt,
 }: Props) {
   const hasPending = !isPendingEmpty(pending)
+  // Mede a própria largura (escopado ao rodapé, independente do tier do header) —
+  // mesmo hook de ResizeObserver usado no SessionHeader.
+  const { ref, tier } = usePanelTier<HTMLDivElement>()
+  const compact = tier !== 'wide'
 
   return (
-    <div className="flex items-center gap-2 px-1 pb-1">
+    <div ref={ref} className="flex items-center gap-2 px-1 pb-1">
       <ModelPill
         activity={activity}
         canSwitch={canSwitch}
         pending={pending}
         onSelectModel={onSelectModel}
+        compact={compact}
       />
       <EffortPill
         effort={activeEffort}
@@ -73,11 +79,13 @@ export function ComposerToolbar({
         ultracodeActive={ultracodeActive}
         onSelect={onSelectEffort}
         canSwitch={canSwitch}
+        compact={compact}
       />
       <PermissionPill
         currentMode={currentMode}
         onCycle={onCyclePermission}
         onSelect={onSelectPermission}
+        compact={compact}
       />
       {onInterrupt && (
         <button

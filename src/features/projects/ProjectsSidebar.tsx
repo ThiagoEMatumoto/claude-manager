@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   DownloadCloud,
   FolderOpen,
@@ -31,7 +31,16 @@ import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { useAppStore } from '@/store/appStore'
 import { repoApi } from '@/lib/ipc'
-import type { MissingRepo, Project, UpdateProjectInput } from '../../../shared/types/ipc'
+import type {
+  CloneMissingResult,
+  MissingRepo,
+  Project,
+  UpdateProjectInput,
+} from '../../../shared/types/ipc'
+
+// Enquanto a janela está visível, revalida os repos faltantes neste intervalo —
+// pega um repo que sumiu do disco (via sync) sem depender de reiniciar o app.
+const MISSING_POLL_MS = 10_000
 
 export function ProjectsSidebar() {
   const { projects, create, update, remove, reorder } = useProjects()
@@ -50,29 +59,87 @@ export function ProjectsSidebar() {
   const [missingRepos, setMissingRepos] = useState<MissingRepo[]>([])
   const [cloningMissing, setCloningMissing] = useState(false)
   const [pullingAll, setPullingAll] = useState(false)
+  const [cloneFailures, setCloneFailures] = useState<CloneMissingResult[]>([])
+  const [cloneError, setCloneError] = useState<string | null>(null)
+
+  const refreshMissing = useCallback(() => {
+    return repoApi
+      .listMissing()
+      .then(setMissingRepos)
+      .catch((err) => {
+        console.error('[ProjectsSidebar] falha ao listar repos faltantes:', err)
+      })
+  }, [])
 
   useEffect(() => {
-    void repoApi.listMissing().then(setMissingRepos)
-  }, [projects.length])
+    void refreshMissing()
+  }, [projects.length, refreshMissing])
+
+  // Revalida quando a janela volta ao foco/visível e num intervalo curto enquanto
+  // visível. O intervalo é pausado quando a aba fica oculta (document.hidden) pra
+  // não bater no disco em background sem ninguém olhando o banner.
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | undefined
+
+    function startPolling() {
+      if (intervalId) return
+      intervalId = setInterval(() => void refreshMissing(), MISSING_POLL_MS)
+    }
+    function stopPolling() {
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = undefined
+      }
+    }
+    function onFocus() {
+      void refreshMissing()
+    }
+    function onVisibility() {
+      if (document.hidden) {
+        stopPolling()
+      } else {
+        void refreshMissing()
+        startPolling()
+      }
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    if (!document.hidden) startPolling()
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      stopPolling()
+    }
+  }, [refreshMissing])
 
   async function cloneMissing() {
     setCloningMissing(true)
+    setCloneError(null)
+    setCloneFailures([])
     try {
-      await repoApi.cloneMissing()
-      setMissingRepos(await repoApi.listMissing())
+      const results = await repoApi.cloneMissing()
+      setCloneFailures(results.filter((r) => r.status === 'error'))
+      await refreshMissing()
+    } catch (err) {
+      console.error('[ProjectsSidebar] falha ao clonar faltantes:', err)
+      setCloneError((err as Error).message)
     } finally {
       setCloningMissing(false)
     }
   }
 
   // O resumo (X atualizados, Y pulados) sai via toast do main; aqui só gerimos
-  // o estado de "em andamento" do botão.
+  // o estado de "em andamento" do botão. Ao final revalida os faltantes, já que
+  // um pull pode ter feito um repo aparecer/sumir.
   async function pullAll() {
     setPullingAll(true)
     try {
       await repoApi.pullAll()
     } finally {
       setPullingAll(false)
+      void refreshMissing()
     }
   }
 
@@ -146,6 +213,21 @@ export function ProjectsSidebar() {
             <Icon as={DownloadCloud} size={13} />
             {cloningMissing ? 'Clonando…' : 'Clonar faltantes'}
           </button>
+          {cloneError && (
+            <div className="text-xs text-[var(--color-danger,#ef4444)]">
+              Falha ao clonar: {cloneError}
+            </div>
+          )}
+          {cloneFailures.length > 0 && (
+            <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-danger,#ef4444)]">
+              {cloneFailures.map((f) => (
+                <li key={f.repoId} className="truncate" title={f.detail}>
+                  falha ao clonar {f.label}
+                  {f.detail ? `: ${f.detail}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

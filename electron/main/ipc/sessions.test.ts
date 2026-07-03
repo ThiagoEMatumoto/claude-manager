@@ -92,6 +92,21 @@ describe('buildSpawnInnerCmd', () => {
     expect(cmd).toContain("--model 'opus'")
   })
 
+  it('anexa --model opusplan (alias hibrido, ja validado contra a whitelist)', () => {
+    const cmdOpusplan = buildSpawnInnerCmd({ ...base, model: 'opusplan' })
+    expect(cmdOpusplan).toContain("--model 'opusplan'")
+  })
+
+  it('anexa --advisor <model> corretamente quotado quando presente', () => {
+    const cmdAdvisor = buildSpawnInnerCmd({ ...base, advisorModel: 'opus' })
+    expect(cmdAdvisor).toContain("--advisor 'opus'")
+  })
+
+  it('nao inclui --advisor quando o advisorModel e null/ausente', () => {
+    expect(buildSpawnInnerCmd({ ...base, advisorModel: null })).not.toContain('--advisor')
+    expect(buildSpawnInnerCmd(base)).not.toContain('--advisor')
+  })
+
   it('NÃO inclui --model quando o modelo é null', () => {
     const cmd = buildSpawnInnerCmd(base)
     expect(cmd).not.toContain('--model')

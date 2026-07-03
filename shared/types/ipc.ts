@@ -479,6 +479,11 @@ export interface ReorderReposInput {
 // Nível de esforço de raciocínio (--effort). Espelha a whitelist do main.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+// Modelo do advisor tool (--advisor <model>): segunda opinião de um modelo mais
+// forte em pontos-chave da sessão. Experimental — só funciona na Anthropic API
+// direta (não Bedrock/Vertex/Foundry). Espelha a whitelist do main.
+export type AdvisorModel = 'opus' | 'sonnet' | 'fable'
+
 // Modo de permissão da sessão (--permission-mode). Espelha EXATAMENTE os choices
 // da CLI claude: default (pergunta tudo), plan (read-only), acceptEdits (edita
 // sem perguntar), auto, bypassPermissions (pula tudo), dontAsk. Validado contra
@@ -505,13 +510,19 @@ export interface SpawnSessionInput {
   // roda o 1º turno — caminho confiável pro handoff em background (a colagem no PTY
   // é descartada quando ninguém dá resize no TUI). Distinto de initialCommand.
   initialPrompt?: string
-  // Modelo inicial da sessão (alias: 'opus' | 'sonnet' | 'haiku'). Validado
-  // contra whitelist no main e anexado ao spawn como `--model <alias>`.
-  // Ausente = default do claude.
+  // Modelo inicial da sessão (alias: 'opus' | 'sonnet' | 'haiku' | 'opusplan').
+  // 'opusplan' é roteamento híbrido nativo da CLI: Opus no plan mode, troca pra
+  // Sonnet ao sair pra execução (sem variante própria de contexto 1M — segue a
+  // elegibilidade de conta, igual ao 'opus' hoje). Validado contra whitelist no
+  // main e anexado ao spawn como `--model <alias>`. Ausente = default do claude.
   model?: string
   // Nível de esforço inicial passado como `--effort <level>`. Validado contra
   // whitelist no main. Ausente = default do claude.
   effort?: EffortLevel
+  // Modelo do advisor tool (--advisor <model>), ligando a segunda opinião em
+  // pontos-chave da sessão. Validado contra whitelist no main. Ausente/undefined
+  // = advisor desligado (sem flag). Experimental — só Anthropic API direta.
+  advisorModel?: AdvisorModel
   // Texto de system-prompt a ANEXAR via --append-system-prompt-file (arquivo
   // temp). Usado pelo fluxo de handoff pra entregar o prompt multi-linha íntegro
   // (em vez de injetá-lo no REPL, onde os \n viram Enter). Se também houver

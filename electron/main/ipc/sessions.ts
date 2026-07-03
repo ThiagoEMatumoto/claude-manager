@@ -69,12 +69,21 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Whitelist do --model no spawn: o valor vem do renderer (segmented control),
 // mas o main re-valida — nada fora desta lista chega à linha de comando.
-const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku'])
+// 'opusplan' é o alias híbrido nativo da CLI (Opus no plan mode, Sonnet na
+// execução) — sem variante própria de contexto 1M, mesma elegibilidade de conta
+// do 'opus'.
+const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku', 'opusplan'])
 
 // Whitelist do --effort no spawn: espelha SPAWN_MODEL_WHITELIST. O valor vem do
 // renderer (segmented control / default persistido), mas o main re-valida — nada
 // fora desta lista chega à linha de comando.
 const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+
+// Whitelist do --advisor no spawn: mesma defesa-em-profundidade de model/effort.
+// Feature experimental (só Anthropic API direta) — sem detecção de provider por
+// ora; se o CLI rejeitar em runtime (Bedrock/Vertex), a sessão falha visível
+// (mesmo tratamento de outras flags incompatíveis).
+const SPAWN_ADVISOR_WHITELIST = new Set(['opus', 'sonnet', 'fable'])
 
 // Whitelist do --permission-mode no spawn: TODOS os choices da CLI claude. O main
 // é a autoridade — qualquer valor fora desta lista é descartado (vira null = sem
@@ -285,6 +294,7 @@ export function buildSpawnInnerCmd(parts: {
   mcpConfigArg: string
   model: string | null
   effort?: string | null
+  advisorModel?: string | null
   systemPromptFilePath: string | null
   permissionMode?: string | null
   disallowedTools?: string[] | null
@@ -296,6 +306,9 @@ export function buildSpawnInnerCmd(parts: {
   }
   if (parts.effort) {
     innerCmd += ` --effort ${shquote(parts.effort)}`
+  }
+  if (parts.advisorModel) {
+    innerCmd += ` --advisor ${shquote(parts.advisorModel)}`
   }
   if (parts.permissionMode) {
     innerCmd += ` --permission-mode ${shquote(parts.permissionMode)}`
@@ -524,6 +537,12 @@ export function registerSessionIpc(): void {
     const effort =
       input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
 
+    // Advisor model: mesma defesa em profundidade de model/effort.
+    const advisorModel =
+      input.advisorModel && SPAWN_ADVISOR_WHITELIST.has(input.advisorModel)
+        ? input.advisorModel
+        : null
+
     // System-prompt anexado via --append-system-prompt-file vem de TRÊS fontes:
     //  - bloco de arquitetura do repo (se repoId; dá o "mapa" do repo no sistema),
     //  - contexto da feature (se featureId; Fase 6), e
@@ -569,6 +588,7 @@ export function registerSessionIpc(): void {
       mcpConfigArg: mcpConfigArg(),
       model,
       effort,
+      advisorModel,
       systemPromptFilePath,
       permissionMode,
       disallowedTools,

@@ -59,10 +59,11 @@ function formatDuration(started: number | null, finished: number | null): string
   return `${mins}min ${secs % 60}s`
 }
 
-// captureQuality degradada → aviso legível. full/null não geram aviso.
+// captureQuality degradada → aviso legível. Headless entrega o stdout íntegro,
+// então classifyCapture só emite 'full'/'none' — 'partial' nunca ocorre. full/null
+// não geram aviso.
 function captureWarning(quality: JobRun['captureQuality']): string | null {
   if (quality === 'none') return 'sem relatório capturado'
-  if (quality === 'partial') return 'relatório parcial'
   return null
 }
 

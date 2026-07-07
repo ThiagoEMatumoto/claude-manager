@@ -4,7 +4,9 @@ import { captureLogs, screenshot } from '../driver/capture'
 import { waitReady } from '../driver/nav'
 import { queryDb } from '../driver/inspect'
 
-const MODE = process.env.JOB_MODE ?? 'plan'
+// Default do produto é 'default' (observe-only via read-only lockdown do runner;
+// 'plan' desviaria pro ExitPlanMode indisponível em headless). Override via JOB_MODE.
+const MODE = process.env.JOB_MODE ?? 'default'
 
 const PROMPT =
   'Escreva uma análise técnica detalhada, com pelo menos 800 palavras, sobre riscos de ' +
@@ -58,8 +60,8 @@ try {
   const t0 = Date.now()
   await page.evaluate((id) => (window as any).api.scheduledJobs.runNow(id), jobId)
 
-  // Poll bem generoso: a crítica longa (800+ palavras, plan mode) leva vários minutos
-  // — muito mais que o "OK". Só fecha o app DEPOIS do status terminal, senão o
+  // Poll bem generoso: a crítica longa (800+ palavras, default mode) leva vários
+  // minutos — muito mais que o "OK". Só fecha o app DEPOIS do status terminal, senão o
   // app.close() mata o child no meio da geração e a run fica presa em 'running'.
   // 150 * 3s = 450s de teto.
   let row: Record<string, unknown> | undefined

@@ -27,6 +27,7 @@ import {
 import { getMcpRuntime } from '../services/mcp/server'
 import { mcpClientConfigPath } from '../services/mcp/config'
 import { chatTranscriptService } from '../services/chat-transcript-service'
+import { captureJobRunOnExit } from '../services/job-capture'
 import {
   buildImageFilename,
   isImageTempFile,
@@ -570,6 +571,15 @@ export function registerSessionIpc(): void {
         }
       } catch (err) {
         console.error('[sessions] handoff reconciliation on exit failed:', err)
+      }
+
+      // Fase 2 Scheduled Jobs: captura PULL do relatório se a sessão pertence a
+      // uma job-run 'running' (liga por session_id). No-op para sessões normais.
+      // try/catch isolado — a captura nunca pode derrubar o fluxo do exit.
+      try {
+        captureJobRunOnExit(e.sessionId, e.exitCode)
+      } catch (err) {
+        console.error('[sessions] job-run capture on exit failed:', err)
       }
 
       // Fase 8: sempre dispara o serviço de memória no exit. Ele resolve a feature

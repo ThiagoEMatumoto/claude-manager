@@ -7,10 +7,11 @@ import { composeJobKickoff } from './job-kickoff'
 import { getDb } from './db'
 import {
   resolvePermissionMode,
-  resolveDisallowedTools,
+  resolveJobDisallowedTools,
   resolveModel,
   resolveEffort,
   resolveAdvisor,
+  isObserveOnlyMode,
 } from './spawn-flags'
 import type {
   AdvisorModel,
@@ -120,9 +121,10 @@ export function buildHeadlessArgs(params: JobRunParams): string[] {
   if (effort) args.push('--effort', effort)
   const advisor = resolveAdvisor(params.advisorModel)
   if (advisor) args.push('--advisor', advisor)
-  // Denylist destrutivo é mesclado dentro de resolveDisallowedTools p/ modo autônomo.
-  const deny = resolveDisallowedTools(mode, params.disallowedTools)
-  if (deny && deny.length > 0) args.push('--disallowedTools', ...deny)
+  // Job HEADLESS recebe SEMPRE o denylist destrutivo — inclusive default/plan (roda
+  // sem supervisão, nenhum modo fica sem o guard-rail). Ver resolveJobDisallowedTools.
+  const deny = resolveJobDisallowedTools(params.disallowedTools)
+  if (deny.length > 0) args.push('--disallowedTools', ...deny)
   const systemPrompt = params.systemPrompt?.trim()
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
   return args
@@ -158,6 +160,21 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
 
   const runId = params.runId
   if (!runId) return // sem run pra finalizar — não ocorre no fluxo do scheduler.
+
+  // Guard fail-closed (defense-in-depth p/ o HIGH latente): jobs são MVP observe-only.
+  // Se a row resolver para um modo NÃO-observe-only (autônomo), finaliza failed SEM
+  // spawnar. As fronteiras MCP/UI já barram a criação; esta é a última linha — o
+  // runner nunca confia cegamente na row.
+  const mode = resolvePermissionMode(params.permissionMode) ?? DEFAULT_PERMISSION_MODE
+  if (!isObserveOnlyMode(mode)) {
+    updateRun({
+      id: runId,
+      status: 'failed',
+      finishedAt: now(),
+      error: `permissionMode autônomo (${mode}) não permitido em job agendado (MVP observe-only).`,
+    })
+    return
+  }
 
   try {
     const cwd = resolveCwd(params.repoId)

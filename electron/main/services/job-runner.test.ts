@@ -53,11 +53,20 @@ describe('buildHeadlessArgs', () => {
     expect(args).not.toContain('--model')
   })
 
-  it('modo autônomo mescla o denylist destrutivo em --disallowedTools', () => {
-    const args = buildHeadlessArgs(baseParams({ permissionMode: 'acceptEdits' }))
+  it('SEMPRE aplica o denylist destrutivo — inclusive default/plan (job sem supervisão)', () => {
+    // default → plan (observe-only) também recebe o guard-rail: é a mudança do Fix 2.
+    const args = buildHeadlessArgs(baseParams())
     const i = args.indexOf('--disallowedTools')
     expect(i).toBeGreaterThan(-1)
     expect(args.slice(i + 1)).toContain('Bash(rm:*)')
+  })
+
+  it('mescla o denylist do renderer com o destrutivo (sem enfraquecer)', () => {
+    const args = buildHeadlessArgs(baseParams({ disallowedTools: ['Write'] }))
+    const i = args.indexOf('--disallowedTools')
+    const specs = args.slice(i + 1)
+    expect(specs).toContain('Write')
+    expect(specs).toContain('Bash(rm:*)')
   })
 })
 
@@ -132,6 +141,22 @@ describe('runJob (finalização async)', () => {
       now: () => 3,
     })
     expect(updateRun.mock.calls[0]![0]).toMatchObject({ status: 'success', captureQuality: 'none' })
+  })
+
+  it('guard fail-closed: permissionMode autônomo → failed SEM spawnar', async () => {
+    const updateRun = vi.fn()
+    const runJson = vi.fn(stubJson({ result: 'x' }))
+    await runJob(baseParams({ permissionMode: 'bypassPermissions' }), {
+      runJson,
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 5,
+    })
+    // Nunca spawnou o claude — o guard finaliza antes de resolver cwd/args.
+    expect(runJson).not.toHaveBeenCalled()
+    const arg = updateRun.mock.calls[0]![0]
+    expect(arg).toMatchObject({ id: 'run-1', status: 'failed', finishedAt: 5 })
+    expect(String(arg.error)).toContain('observe-only')
   })
 
   it('sem runId → no-op (nada a finalizar)', async () => {

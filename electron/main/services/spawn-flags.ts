@@ -56,6 +56,27 @@ export function resolvePermissionMode(value: string | null | undefined): string 
   return value && SPAWN_PERMISSION_MODE_WHITELIST.has(value) ? value : null
 }
 
+// Predicado do allowlist observe-only. Usado pelo job-runner como guard fail-closed
+// (defense-in-depth): um job cuja row resolva para modo autônomo é finalizado como
+// failed SEM spawnar — as fronteiras MCP/UI já barram a criação, este é o piso.
+const OBSERVE_ONLY_SET = new Set<string>(OBSERVE_ONLY_PERMISSION_MODES)
+export function isObserveOnlyMode(mode: string): boolean {
+  return OBSERVE_ONLY_SET.has(mode)
+}
+
+// Denylist de um job HEADLESS. Diferente do spawn interativo, o job SEMPRE recebe o
+// denylist destrutivo — mesmo em observe-only (default/plan): roda sem supervisão,
+// então nenhum modo pode ficar sem o guard-rail. Mescla o denylist do renderer/job
+// (que não consegue enfraquecê-lo). Fonte única = DESTRUCTIVE_DENYLIST.
+export function resolveJobDisallowedTools(
+  rendererDeny: readonly unknown[] | null | undefined,
+): string[] {
+  const deny = (rendererDeny ?? []).filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+  return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST]))
+}
+
 // Monta o denylist final do spawn. Mescla o denylist destrutivo canônico quando o
 // modo é autônomo (o renderer/job não pode enfraquecê-lo); senão devolve só o
 // denylist do renderer (ou null se vazio). Filtra specs não-string/vazios.

@@ -898,6 +898,12 @@ export type JobRunStatus =
 // silenciosa quando a sessão sai sem produzir texto.
 export type CaptureQuality = 'full' | 'partial' | 'none'
 
+// Discriminador do tipo de job (decisão técnica explícita — nunca inferida do
+// prompt): 'critique' critica código/texto (comportamento atual); 'web-audit'
+// dirige um browser (Playwright) contra targetUrl e mede desempenho + usabilidade.
+// O runner usa o kind para liberar as browser tools só no web-audit.
+export type JobKind = 'critique' | 'web-audit'
+
 // Agendamento hand-rolled (sem lib de cron no MVP). Discriminated union:
 // - interval: a cada N horas a partir do último run.
 // - daily: todo dia às HH:MM (hora local).
@@ -915,9 +921,13 @@ export type JobSchedule =
 export interface ScheduledJob {
   id: string
   name: string
+  // Tipo do job: 'critique' (default, retrocompatível) ou 'web-audit'.
+  kind: JobKind
   repoId: string | null
   prompt: string
   systemPrompt: string | null
+  // URL auditada — só web-audit preenche; null em jobs 'critique'.
+  targetUrl: string | null
   schedule: JobSchedule
   nextRunAt: number
   lastRunAt: number | null
@@ -945,6 +955,9 @@ export interface JobRun {
   ccSessionId: string | null
   reportText: string | null
   captureQuality: CaptureQuality | null
+  // Métricas estruturadas do web-audit (LCP/TTFB/console/network) como JSON. Null
+  // em 'critique' e enquanto a Fase 2 (parse) não popula. String opaca por ora.
+  metricsJson: string | null
   tokens: number | null
   model: string | null
   error: string | null
@@ -953,9 +966,12 @@ export interface JobRun {
 
 export interface CreateScheduledJobInput {
   name: string
+  // Default 'critique' quando omitido (o store aplica o default).
+  kind?: JobKind
   repoId?: string | null
   prompt: string
   systemPrompt?: string | null
+  targetUrl?: string | null
   schedule: JobSchedule
   enabled?: boolean
   catchUp?: boolean
@@ -969,9 +985,11 @@ export interface CreateScheduledJobInput {
 export interface UpdateScheduledJobInput {
   id: string
   name?: string
+  kind?: JobKind
   repoId?: string | null
   prompt?: string
   systemPrompt?: string | null
+  targetUrl?: string | null
   // Trocar o schedule recomputa next_run_at a partir de agora.
   schedule?: JobSchedule
   enabled?: boolean
@@ -998,6 +1016,7 @@ export interface UpdateJobRunInput {
   ccSessionId?: string | null
   reportText?: string | null
   captureQuality?: CaptureQuality | null
+  metricsJson?: string | null
   tokens?: number | null
   model?: string | null
   error?: string | null

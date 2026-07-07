@@ -15,9 +15,15 @@ import { queryDb } from '../driver/inspect'
 // sessão a ler as creds via printenv e logar, sem ecoá-las.
 //
 // SEGURANÇA DO OUTPUT: o report_text da página autenticada pode conter dados de
-// cliente/caso → este cenário NÃO despeja o relatório. Só imprime status, length e se
-// contém "LCP". Ao final, o operador deve rodar `rm -rf .playwright-mcp` (screenshots).
+// cliente/caso → este cenário NÃO despeja o relatório. Só imprime status, length, se
+// contém "LCP" e o VALOR numérico do LCP (número não é sensível). Ao final, o operador
+// deve limpar os screenshots do cwd do job (repoId:null → ~/ClaudeManager/scratch):
+// `rm -rf ~/ClaudeManager/scratch/.playwright-mcp`.
 
+// Modelo do job: sonnet (rápido e segue o playbook direto). O opus default é lento e
+// tende a sobre-elaborar (spawn de sub-agente de QA que NÃO herda as browser tools) —
+// override via WEBAUDIT_MODEL. O wiring (allowlist/env/MCP) é model-independent.
+const MODEL = process.env.WEBAUDIT_MODEL ?? 'sonnet'
 const TARGET_URL = process.env.WEBAUDIT_URL ?? 'https://app.legalstaging.lexter.ai'
 const PROMPT =
   'Audite o desempenho e a usabilidade da página inicial do legal-ui. Faça login se ' +
@@ -42,31 +48,33 @@ try {
   await waitReady(page)
 
   jobId = await page.evaluate(
-    async ({ url, prompt }) => {
+    async ({ url, prompt, model }) => {
       const job = await (window as any).api.scheduledJobs.create({
         name: 'webaudit-staging',
         kind: 'web-audit',
         repoId: null,
         prompt,
         targetUrl: url,
+        model,
         schedule: { type: 'interval', hours: 24 },
         permissionMode: 'default',
       })
       return job.id as string
     },
-    { url: TARGET_URL, prompt: PROMPT },
+    { url: TARGET_URL, prompt: PROMPT, model: MODEL },
   )
-  console.log('JOB_ID', jobId, 'TARGET', TARGET_URL)
+  console.log('JOB_ID', jobId, 'TARGET', TARGET_URL, 'MODEL', MODEL)
 
   const t0 = Date.now()
   await page.evaluate((id) => (window as any).api.scheduledJobs.runNow(id), jobId)
 
   // Poll generoso: login Firebase + navegação + captura de métricas leva minutos.
   // Só fecha o app DEPOIS do status terminal (senão mata o child no meio do browser).
-  // 200 * 3s = 600s de teto (alinhado ao JOB_TIMEOUT_MS de 10min do runner).
+  // 320 * 3s = 960s de teto (< WEB_AUDIT_TIMEOUT_MS de 20min do runner; sonnet finaliza
+  // bem antes). O runner marca 'failed' no timeout, então o poll nunca fica preso.
   let row: Record<string, unknown> | undefined
-  for (let i = 0; i < 200; i++) {
-    if (i === 3 || i === 50 || i === 120 || i === 190) snapClaude(String(i))
+  for (let i = 0; i < 320; i++) {
+    if (i === 3 || i === 60 || i === 150 || i === 300) snapClaude(String(i))
     const runs = (await page.evaluate(
       (jid) => (window as any).api.scheduledJobs.listRuns({ jobId: jid, limit: 1 }),
       jobId,
@@ -80,8 +88,12 @@ try {
   const elapsedS = ((Date.now() - t0) / 1000).toFixed(1)
 
   const apiReport = (row?.reportText as string | null) ?? ''
+  // Evidência POSITIVA de página autenticada (sem despejar conteúdo sensível): o VALOR
+  // numérico do LCP do bloco json de métricas (número não é sensível) + se o relatório
+  // referencia a rota autenticada /app. lcp não-null ⇒ mediu na página logada.
+  const lcpMatch = apiReport.match(/"lcp"\s*:\s*(\d+)/)
+  const authRoute = /\/app\//.test(apiReport) || /casos/i.test(apiReport)
   console.log('ELAPSED_TO_TERMINAL_S', elapsedS)
-  // NÃO despeja o report (pode conter dados de cliente): só status/len/tem-LCP.
   console.log(
     'FINAL_ROW',
     JSON.stringify({
@@ -91,6 +103,8 @@ try {
       error: row?.error,
       apiReportLen: apiReport.length,
       hasLCP: /lcp/i.test(apiReport),
+      lcpValue: lcpMatch ? Number(lcpMatch[1]) : null,
+      referencesAuthRoute: authRoute,
     }),
   )
   await screenshot(page, 'integration-webaudit')

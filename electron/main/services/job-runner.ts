@@ -36,6 +36,14 @@ import type {
 // Timeout generoso: um job pode fazer trabalho real (auditar extrações etc). Estouro
 // vira 'failed' — a run NUNCA fica presa em 'running' (o bug que esta migração corrige).
 const JOB_TIMEOUT_MS = 10 * 60 * 1000
+// web-audit é inerentemente mais lento: login + N round-trips de browser (navigate/
+// snapshot/screenshot/evaluate) + relatório. No opus default os 10min da crítica não
+// bastam — o job estourava 'failed' sem relatório. Dá o dobro de folga a esse kind.
+const WEB_AUDIT_TIMEOUT_MS = 20 * 60 * 1000
+
+function timeoutForKind(kind: JobKind | null | undefined): number {
+  return kind === 'web-audit' ? WEB_AUDIT_TIMEOUT_MS : JOB_TIMEOUT_MS
+}
 
 // Observe-only via `default` + read-only lockdown: o job roda em `default` (a crítica
 // vai DIRETO pro stdout/.result; `plan` desviaria pro ExitPlanMode, indisponível em
@@ -210,7 +218,7 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
   try {
     const cwd = resolveCwd(params.repoId)
     const args = buildHeadlessArgs(params)
-    const { data, result } = await runJson(args, { cwd, timeoutMs: JOB_TIMEOUT_MS })
+    const { data, result } = await runJson(args, { cwd, timeoutMs: timeoutForKind(params.kind) })
 
     const text = typeof data?.result === 'string' ? data.result : null
     const failed = result.code !== 0 || !data || data.is_error === true

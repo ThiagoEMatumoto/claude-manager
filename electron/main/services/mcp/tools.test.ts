@@ -566,6 +566,8 @@ describe('composeJobKickoff (web-audit playbook)', () => {
     expect(kickoff).toContain('consoleErrors')
     // regra de segurança presente.
     expect(kickoff).toContain('NUNCA escreva as credenciais')
+    // proíbe delegar a sub-agentes (eles não herdam as browser tools do job).
+    expect(kickoff).toContain('NÃO delegue a sub-agentes')
   })
 
   it('resolve as env vars de login por staging vs prod pela targetUrl (determinístico)', () => {

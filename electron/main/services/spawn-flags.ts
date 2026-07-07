@@ -32,6 +32,13 @@ const SPAWN_PERMISSION_MODE_WHITELIST = new Set<string>(SPAWN_PERMISSION_MODES)
 // destrutivo como guard-rail. plan é read-only e default pergunta tudo.
 const AUTONOMOUS_PERMISSION_MODES = new Set<string>(['acceptEdits', 'auto', 'bypassPermissions'])
 
+// Modos observe-only (read-only / pergunta-tudo) — os ÚNICOS permitidos para jobs
+// agendados no MVP. Um job roda sem supervisão, então os modos autônomos ficam
+// gated (bloqueados na UI e no MCP) até existirem os guards de segurança. É um
+// ALLOWLIST explícito (fail-closed): NÃO derivar como complemento do autônomo —
+// 'dontAsk' não está em AUTONOMOUS_PERMISSION_MODES e escaparia o gate.
+export const OBSERVE_ONLY_PERMISSION_MODES = ['default', 'plan'] as const
+
 // Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a sessão/job
 // sobe em modo autônomo. Bloqueia as ops irreversíveis das regras do usuário.
 export const DESTRUCTIVE_DENYLIST = [

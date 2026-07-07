@@ -423,6 +423,32 @@ describe('mcp tools — scheduled jobs', () => {
     ).toThrow()
   })
 
+  it('scheduled_job_create/update rejeitam permissionMode autônomo (gate observe-only)', () => {
+    const base = { name: 'gated', prompt: 'roda', schedule: { type: 'interval', hours: 24 } }
+    // Modos autônomos barrados na fronteira MCP (fecha a self-elevation por injection).
+    for (const permissionMode of ['bypassPermissions', 'dontAsk', 'acceptEdits', 'auto']) {
+      expect(() =>
+        tool('scheduled_job_create').handler({ ...base, permissionMode }),
+      ).toThrow(/autônomo indisponível via MCP/)
+    }
+    // Observe-only passa: plan e default são aceitos.
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      ...base,
+      permissionMode: 'plan',
+    })
+    expect(job.permissionMode).toBe('plan')
+
+    // O gate sobrevive ao .partial() do update schema.
+    expect(() =>
+      tool('scheduled_job_update').handler({ id: job.id, permissionMode: 'bypassPermissions' }),
+    ).toThrow(/autônomo indisponível via MCP/)
+    const { job: updated } = call<{ job: ScheduledJob }>('scheduled_job_update', {
+      id: job.id,
+      permissionMode: 'default',
+    })
+    expect(updated.permissionMode).toBe('default')
+  })
+
   it('scheduled_job_update pausa o job (enabled=false → row enabled=0)', () => {
     const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
       name: 'pausável',

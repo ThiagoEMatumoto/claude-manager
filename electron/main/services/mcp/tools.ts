@@ -22,6 +22,7 @@ import { getActivityFor } from '../session-activity'
 import { ptyManager } from '../pty-manager'
 import { getDb } from '../db'
 import { getPref } from '../prefs-store'
+import { OBSERVE_ONLY_PERMISSION_MODES } from '../spawn-flags'
 import { randomUUID } from 'node:crypto'
 import type {
   FeatureObjectiveLink,
@@ -906,14 +907,13 @@ function handoffTools(notify: McpNotify): ToolDef[] {
 
 // ---- scheduled jobs ----
 
-const jobPermissionMode = z.enum([
-  'default',
-  'plan',
-  'acceptEdits',
-  'auto',
-  'bypassPermissions',
-  'dontAsk',
-])
+// Gate observe-only: jobs via MCP só aceitam plan/default. Os modos autônomos
+// ficam bloqueados na fronteira (fecha a self-elevation por prompt injection —
+// um job em plan critica repo untrusted, injection tenta escalar via create/update
+// com bypassPermissions/dontAsk). Enum restrito ao allowlist = rejeição na validação.
+const jobPermissionMode = z.enum(OBSERVE_ONLY_PERMISSION_MODES, {
+  error: 'permissionMode autônomo indisponível via MCP no MVP — use a UI (apenas plan/default)',
+})
 const jobEffort = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
 const jobAdvisorModel = z.enum(['opus', 'sonnet', 'fable'])
 const jobRunStatus = z.enum(['scheduled', 'running', 'success', 'failed', 'interrupted', 'missed'])

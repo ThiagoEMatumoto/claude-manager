@@ -437,6 +437,22 @@ export function getLastRun(jobId: string): JobRun | null {
   return row ? rowToRun(row) : null
 }
 
+// report_text do run mais recente que TEM relatório — fonte do delta-via-prompt.
+// Não pode ser getLastRun: num app desktop 'missed'/'failed' (sem report) no meio
+// são comuns e suprimiriam o delta mesmo havendo um 'success' anterior. Prioriza
+// success e, dentro disso, o mais recente; ignora report vazio.
+export function getLastReport(jobId: string): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT report_text FROM job_runs
+       WHERE job_id = ? AND report_text IS NOT NULL AND TRIM(report_text) <> ''
+       ORDER BY (status = 'success') DESC, created_at DESC
+       LIMIT 1`,
+    )
+    .get(jobId) as { report_text: string } | undefined
+  return row ? row.report_text : null
+}
+
 // ---- Scheduler (Fase 2): consultas de vencidos + reconcile de órfãos ----
 
 // Jobs elegíveis para disparo AGORA: habilitados e vencidos. O scheduler itera

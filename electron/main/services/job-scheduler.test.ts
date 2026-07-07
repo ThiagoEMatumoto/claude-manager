@@ -16,6 +16,7 @@ vi.mock('./job-runner', () => ({
 
 import { JobScheduler } from './job-scheduler'
 import * as store from './scheduled-job-store'
+import { composeJobKickoff } from './job-kickoff'
 
 function applyAllMigrations(db: Database.Database): void {
   for (const m of migrations) {
@@ -138,5 +139,57 @@ describe('JobScheduler', () => {
     expect(changed).toBe(1)
     expect(store.getRun(run.id)!.status).toBe('interrupted')
     expect(store.getRun(run.id)!.finishedAt).not.toBeNull()
+  })
+
+  it('(e) runJobNow dispara run ad-hoc e NÃO altera next_run_at', () => {
+    const job = makeJob()
+    const nextBefore = store.get(job.id)!.nextRunAt
+    // now ANTES do vencimento: prova que run_now ignora o schedule (não usa claim).
+    const now = job.nextRunAt - 1000
+    const spawn = vi.fn(() => ({ sessionId: 's-now', ccSessionId: 'cc-now' }))
+    const scheduler = new JobScheduler({ now: () => now, spawn })
+
+    const run = scheduler.runJobNow(job.id)
+
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(run.status).toBe('running')
+    expect(run.sessionId).toBe('s-now')
+    // invariante da tarefa: run_now não toca o agendamento (computeNextRunAt manda).
+    expect(store.get(job.id)!.nextRunAt).toBe(nextBefore)
+    expect(store.listRuns({ jobId: job.id })).toHaveLength(1)
+  })
+
+  it('(f) runJobNow injeta o report da run anterior no spawn (delta) + runId', () => {
+    const job = makeJob()
+    const prev = store.createRun({ jobId: job.id, status: 'success' })
+    store.updateRun({ id: prev.id, reportText: '## Achados\n- fan-out no X' })
+
+    const spawn = vi.fn(() => ({ sessionId: 's2', ccSessionId: 'cc2' }))
+    const scheduler = new JobScheduler({ now: () => Date.now(), spawn })
+
+    const run = scheduler.runJobNow(job.id)
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: run.id, previousReport: '## Achados\n- fan-out no X' }),
+    )
+  })
+
+  it('(g) delta usa o último run COM report: success(report)→missed→ run3 injeta o report do success', () => {
+    const job = makeJob()
+    // run1: success com relatório.
+    const r1 = store.createRun({ jobId: job.id, status: 'success' })
+    store.updateRun({ id: r1.id, reportText: '## Achados\n- gap na extração' })
+    // run2: missed sem relatório (app fechado no vencimento) — NÃO deve suprimir o delta.
+    store.createRun({ jobId: job.id, status: 'missed' })
+
+    const spawn = vi.fn(() => ({ sessionId: 's3', ccSessionId: 'cc3' }))
+    const scheduler = new JobScheduler({ now: () => Date.now(), spawn })
+
+    scheduler.runJobNow(job.id)
+
+    const params = spawn.mock.calls[0][0]
+    expect(params.previousReport).toBe('## Achados\n- gap na extração')
+    // o kickoff efetivo injeta o report do success anterior (pula o missed do meio).
+    expect(composeJobKickoff(params)).toContain('gap na extração')
   })
 })

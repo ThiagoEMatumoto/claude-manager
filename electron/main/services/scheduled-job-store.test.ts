@@ -222,5 +222,35 @@ describe('scheduled-job-store', () => {
       expect(done.reportText).toBe('# achados')
       expect(store.getLastRun(job.id)?.status).toBe('success')
     })
+
+    it('getLastReport pega o último run COM report, pulando missed/failed sem report', () => {
+      const job = store.create({
+        name: 'J',
+        repoId: 'r1',
+        prompt: 'p',
+        schedule: { type: 'interval', hours: 24 },
+      })
+      // success com relatório.
+      const r1 = store.createRun({ jobId: job.id, status: 'success' })
+      store.updateRun({ id: r1.id, reportText: '# relatório do run 1' })
+      // runs posteriores SEM report (não devem suprimir o delta).
+      store.createRun({ jobId: job.id, status: 'missed' })
+      store.createRun({ jobId: job.id, status: 'failed' })
+
+      expect(store.getLastReport(job.id)).toBe('# relatório do run 1')
+    })
+
+    it('getLastReport ignora report vazio e retorna null sem nenhum report', () => {
+      const job = store.create({
+        name: 'J',
+        repoId: 'r1',
+        prompt: 'p',
+        schedule: { type: 'interval', hours: 24 },
+      })
+      expect(store.getLastReport(job.id)).toBeNull()
+      const r = store.createRun({ jobId: job.id, status: 'success' })
+      store.updateRun({ id: r.id, reportText: '   ' }) // só espaço = vazio
+      expect(store.getLastReport(job.id)).toBeNull()
+    })
   })
 })

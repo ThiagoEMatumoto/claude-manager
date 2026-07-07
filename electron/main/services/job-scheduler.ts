@@ -1,5 +1,6 @@
 import * as jobStore from './scheduled-job-store'
 import { spawnJobSession, type SpawnJobSessionParams, type SpawnJobSessionResult } from './job-runner'
+import { setRunJobNow } from './job-run-now'
 import type { JobRun, ScheduledJob } from '../../../shared/types/ipc'
 
 // Scheduler de Scheduled Jobs (Fase 2). Molde de calendar-watcher: um único timer
@@ -22,8 +23,13 @@ export interface JobSchedulerDeps {
 }
 
 // Snapshot self-contained dos params de spawn a partir da row do job (imune a
-// mudança de preset — o que foi gravado no job é o que roda).
-function jobToSpawnParams(job: ScheduledJob): SpawnJobSessionParams {
+// mudança de preset — o que foi gravado no job é o que roda). runId liga a sessão
+// ao job_report desta run; previousReport (último run COM relatório) alimenta o delta.
+function jobToSpawnParams(
+  job: ScheduledJob,
+  run: JobRun,
+  previousReport: string | null,
+): SpawnJobSessionParams {
   return {
     repoId: job.repoId,
     name: job.name,
@@ -34,6 +40,8 @@ function jobToSpawnParams(job: ScheduledJob): SpawnJobSessionParams {
     permissionMode: job.permissionMode,
     advisorModel: job.advisorModel,
     disallowedTools: job.disallowedTools,
+    runId: run.id,
+    previousReport,
   }
 }
 
@@ -82,10 +90,13 @@ export class JobScheduler {
       console.error('[job-scheduler] reconcile de órfãos no boot falhou:', err)
     }
     for (const job of jobStore.listDueJobs(now)) {
+      // Último run COM relatório (não o último absoluto: 'missed'/'failed' no meio
+      // não devem suprimir o delta havendo um 'success' anterior). Alimenta o delta.
+      const previousReport = jobStore.getLastReport(job.id)
       const run = jobStore.claimDueJob(job.id, now)
       if (!run) continue
       if (job.catchUp) {
-        this.spawnClaimedRun(job, run, now)
+        this.spawnClaimedRun(job, run, previousReport, now)
       } else {
         jobStore.updateRun({ id: run.id, status: 'missed', finishedAt: now })
       }
@@ -101,9 +112,10 @@ export class JobScheduler {
     try {
       const now = this.deps.now()
       for (const job of jobStore.listDueJobs(now)) {
+        const previousReport = jobStore.getLastReport(job.id)
         const run = jobStore.claimDueJob(job.id, now)
         if (!run) continue
-        this.spawnClaimedRun(job, run, now)
+        this.spawnClaimedRun(job, run, previousReport, now)
       }
     } catch (err) {
       console.error('[job-scheduler] tick falhou (não-fatal):', err)
@@ -112,12 +124,31 @@ export class JobScheduler {
     }
   }
 
+  // Dispara um run AD-HOC agora, fora do schedule (paridade com o "Run now" da UI
+  // e da tool MCP). NÃO reivindica via claimDueJob: cria a run direto e NÃO toca
+  // next_run_at — computeNextRunAt segue a única fonte do agendamento. Reusa o
+  // mesmo caminho de spawn (delta-via-prompt + captura no exit valem igual).
+  runJobNow(jobId: string): JobRun {
+    const job = jobStore.get(jobId)
+    if (!job) throw new Error(`scheduled job não encontrado: ${jobId}`)
+    const now = this.deps.now()
+    const previousReport = jobStore.getLastReport(jobId)
+    const run = jobStore.createRun({ jobId, status: 'scheduled', model: job.model })
+    this.spawnClaimedRun(job, run, previousReport, now)
+    return jobStore.getRun(run.id) ?? run
+  }
+
   // Spawna a sessão da run reivindicada e transiciona scheduled→running gravando
   // session_id/cc_session_id (a captura no 'exit' liga sessão→run por session_id).
   // Falha de spawn não derruba o tick: marca a run 'failed' e segue.
-  private spawnClaimedRun(job: ScheduledJob, run: JobRun, now: number): void {
+  private spawnClaimedRun(
+    job: ScheduledJob,
+    run: JobRun,
+    previousReport: string | null,
+    now: number,
+  ): void {
     try {
-      const { sessionId, ccSessionId } = this.deps.spawn(jobToSpawnParams(job))
+      const { sessionId, ccSessionId } = this.deps.spawn(jobToSpawnParams(job, run, previousReport))
       jobStore.updateRun({
         id: run.id,
         status: 'running',
@@ -138,3 +169,7 @@ export class JobScheduler {
 }
 
 export const jobScheduler = new JobScheduler()
+
+// Registra a impl real do "run now" no seam leaf (job-run-now.ts) — assim tools.ts
+// dispara um run sem importar esta cadeia (evita o ciclo com mcp/server + electron).
+setRunJobNow((jobId) => jobScheduler.runJobNow(jobId))

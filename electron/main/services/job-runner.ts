@@ -1,4 +1,5 @@
 import { spawnSession } from '../ipc/sessions'
+import { composeJobKickoff } from './job-kickoff'
 import type { AdvisorModel, EffortLevel, PermissionMode } from '../../../shared/types/ipc'
 
 // Primitivo de spawn programático de sessão para Scheduled Jobs (Fase 1). O
@@ -23,6 +24,10 @@ export interface SpawnJobSessionParams {
   permissionMode?: PermissionMode | null
   advisorModel?: AdvisorModel | null
   disallowedTools?: string[] | null
+  // id da JobRun desta execução — instrui a sessão a fechar com job_report(runId).
+  runId?: string | null
+  // report_text da execução anterior — injeta o delta no kickoff quando presente.
+  previousReport?: string | null
 }
 
 export interface SpawnJobSessionResult {
@@ -35,22 +40,16 @@ export interface SpawnJobSessionResult {
 // Observe-only: sem write/commit. Modo autônomo exige opt-in explícito por job.
 const DEFAULT_PERMISSION_MODE: PermissionMode = 'plan'
 
-// Compõe o kickoff do job. Fase 1: o prompt do job JÁ carrega a instrução de
-// crítica/relatório (template imposto pelo prompt). O delta-via-prompt (injetar o
-// run anterior) e a captura são Fase 2/4 — aqui o prompt vira o 1º turno direto.
-function composeKickoff(params: SpawnJobSessionParams): string {
-  return params.prompt
-}
-
 // Dispara a sessão do job em BACKGROUND (sem pane), entregando o kickoff via
 // initialPrompt POSICIONAL (`claude [flags] "<prompt>"`, auto-submit do 1º turno)
 // — o caminho confiável sem UI, ao contrário de injectInitialCommandOnFirstData
-// (frágil sem resize do TUI). Retorna os ids da sessão criada.
+// (frágil sem resize do TUI). O kickoff (prompt + delta + instrução job_report) é
+// montado em job-kickoff.ts (puro). Retorna os ids da sessão criada.
 export function spawnJobSession(params: SpawnJobSessionParams): SpawnJobSessionResult {
   const session = spawnSession({
     repoId: params.repoId,
     name: params.name ?? undefined,
-    initialPrompt: composeKickoff(params),
+    initialPrompt: composeJobKickoff(params),
     systemPromptText: params.systemPrompt ?? undefined,
     model: params.model ?? undefined,
     effort: params.effort ?? undefined,

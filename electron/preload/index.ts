@@ -47,6 +47,7 @@ import type {
   CreateScheduledJobInput,
   UpdateScheduledJobInput,
   JobRunListFilter,
+  JobSchedule,
   MeetingListFilter,
   MeetingSegment,
   MeetingSpeaker,
@@ -305,6 +306,9 @@ const api: Api = {
     update: (input: UpdateScheduledJobInput) => invoke('scheduledJobs:update', input),
     delete: (id: string) => invoke('scheduledJobs:delete', id),
     listRuns: (filter?: JobRunListFilter) => invoke('scheduledJobs:list-runs', filter),
+    runNow: (id: string) => invoke('scheduledJobs:run-now', id),
+    previewRuns: (schedule: JobSchedule, count: number) =>
+      invoke('scheduledJobs:preview-runs', schedule, count),
     onUpdated: (handler) => subscribe<unknown>('scheduledJob:updated', handler),
     onRunUpdated: (handler) => subscribe<unknown>('jobRun:updated', handler),
   },

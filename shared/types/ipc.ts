@@ -1970,6 +1970,11 @@ export interface Api {
     update(input: UpdateScheduledJobInput): Promise<ScheduledJob>
     delete(id: string): Promise<void>
     listRuns(filter?: JobRunListFilter): Promise<JobRun[]>
+    // Dispara um run ad-hoc agora (fora do schedule). Retorna a run criada.
+    runNow(id: string): Promise<JobRun>
+    // Preview dos próximos `count` disparos a partir de agora (timestamps ms).
+    // Puro: não cria runs nem toca next_run_at.
+    previewRuns(schedule: JobSchedule, count: number): Promise<number[]>
     // Payload = ScheduledJob completo ou marcador {id, deleted} — o renderer
     // trata como sinal de recarga.
     onUpdated(handler: (payload: unknown) => void): () => void

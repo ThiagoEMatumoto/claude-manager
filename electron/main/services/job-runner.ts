@@ -10,6 +10,7 @@ import { getDb } from './db'
 import {
   resolvePermissionMode,
   resolveJobDisallowedTools,
+  resolveJobAllowedTools,
   resolveModel,
   resolveEffort,
   resolveAdvisor,
@@ -19,6 +20,7 @@ import type {
   AdvisorModel,
   CaptureQuality,
   EffortLevel,
+  JobKind,
   JobRun,
   PermissionMode,
 } from '../../../shared/types/ipc'
@@ -50,8 +52,13 @@ const SCRATCH_DIR_KEY = 'scratch_dir'
 export interface JobRunParams {
   repoId: string | null
   name?: string | null
+  // 'critique' (default) ou 'web-audit'. web-audit libera as browser tools e injeta
+  // o playbook de auditoria no kickoff. Ausente/null → tratado como 'critique'.
+  kind?: JobKind | null
   prompt: string
   systemPrompt?: string | null
+  // URL auditada (só web-audit) — injetada no kickoff pelo composeJobKickoff.
+  targetUrl?: string | null
   model?: string | null
   effort?: EffortLevel | null
   // Observe-only por padrão: sem opt-in explícito, o job sobe read-only (plan).
@@ -132,6 +139,12 @@ export function buildHeadlessArgs(params: JobRunParams): string[] {
   // sem supervisão, nenhum modo fica sem o guard-rail). Ver resolveJobDisallowedTools.
   const deny = resolveJobDisallowedTools(params.disallowedTools)
   if (deny.length > 0) args.push('--disallowedTools', ...deny)
+  // web-audit: libera as browser tools do Playwright global via --allowedTools (arg
+  // ÚNICO space-joined, como confirmado no spike Fase 0 — difere do --disallowedTools
+  // que espalha). Aditivo (Read/Bash/Grep sobrevivem) e convive com o lockdown acima.
+  // critique → allow vazio → sem flag (comportamento atual).
+  const allow = resolveJobAllowedTools(params.kind ?? 'critique')
+  if (allow.length > 0) args.push('--allowedTools', allow.join(' '))
   const systemPrompt = params.systemPrompt?.trim()
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
   return args

@@ -39,8 +39,10 @@ function jobToSpawnParams(
   return {
     repoId: job.repoId,
     name: job.name,
+    kind: job.kind,
     prompt: job.prompt,
     systemPrompt: job.systemPrompt,
+    targetUrl: job.targetUrl,
     model: job.model,
     effort: job.effort,
     permissionMode: job.permissionMode,

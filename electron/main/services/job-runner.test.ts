@@ -85,6 +85,23 @@ describe('buildHeadlessArgs', () => {
     expect(specs).toContain('Write')
     expect(specs).toContain('Edit')
   })
+
+  it('critique (default) NÃO passa --allowedTools', () => {
+    expect(buildHeadlessArgs(baseParams())).not.toContain('--allowedTools')
+    expect(buildHeadlessArgs(baseParams({ kind: 'critique' }))).not.toContain('--allowedTools')
+  })
+
+  it('web-audit passa --allowedTools como arg único space-joined com as browser tools', () => {
+    const args = buildHeadlessArgs(baseParams({ kind: 'web-audit' }))
+    const allow = argValue(args, '--allowedTools')
+    expect(allow).toBeDefined()
+    // arg ÚNICO (space-joined), não spread — o lockdown (--disallowedTools) segue spread.
+    expect(allow).toContain('mcp__plugin_playwright_playwright__browser_navigate')
+    expect(allow).toContain('mcp__plugin_playwright_playwright__browser_evaluate')
+    // web-audit NÃO enfraquece o read-only lockdown: as write tools seguem no denylist.
+    const di = args.indexOf('--disallowedTools')
+    expect(args.slice(di + 1)).toContain('Write')
+  })
 })
 
 describe('runJob (finalização async)', () => {

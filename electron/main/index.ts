@@ -41,6 +41,7 @@ import { startMcpServer, stopMcpServer } from './services/mcp/server'
 import { initUpdater } from './services/updater'
 import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { calendarWatcher } from './services/calendar/calendar-watcher'
+import { jobScheduler } from './services/job-scheduler'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
 import { setMainWindow } from './services/notifications'
 
@@ -207,6 +208,12 @@ app.whenReady().then(async () => {
   // rede. Inicia DEPOIS da janela porque o clique da notificação a foca.
   calendarWatcher.start()
 
+  // Scheduled Jobs (Fase 2): poll único ~30s. No boot reconcilia runs órfãs do
+  // processo anterior, faz catch-up dos vencidos (skip-with-marker ou spawn se
+  // catch_up opt-in) e agenda o poll. Inicia DEPOIS da janela pois o spawn dos
+  // jobs reusa o pipeline de sessão.
+  jobScheduler.start()
+
   // Self-heal periódico de handoffs presos em 'running' cuja filha já morreu em
   // runtime (PTY exit pode não ter disparado a reconciliação). Não bloqueia o
   // boot e é idempotente — a query só toca handoffs órfãos.
@@ -261,6 +268,7 @@ function runFinalShutdown(): void {
   stopUsageMonitor()
   stopFeatureWatcher()
   calendarWatcher.stop()
+  jobScheduler.stop()
   if (handoffReconcileTimer) {
     clearInterval(handoffReconcileTimer)
     handoffReconcileTimer = null

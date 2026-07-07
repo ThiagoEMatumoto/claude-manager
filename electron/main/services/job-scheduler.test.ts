@@ -11,13 +11,13 @@ vi.mock('./db', () => ({
   getDb: () => testDb,
 }))
 vi.mock('./job-runner', () => ({
-  spawnJobSession: vi.fn(() => ({ sessionId: 's-default', ccSessionId: 'cc-default' })),
+  runJob: vi.fn(() => {}),
 }))
 
 import { JobScheduler } from './job-scheduler'
 import * as store from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
-import type { SpawnJobSessionParams, SpawnJobSessionResult } from './job-runner'
+import type { JobRunParams } from './job-runner'
 
 function applyAllMigrations(db: Database.Database): void {
   for (const m of migrations) {
@@ -67,19 +67,20 @@ describe('JobScheduler', () => {
     testDb.close()
   })
 
-  it('(a) tick com 1 job vencido cria 1 run e avança next_run_at', () => {
+  it('(a) tick com 1 job vencido cria 1 run running (session=gerado) e avança next_run_at', () => {
     const job = makeJob()
     const now = job.nextRunAt + 1000
-    const spawn = vi.fn(() => ({ sessionId: 's1', ccSessionId: 'cc1' }))
-    const scheduler = new JobScheduler({ now: () => now, spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => now, run, genId: () => 'cc1' })
 
     scheduler.tick()
 
-    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(1)
     const runs = store.listRuns({ jobId: job.id })
     expect(runs).toHaveLength(1)
     expect(runs[0].status).toBe('running')
-    expect(runs[0].sessionId).toBe('s1')
+    // session_id e cc_session_id == o --session-id gerado no disparo (mesmo uuid).
+    expect(runs[0].sessionId).toBe('cc1')
     expect(runs[0].ccSessionId).toBe('cc1')
     expect(store.get(job.id)!.nextRunAt).toBeGreaterThan(now)
   })
@@ -87,25 +88,25 @@ describe('JobScheduler', () => {
   it('(b) double-tick no mesmo instante não cria 2 runs', () => {
     const job = makeJob()
     const now = job.nextRunAt + 1000
-    const spawn = vi.fn(() => ({ sessionId: 's1', ccSessionId: 'cc1' }))
-    const scheduler = new JobScheduler({ now: () => now, spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => now, run, genId: () => 'cc1' })
 
     scheduler.tick()
     scheduler.tick()
 
-    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(1)
     expect(store.listRuns({ jobId: job.id })).toHaveLength(1)
   })
 
-  it('(c) boot com vencido e catch_up=0 marca run missed sem spawn', () => {
+  it('(c) boot com vencido e catch_up=0 marca run missed sem disparar o runner', () => {
     const job = makeJob({ catchUp: false })
     const now = job.nextRunAt + 1000
-    const spawn = vi.fn(() => ({ sessionId: 's1', ccSessionId: 'cc1' }))
-    const scheduler = new JobScheduler({ now: () => now, spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => now, run, genId: () => 'cc1' })
 
     scheduler.start()
 
-    expect(spawn).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
     const runs = store.listRuns({ jobId: job.id })
     expect(runs).toHaveLength(1)
     expect(runs[0].status).toBe('missed')
@@ -114,15 +115,15 @@ describe('JobScheduler', () => {
     scheduler.stop()
   })
 
-  it('(c2) boot com vencido e catch_up=1 spawna 1 run de catch-up', () => {
+  it('(c2) boot com vencido e catch_up=1 dispara 1 run de catch-up', () => {
     const job = makeJob({ catchUp: true })
     const now = job.nextRunAt + 1000
-    const spawn = vi.fn(() => ({ sessionId: 's1', ccSessionId: 'cc1' }))
-    const scheduler = new JobScheduler({ now: () => now, spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => now, run, genId: () => 'cc1' })
 
     scheduler.start()
 
-    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(1)
     const runs = store.listRuns({ jobId: job.id })
     expect(runs).toHaveLength(1)
     expect(runs[0].status).toBe('running')
@@ -147,31 +148,35 @@ describe('JobScheduler', () => {
     const nextBefore = store.get(job.id)!.nextRunAt
     // now ANTES do vencimento: prova que run_now ignora o schedule (não usa claim).
     const now = job.nextRunAt - 1000
-    const spawn = vi.fn(() => ({ sessionId: 's-now', ccSessionId: 'cc-now' }))
-    const scheduler = new JobScheduler({ now: () => now, spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => now, run, genId: () => 'cc-now' })
 
-    const run = scheduler.runJobNow(job.id)
+    const jobRun = scheduler.runJobNow(job.id)
 
-    expect(spawn).toHaveBeenCalledTimes(1)
-    expect(run.status).toBe('running')
-    expect(run.sessionId).toBe('s-now')
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(jobRun.status).toBe('running')
+    expect(jobRun.sessionId).toBe('cc-now')
     // invariante da tarefa: run_now não toca o agendamento (computeNextRunAt manda).
     expect(store.get(job.id)!.nextRunAt).toBe(nextBefore)
     expect(store.listRuns({ jobId: job.id })).toHaveLength(1)
   })
 
-  it('(f) runJobNow injeta o report da run anterior no spawn (delta) + runId', () => {
+  it('(f) runJobNow injeta o report da run anterior no disparo (delta) + runId', () => {
     const job = makeJob()
     const prev = store.createRun({ jobId: job.id, status: 'success' })
     store.updateRun({ id: prev.id, reportText: '## Achados\n- fan-out no X' })
 
-    const spawn = vi.fn(() => ({ sessionId: 's2', ccSessionId: 'cc2' }))
-    const scheduler = new JobScheduler({ now: () => Date.now(), spawn })
+    const run = vi.fn()
+    const scheduler = new JobScheduler({ now: () => Date.now(), run, genId: () => 'cc2' })
 
-    const run = scheduler.runJobNow(job.id)
+    const jobRun = scheduler.runJobNow(job.id)
 
-    expect(spawn).toHaveBeenCalledWith(
-      expect.objectContaining({ runId: run.id, previousReport: '## Achados\n- fan-out no X' }),
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: jobRun.id,
+        previousReport: '## Achados\n- fan-out no X',
+        ccSessionId: 'cc2',
+      }),
     )
   })
 
@@ -183,17 +188,12 @@ describe('JobScheduler', () => {
     // run2: missed sem relatório (app fechado no vencimento) — NÃO deve suprimir o delta.
     store.createRun({ jobId: job.id, status: 'missed' })
 
-    const spawn = vi.fn(
-      (_params: SpawnJobSessionParams): SpawnJobSessionResult => ({
-        sessionId: 's3',
-        ccSessionId: 'cc3',
-      }),
-    )
-    const scheduler = new JobScheduler({ now: () => Date.now(), spawn })
+    const run = vi.fn((_params: JobRunParams) => {})
+    const scheduler = new JobScheduler({ now: () => Date.now(), run, genId: () => 'cc3' })
 
     scheduler.runJobNow(job.id)
 
-    const params = spawn.mock.calls[0]![0]
+    const params = run.mock.calls[0]![0]
     expect(params.previousReport).toBe('## Achados\n- gap na extração')
     // o kickoff efetivo injeta o report do success anterior (pula o missed do meio).
     expect(composeJobKickoff(params)).toContain('gap na extração')

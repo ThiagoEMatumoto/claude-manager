@@ -1,68 +1,189 @@
-import { spawnSession } from '../ipc/sessions'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { runClaudeJson, type RunOpts, type RunResult } from './claude-cli'
+import * as jobStore from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
-import type { AdvisorModel, EffortLevel, PermissionMode } from '../../../shared/types/ipc'
+import { getDb } from './db'
+import {
+  resolvePermissionMode,
+  resolveDisallowedTools,
+  resolveModel,
+  resolveEffort,
+  resolveAdvisor,
+} from './spawn-flags'
+import type {
+  AdvisorModel,
+  CaptureQuality,
+  EffortLevel,
+  JobRun,
+  PermissionMode,
+} from '../../../shared/types/ipc'
 
-// Primitivo de spawn programático de sessão para Scheduled Jobs (Fase 1). O
-// spawn "normal" nasce no renderer (handoffsStore.spawnSessionBackground), fora
-// do alcance do processo main; o scheduler (Fase 2) vai precisar disparar SEM
-// renderer. Este serviço compõe o kickoff e reusa spawnSession (a lógica pura
-// extraída de sessions.ts, por cima de startSession/ptyManager).
-//
-// NÃO implementa scheduler nem captura de resultado (Fase 2) — só o disparo.
+// Runner de Scheduled Jobs (Fase 2, HEADLESS). Antes o job subia num PTY interativo
+// (`claude` sem -p): o processo NUNCA saía após o turno e a captura no evento 'exit'
+// jamais disparava → a run ficava presa em 'running' (em plan mode ainda travava no
+// ExitPlanMode). Migramos para `claude -p` via execFile: processa, sai com exit code,
+// stdout = JSON com o relatório final em `.result`. O runner finaliza a JobRun DIRETO
+// (sem depender de PTY nem do MCP job_report — a captura por stdout funciona mesmo
+// com o app real do usuário aberto). Reusa a resolução de path/env de claude-cli.ts.
+
+// Timeout generoso: um job pode fazer trabalho real (auditar extrações etc). Estouro
+// vira 'failed' — a run NUNCA fica presa em 'running' (o bug que esta migração corrige).
+const JOB_TIMEOUT_MS = 10 * 60 * 1000
+
+// Observe-only: sem write/commit. Modo autônomo exige opt-in explícito por job.
+const DEFAULT_PERMISSION_MODE: PermissionMode = 'plan'
+const SCRATCH_DIR_KEY = 'scratch_dir'
 
 // Snapshot self-contained dos params resolvidos do job (nada de lookup de preset
-// aqui): o caller (scheduler, Fase 2) passa exatamente o que foi gravado na row.
-export interface SpawnJobSessionParams {
+// aqui): o scheduler passa exatamente o que foi gravado na row + o ccSessionId
+// (== --session-id) que ele já gravou na run ao transicionar pra 'running'.
+export interface JobRunParams {
   repoId: string | null
-  // Nome da sessão spawnada (ex.: o nome do job). Default do repo se vazio.
   name?: string | null
   prompt: string
   systemPrompt?: string | null
   model?: string | null
   effort?: EffortLevel | null
-  // Observe-only por padrão: sem opt-in explícito, a sessão sobe read-only.
+  // Observe-only por padrão: sem opt-in explícito, o job sobe read-only (plan).
   permissionMode?: PermissionMode | null
   advisorModel?: AdvisorModel | null
   disallowedTools?: string[] | null
-  // id da JobRun desta execução — instrui a sessão a fechar com job_report(runId).
+  // id da JobRun desta execução — o runner finaliza ESTA run ao sair.
   runId?: string | null
   // report_text da execução anterior — injeta o delta no kickoff quando presente.
   previousReport?: string | null
-}
-
-export interface SpawnJobSessionResult {
-  // sessions.id interno (usado pra reconciliar/kill).
-  sessionId: string
-  // id da sessão Claude Code (usado pra achar o transcript na captura, Fase 2).
+  // --session-id do `claude -p`; gravado como cc_session_id da run pelo scheduler.
   ccSessionId: string
 }
 
-// Observe-only: sem write/commit. Modo autônomo exige opt-in explícito por job.
-const DEFAULT_PERMISSION_MODE: PermissionMode = 'plan'
+// Shape mínimo do JSON de `claude -p --output-format json` que consumimos: `.result`
+// é o texto final do assistant; `usage` traz os tokens; `is_error` sinaliza falha
+// lógica (raro num exit 0). Campos extras (session_id, cost, etc) são ignorados.
+export interface ClaudeHeadlessResult {
+  result?: unknown
+  is_error?: boolean
+  usage?: { input_tokens?: number; output_tokens?: number }
+}
 
-// Dispara a sessão do job em BACKGROUND (sem pane), entregando o kickoff via
-// initialPrompt POSICIONAL (`claude [flags] "<prompt>"`, auto-submit do 1º turno)
-// — o caminho confiável sem UI, ao contrário de injectInitialCommandOnFirstData
-// (frágil sem resize do TUI). O kickoff (prompt + delta + instrução job_report) é
-// montado em job-kickoff.ts (puro). Retorna os ids da sessão criada.
-export function spawnJobSession(params: SpawnJobSessionParams): SpawnJobSessionResult {
-  const session = spawnSession({
-    repoId: params.repoId,
-    name: params.name ?? undefined,
-    initialPrompt: composeJobKickoff(params),
-    systemPromptText: params.systemPrompt ?? undefined,
-    model: params.model ?? undefined,
-    effort: params.effort ?? undefined,
-    permissionMode: params.permissionMode ?? DEFAULT_PERMISSION_MODE,
-    advisorModel: params.advisorModel ?? undefined,
-    disallowedTools: params.disallowedTools ?? undefined,
-  })
+export interface JobRunnerDeps {
+  // Assinatura concreta (não-genérica) do runClaudeJson — o runner sempre consome
+  // o shape ClaudeHeadlessResult. Facilita injetar um stub no teste sem generics.
+  runJson?: (
+    args: string[],
+    opts?: RunOpts,
+  ) => Promise<{ data: ClaudeHeadlessResult | null; result: RunResult }>
+  updateRun?: (input: Parameters<typeof jobStore.updateRun>[0]) => JobRun
+  resolveCwd?: (repoId: string | null) => string
+  now?: () => number
+}
 
-  // spawnSession sempre grava cc_session_id (== o session-id gerado); o guard
-  // torna o contrato explícito para o caller (a captura da Fase 2 depende dele).
-  if (!session.ccSessionId) {
-    throw new Error('spawnJobSession: sessão criada sem ccSessionId')
+// cwd do processo claude: path do repo, ou a pasta scratch da sessão avulsa (mesma
+// resolução do spawn interativo — default ~/ClaudeManager/scratch, sem electron).
+function defaultResolveCwd(repoId: string | null): string {
+  const db = getDb()
+  if (repoId) {
+    const row = db.prepare('SELECT path FROM repos WHERE id = ?').get(repoId) as
+      | { path: string }
+      | undefined
+    if (!row) throw new Error(`repo not found: ${repoId}`)
+    return row.path
   }
+  const row = db.prepare('SELECT value FROM app_prefs WHERE key = ?').get(SCRATCH_DIR_KEY) as
+    | { value: string }
+    | undefined
+  const dir = row?.value?.trim() || join(homedir(), 'ClaudeManager', 'scratch')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
 
-  return { sessionId: session.id, ccSessionId: session.ccSessionId }
+// Monta os args do `claude -p` headless (array pra execFile — sem shell/quoting).
+// Ordem imita buildSpawnInnerCmd e re-valida cada flag contra a whitelist (o main é
+// a autoridade; nada fora da whitelist chega à CLI). O kickoff (prompt + delta +
+// instrução job_report) é o valor POSICIONAL do -p.
+export function buildHeadlessArgs(params: JobRunParams): string[] {
+  const mode = resolvePermissionMode(params.permissionMode) ?? DEFAULT_PERMISSION_MODE
+  const args = [
+    '-p',
+    composeJobKickoff(params),
+    '--session-id',
+    params.ccSessionId,
+    '--output-format',
+    'json',
+    '--permission-mode',
+    mode,
+  ]
+  const model = resolveModel(params.model)
+  if (model) args.push('--model', model)
+  const effort = resolveEffort(params.effort)
+  if (effort) args.push('--effort', effort)
+  const advisor = resolveAdvisor(params.advisorModel)
+  if (advisor) args.push('--advisor', advisor)
+  // Denylist destrutivo é mesclado dentro de resolveDisallowedTools p/ modo autônomo.
+  const deny = resolveDisallowedTools(mode, params.disallowedTools)
+  if (deny && deny.length > 0) args.push('--disallowedTools', ...deny)
+  const systemPrompt = params.systemPrompt?.trim()
+  if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
+  return args
+}
+
+// full se veio texto; none se a sessão saiu sem relatório (evita marcar success
+// silencioso sem conteúdo). Headless entrega o stdout íntegro, então 'partial'
+// (truncamento) não ocorre aqui — o enum mantém a paridade com a captura antiga.
+function classifyCapture(text: string | null): CaptureQuality {
+  return text && text.trim().length > 0 ? 'full' : 'none'
+}
+
+// tokens single-number: input + output do turno headless (snapshot, não cumulativo
+// — sem consumidor até a Fase 3). null se o usage não veio.
+function tokensOf(data: ClaudeHeadlessResult | null): number | null {
+  const u = data?.usage
+  if (!u) return null
+  const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0)
+  return total > 0 ? total : null
+}
+
+// Executa o job em HEADLESS (`claude -p`), processa até o exit code e finaliza a
+// JobRun DIRETO: success no exit 0 com relatório, senão failed. Async e
+// fire-and-forget — o scheduler já transicionou a run pra 'running'. INVARIANTE:
+// NUNCA lança. Todo caminho (cwd inexistente, spawn, timeout, exit≠0, parse) cai
+// num updateRun('failed'), pra a run jamais ficar presa em 'running' (o bug que
+// motivou a migração). O try/catch envolve o corpo inteiro (inclui resolveCwd).
+export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Promise<void> {
+  const runJson = deps.runJson ?? runClaudeJson
+  const updateRun = deps.updateRun ?? jobStore.updateRun
+  const resolveCwd = deps.resolveCwd ?? defaultResolveCwd
+  const now = deps.now ?? (() => Date.now())
+
+  const runId = params.runId
+  if (!runId) return // sem run pra finalizar — não ocorre no fluxo do scheduler.
+
+  try {
+    const cwd = resolveCwd(params.repoId)
+    const args = buildHeadlessArgs(params)
+    const { data, result } = await runJson(args, { cwd, timeoutMs: JOB_TIMEOUT_MS })
+
+    const text = typeof data?.result === 'string' ? data.result : null
+    const failed = result.code !== 0 || !data || data.is_error === true
+
+    updateRun({
+      id: runId,
+      status: failed ? 'failed' : 'success',
+      reportText: text,
+      captureQuality: classifyCapture(text),
+      tokens: tokensOf(data),
+      finishedAt: now(),
+      error: failed
+        ? (result.stderr || '').trim() || `claude -p encerrou com exit code ${result.code}.`
+        : null,
+    })
+  } catch (err) {
+    updateRun({
+      id: runId,
+      status: 'failed',
+      finishedAt: now(),
+      error: String((err as Error)?.message ?? err),
+    })
+  }
 }

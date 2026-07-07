@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import * as jobStore from './scheduled-job-store'
-import { spawnJobSession, type SpawnJobSessionParams, type SpawnJobSessionResult } from './job-runner'
+import { runJob, type JobRunParams } from './job-runner'
 import { setRunJobNow } from './job-run-now'
 import type { JobRun, ScheduledJob } from '../../../shared/types/ipc'
 
@@ -17,19 +18,23 @@ const POLL_INTERVAL_MS = 30 * 1000
 export interface JobSchedulerDeps {
   // Relógio (default: Date.now). Injetável p/ teste determinístico.
   now?: () => number
-  // Dispara a sessão do job (default: spawnJobSession). Injetável p/ teste — assim
-  // o teste nunca toca o PTY/electron.
-  spawn?: (params: SpawnJobSessionParams) => SpawnJobSessionResult
+  // Executa o job HEADLESS e finaliza a run async (default: runJob). Injetável p/
+  // teste — assim o teste nunca toca claude/execFile/electron.
+  run?: (params: JobRunParams) => void | Promise<void>
+  // Gera o --session-id/cc_session_id da run (default: randomUUID). Injetável p/
+  // teste determinístico.
+  genId?: () => string
 }
 
-// Snapshot self-contained dos params de spawn a partir da row do job (imune a
-// mudança de preset — o que foi gravado no job é o que roda). runId liga a sessão
-// ao job_report desta run; previousReport (último run COM relatório) alimenta o delta.
+// Snapshot self-contained dos params do job a partir da row (imune a mudança de
+// preset — o que foi gravado no job é o que roda). runId liga o run à finalização
+// desta execução; previousReport (último run COM relatório) alimenta o delta. O
+// ccSessionId é gerado no disparo (spawnClaimedRun) e adicionado a estes params.
 function jobToSpawnParams(
   job: ScheduledJob,
   run: JobRun,
   previousReport: string | null,
-): SpawnJobSessionParams {
+): Omit<JobRunParams, 'ccSessionId'> {
   return {
     repoId: job.repoId,
     name: job.name,
@@ -55,7 +60,8 @@ export class JobScheduler {
   constructor(deps: JobSchedulerDeps = {}) {
     this.deps = {
       now: deps.now ?? (() => Date.now()),
-      spawn: deps.spawn ?? spawnJobSession,
+      run: deps.run ?? runJob,
+      genId: deps.genId ?? randomUUID,
     }
   }
 
@@ -127,7 +133,8 @@ export class JobScheduler {
   // Dispara um run AD-HOC agora, fora do schedule (paridade com o "Run now" da UI
   // e da tool MCP). NÃO reivindica via claimDueJob: cria a run direto e NÃO toca
   // next_run_at — computeNextRunAt segue a única fonte do agendamento. Reusa o
-  // mesmo caminho de spawn (delta-via-prompt + captura no exit valem igual).
+  // mesmo caminho de disparo (delta-via-prompt + finalização async valem igual).
+  // Retorna a run já em 'running' (o runner headless a finaliza async depois).
   runJobNow(jobId: string): JobRun {
     const job = jobStore.get(jobId)
     if (!job) throw new Error(`scheduled job não encontrado: ${jobId}`)
@@ -138,9 +145,13 @@ export class JobScheduler {
     return jobStore.getRun(run.id) ?? run
   }
 
-  // Spawna a sessão da run reivindicada e transiciona scheduled→running gravando
-  // session_id/cc_session_id (a captura no 'exit' liga sessão→run por session_id).
-  // Falha de spawn não derruba o tick: marca a run 'failed' e segue.
+  // Transiciona a run reivindicada scheduled→running (gravando session_id/
+  // cc_session_id = o --session-id gerado agora) e DISPARA o runner headless
+  // fire-and-forget — ele finaliza a run async (success/failed) ao sair. A
+  // finalização NÃO vem mais do PTY 'exit' (o job roda via `claude -p`). Falha
+  // síncrona do disparo (genId/updateRun) marca a run 'failed' e segue; o .catch
+  // blinda contra uma rejection escapando do próprio runner (defense-in-depth —
+  // o runJob não lança, mas nunca deixar a run presa por unhandledRejection).
   private spawnClaimedRun(
     job: ScheduledJob,
     run: JobRun,
@@ -148,16 +159,27 @@ export class JobScheduler {
     now: number,
   ): void {
     try {
-      const { sessionId, ccSessionId } = this.deps.spawn(jobToSpawnParams(job, run, previousReport))
+      const ccSessionId = this.deps.genId()
       jobStore.updateRun({
         id: run.id,
         status: 'running',
-        sessionId,
+        sessionId: ccSessionId,
         ccSessionId,
         startedAt: now,
       })
+      void Promise.resolve(
+        this.deps.run({ ...jobToSpawnParams(job, run, previousReport), ccSessionId }),
+      ).catch((err) => {
+        console.error(`[job-scheduler] runner do job ${job.id} rejeitou:`, err)
+        jobStore.updateRun({
+          id: run.id,
+          status: 'failed',
+          finishedAt: this.deps.now(),
+          error: String((err as Error)?.message ?? err),
+        })
+      })
     } catch (err) {
-      console.error(`[job-scheduler] spawn do job ${job.id} falhou:`, err)
+      console.error(`[job-scheduler] disparo do job ${job.id} falhou:`, err)
       jobStore.updateRun({
         id: run.id,
         status: 'failed',

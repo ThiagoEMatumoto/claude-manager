@@ -434,6 +434,103 @@ function startSession(opts: {
   return toSession(row)
 }
 
+// Spawn de sessão NOVA, extraído do handler `sessions:spawn` para ser chamável
+// SEM renderer (ex.: job-runner no processo main, que não tem BrowserWindow). O
+// broadcast de PTY é no-op com zero janelas, então nada aqui exige renderer.
+// Mantém a MESMA ordem de validação/flags do handler original — o main é a
+// autoridade que re-valida model/effort/advisor/permission contra as whitelists.
+export function spawnSession(input: SpawnSessionInput): Session {
+  const db = getDb()
+  const repoId = input.repoId ?? null
+
+  // Sessão avulsa (repoId null): roda no scratch dir, sem vínculo com repo.
+  let cwd: string
+  let defaultName: string
+  if (repoId) {
+    const repo = db
+      .prepare('SELECT path, label FROM repos WHERE id = ?')
+      .get(repoId) as RepoPathRow | undefined
+    if (!repo) throw new Error(`repo not found: ${repoId}`)
+    assertRepoDirExists(repo.path)
+    cwd = repo.path
+    defaultName = repo.label
+  } else {
+    cwd = resolveScratchDir()
+    defaultName = QUICK_SESSION_NAME
+  }
+
+  const sessionId = randomUUID()
+  const name = input.name?.trim() || defaultName
+
+  if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
+  const claudeCmd = resolveClaudeCommand()
+
+  // Defesa em profundidade: só passa adiante o valor que estiver na whitelist.
+  const model = input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
+  const effort = input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
+  const advisorModel =
+    input.advisorModel && SPAWN_ADVISOR_WHITELIST.has(input.advisorModel)
+      ? input.advisorModel
+      : null
+
+  // System-prompt anexado via --append-system-prompt-file vem de até três fontes
+  // (arquitetura do repo, contexto da feature, systemPromptText) concatenadas num
+  // único arquivo. NÃO bloqueia o spawn se algo falhar.
+  let systemPromptFilePath: string | null = null
+  try {
+    const segments: string[] = []
+    if (repoId) {
+      const archContent = buildRepoArchitectureOrNull(repoId)
+      if (archContent) segments.push(archContent)
+    }
+    if (input.featureId) {
+      const featureContent = buildFeatureContextOrNull(input.featureId)
+      if (featureContent) segments.push(featureContent)
+    }
+    if (input.systemPromptText?.trim()) {
+      segments.push(input.systemPromptText)
+    }
+    if (segments.length > 0) {
+      systemPromptFilePath = writeTempPromptFile(
+        input.featureId ? `feat-${input.featureId}` : 'handoff',
+        segments.join('\n\n---\n\n'),
+      )
+    }
+  } catch (err) {
+    console.error('[sessions] system-prompt injection failed:', err)
+  }
+
+  // Permission mode validado contra a whitelist; em modo autônomo aplica SEMPRE o
+  // denylist destrutivo canônico (o renderer não consegue enfraquecê-lo).
+  const permissionMode = resolvePermissionMode(input.permissionMode)
+  const disallowedTools = resolveDisallowedTools(permissionMode, input.disallowedTools)
+
+  const innerCmd = buildSpawnInnerCmd({
+    claudeCmd,
+    sessionId,
+    name,
+    mcpConfigArg: mcpConfigArg(),
+    model,
+    effort,
+    advisorModel,
+    systemPromptFilePath,
+    permissionMode,
+    disallowedTools,
+    initialPrompt: input.initialPrompt,
+  })
+
+  return startSession({
+    ccSessionId: sessionId,
+    repoId,
+    cwd,
+    innerCmd,
+    featureId: input.featureId,
+    initialCommand: input.initialCommand,
+    cols: input.cols,
+    rows: input.rows,
+  })
+}
+
 let listenersAttached = false
 
 export function registerSessionIpc(): void {
@@ -501,111 +598,8 @@ export function registerSessionIpc(): void {
     listenersAttached = true
   }
 
-  ipcMain.handle('sessions:spawn', (_e, input: SpawnSessionInput) => {
-    const db = getDb()
-    const repoId = input.repoId ?? null
-
-    // Sessão avulsa (repoId null): roda no scratch dir, sem vínculo com repo.
-    let cwd: string
-    let defaultName: string
-    if (repoId) {
-      const repo = db
-        .prepare('SELECT path, label FROM repos WHERE id = ?')
-        .get(repoId) as RepoPathRow | undefined
-      if (!repo) throw new Error(`repo not found: ${repoId}`)
-      assertRepoDirExists(repo.path)
-      cwd = repo.path
-      defaultName = repo.label
-    } else {
-      cwd = resolveScratchDir()
-      defaultName = QUICK_SESSION_NAME
-    }
-
-    const sessionId = randomUUID()
-    const name = input.name?.trim() || defaultName
-
-    if (!UUID_RE.test(sessionId)) throw new Error(`invalid session id: ${sessionId}`)
-    const claudeCmd = resolveClaudeCommand()
-
-    // Modelo inicial: só passa adiante se o valor passar na whitelist (defesa em
-    // profundidade — o renderer também restringe, mas o main é a autoridade).
-    const model =
-      input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
-
-    // Effort inicial: mesma defesa em profundidade do model — só passa adiante se
-    // o valor passar na whitelist.
-    const effort =
-      input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
-
-    // Advisor model: mesma defesa em profundidade de model/effort.
-    const advisorModel =
-      input.advisorModel && SPAWN_ADVISOR_WHITELIST.has(input.advisorModel)
-        ? input.advisorModel
-        : null
-
-    // System-prompt anexado via --append-system-prompt-file vem de TRÊS fontes:
-    //  - bloco de arquitetura do repo (se repoId; dá o "mapa" do repo no sistema),
-    //  - contexto da feature (se featureId; Fase 6), e
-    //  - systemPromptText (prompt do handoff — entregue por arquivo pra não
-    //    quebrar no REPL com seus \n).
-    // Se >1, concatena num único arquivo (um só --append-system-prompt-file).
-    // Ordem: arquitetura primeiro (mapa), depois feature, depois handoff.
-    // NÃO bloqueia o spawn se algo falhar.
-    let systemPromptFilePath: string | null = null
-    try {
-      const segments: string[] = []
-      if (repoId) {
-        const archContent = buildRepoArchitectureOrNull(repoId)
-        if (archContent) segments.push(archContent)
-      }
-      if (input.featureId) {
-        const featureContent = buildFeatureContextOrNull(input.featureId)
-        if (featureContent) segments.push(featureContent)
-      }
-      if (input.systemPromptText?.trim()) {
-        segments.push(input.systemPromptText)
-      }
-      if (segments.length > 0) {
-        systemPromptFilePath = writeTempPromptFile(
-          input.featureId ? `feat-${input.featureId}` : 'handoff',
-          segments.join('\n\n---\n\n'),
-        )
-      }
-    } catch (err) {
-      console.error('[sessions] system-prompt injection failed:', err)
-    }
-
-    // Permission mode: validado contra a whitelist (TODOS os modos da CLI). Em
-    // modo autônomo, aplica SEMPRE o denylist destrutivo canônico mesclado ao que
-    // veio do renderer — o renderer não consegue enfraquecê-lo.
-    const permissionMode = resolvePermissionMode(input.permissionMode)
-    const disallowedTools = resolveDisallowedTools(permissionMode, input.disallowedTools)
-
-    const innerCmd = buildSpawnInnerCmd({
-      claudeCmd,
-      sessionId,
-      name,
-      mcpConfigArg: mcpConfigArg(),
-      model,
-      effort,
-      advisorModel,
-      systemPromptFilePath,
-      permissionMode,
-      disallowedTools,
-      initialPrompt: input.initialPrompt,
-    })
-
-    return startSession({
-      ccSessionId: sessionId,
-      repoId,
-      cwd,
-      innerCmd,
-      featureId: input.featureId,
-      initialCommand: input.initialCommand,
-      cols: input.cols,
-      rows: input.rows,
-    })
-  })
+  // Corpo extraído para o módulo (spawnSession) — chamável sem renderer.
+  ipcMain.handle('sessions:spawn', (_e, input: SpawnSessionInput) => spawnSession(input))
 
   ipcMain.handle('sessions:resume', (_e, input: ResumeSessionInput) => {
     const db = getDb()

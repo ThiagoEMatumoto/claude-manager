@@ -10,6 +10,10 @@ import * as taskStore from '../task-store'
 import * as featureStore from '../feature-store'
 import * as repoDepStore from '../repo-dependency-store'
 import * as handoffStore from '../handoff-store'
+import * as jobStore from '../scheduled-job-store'
+// Seam leaf (sem electron): dispara o run imediato sem importar a cadeia
+// job-scheduler → job-runner → ipc/sessions (que criaria ciclo com mcp/server).
+import { runJobNow } from '../job-run-now'
 import { composeHandoffPrompt, type HandoffEdge } from '../handoff/compose-prompt'
 // Seam de injeção mãe→filha (importa SÓ de inject.ts, não de ipc/sessions.ts —
 // evita arrastar electron/ipcMain pros handlers e permite mockar nos testes).
@@ -900,6 +904,165 @@ function handoffTools(notify: McpNotify): ToolDef[] {
   ]
 }
 
+// ---- scheduled jobs ----
+
+const jobPermissionMode = z.enum([
+  'default',
+  'plan',
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'dontAsk',
+])
+const jobEffort = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+const jobAdvisorModel = z.enum(['opus', 'sonnet', 'fable'])
+const jobRunStatus = z.enum(['scheduled', 'running', 'success', 'failed', 'interrupted', 'missed'])
+
+// Espelha JobSchedule (discriminated union em shared/types/ipc.ts). next_run_at é
+// derivado disto num único helper (computeNextRunAt) — não é dado do input.
+const jobSchedule = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('interval'), hours: z.number().int().positive() }),
+  z.object({
+    type: z.literal('daily'),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+  z.object({
+    type: z.literal('weekly'),
+    dayOfWeek: z.number().int().min(0).max(6),
+    hour: z.number().int().min(0).max(23),
+    minute: z.number().int().min(0).max(59),
+  }),
+])
+
+// Espelha CreateScheduledJobInput.
+const scheduledJobCreateSchema = z.object({
+  name: z.string().min(1),
+  repoId: z.string().nullish(),
+  prompt: z.string().min(1),
+  systemPrompt: z.string().nullish(),
+  schedule: jobSchedule,
+  enabled: z.boolean().optional(),
+  catchUp: z.boolean().optional(),
+  model: z.string().nullish(),
+  effort: jobEffort.nullish(),
+  permissionMode: jobPermissionMode.nullish(),
+  advisorModel: jobAdvisorModel.nullish(),
+  disallowedTools: z.array(z.string()).nullish(),
+})
+
+// Espelha UpdateScheduledJobInput (id obrigatório, resto parcial).
+const scheduledJobUpdateSchema = scheduledJobCreateSchema.partial().extend({ id: z.string().min(1) })
+
+// Espelha ScheduledJobListFilter.
+const scheduledJobListSchema = z.object({
+  enabled: z.boolean().optional(),
+  repoId: z.string().optional(),
+})
+
+const scheduledJobRunNowSchema = z.object({ jobId: z.string().min(1) })
+
+// Espelha JobRunListFilter.
+const jobRunListSchema = z.object({
+  jobId: z.string().optional(),
+  status: jobRunStatus.optional(),
+  limit: z.number().int().positive().optional(),
+})
+
+// Push OPCIONAL da própria sessão do job (molde handoff_report): grava report_text
+// + status success na run identificada pelo runId (embutido no kickoff do job).
+const jobReportSchema = z.object({
+  runId: z.string().min(1),
+  report: z.string().min(1),
+})
+
+function scheduledJobTools(notify: McpNotify): ToolDef[] {
+  return [
+    {
+      name: 'scheduled_job_create',
+      title: 'Create scheduled job',
+      description:
+        'Create a scheduled job that periodically runs a Claude Code session in a target repo and captures a critique report. schedule is interval (every N hours), daily (HH:MM local time), or weekly (dayOfWeek 0=Sun..6=Sat + HH:MM). permissionMode defaults to plan (observe-only, no writes). The prompt should impose the report template (findings + suggestions in markdown).',
+      inputSchema: scheduledJobCreateSchema,
+      handler: (args) => {
+        const input = scheduledJobCreateSchema.parse(args)
+        const job = jobStore.create(input)
+        notify.broadcast('scheduledJob:updated', job)
+        return ok({ job })
+      },
+    },
+    {
+      name: 'scheduled_job_list',
+      title: 'List scheduled jobs',
+      description:
+        'List scheduled jobs (enabled, nextRunAt, lastRunAt, schedule, repo). Optional filters: enabled, repoId.',
+      inputSchema: scheduledJobListSchema,
+      handler: (args) => {
+        const filter = scheduledJobListSchema.parse(args)
+        return ok({ items: jobStore.list(filter) })
+      },
+    },
+    {
+      name: 'scheduled_job_update',
+      title: 'Update scheduled job',
+      description:
+        'Update a scheduled job by id — edit prompt/schedule/spawn params, or pause/resume via enabled. Changing schedule re-anchors nextRunAt to now.',
+      inputSchema: scheduledJobUpdateSchema,
+      handler: (args) => {
+        const input = scheduledJobUpdateSchema.parse(args)
+        const job = jobStore.update(input)
+        notify.broadcast('scheduledJob:updated', job)
+        return ok({ job })
+      },
+    },
+    {
+      name: 'scheduled_job_run_now',
+      title: 'Run a scheduled job now',
+      description:
+        'Trigger an ad-hoc run of a scheduled job immediately, outside its schedule. Does NOT change nextRunAt — the regular schedule keeps ticking. Spawns the session via the same path as the scheduler (delta-via-prompt + report capture apply).',
+      inputSchema: scheduledJobRunNowSchema,
+      handler: (args) => {
+        const { jobId } = scheduledJobRunNowSchema.parse(args)
+        const run = runJobNow(jobId)
+        notify.broadcast('jobRun:updated', run)
+        return ok({ run })
+      },
+    },
+    {
+      name: 'job_run_list',
+      title: 'List job runs',
+      description:
+        'List the run history of scheduled jobs (status, reportText, tokens, captureQuality, timing), most recent first. Optional filters: jobId, status, limit.',
+      inputSchema: jobRunListSchema,
+      handler: (args) => {
+        const filter = jobRunListSchema.parse(args)
+        return ok({ items: jobStore.listRuns(filter) })
+      },
+    },
+    {
+      name: 'job_report',
+      title: 'Report a job run result',
+      description:
+        'Called by the JOB session itself to push its final critique report. Pass runId (given in the job kickoff) and the markdown report; records report_text and marks the run success. Optional — the pull capture on session exit is the floor; this is a structured complement.',
+      inputSchema: jobReportSchema,
+      handler: (args) => {
+        const { runId, report } = jobReportSchema.parse(args)
+        const existing = jobStore.getRun(runId)
+        if (!existing) throw new Error(`job run não encontrado: ${runId}`)
+        const run = jobStore.updateRun({
+          id: runId,
+          status: 'success',
+          reportText: report,
+          captureQuality: 'full',
+          finishedAt: Date.now(),
+        })
+        notify.broadcast('jobRun:updated', run)
+        return ok({ run })
+      },
+    },
+  ]
+}
+
 export function buildTools(notify: McpNotify): ToolDef[] {
   return [
     ...overviewTools(),
@@ -907,6 +1070,7 @@ export function buildTools(notify: McpNotify): ToolDef[] {
     ...taskTools(notify),
     ...featureTools(notify),
     ...handoffTools(notify),
+    ...scheduledJobTools(notify),
   ]
 }
 

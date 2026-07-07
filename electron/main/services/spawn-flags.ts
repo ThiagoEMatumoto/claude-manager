@@ -50,6 +50,36 @@ export const DESTRUCTIVE_DENYLIST = [
   'Bash(git clean:*)',
 ]
 
+// Browser tools do Playwright global (plugin do usuário), liberadas SÓ para jobs
+// web-audit. Prefixo confirmado no spike Fase 0: mcp__plugin_playwright_playwright__.
+// O `claude -p` headless herda o Playwright global SEM --mcp-config (o MCP do
+// claude-manager NÃO é herdado → self-elevation fechada por construção). As 10 tools
+// são as usadas pela skill browser-validate (nav/snapshot/screenshot/console/network/
+// evaluate/type/click/fill_form/wait_for).
+const PLAYWRIGHT_PREFIX = 'mcp__plugin_playwright_playwright__'
+export const WEB_AUDIT_BROWSER_TOOLS = [
+  'browser_navigate',
+  'browser_snapshot',
+  'browser_take_screenshot',
+  'browser_console_messages',
+  'browser_network_requests',
+  'browser_evaluate',
+  'browser_type',
+  'browser_click',
+  'browser_fill_form',
+  'browser_wait_for',
+].map((t) => PLAYWRIGHT_PREFIX + t)
+
+// Allowlist ADITIVO por kind (o spike provou que --allowedTools é aditivo: Read/
+// Grep/Glob/Bash sobrevivem fora dele). web-audit libera as browser tools; critique
+// (e qualquer kind desconhecido → fail-closed) recebe [] = sem allowlist, o
+// comportamento atual. A decisão vive no MAIN (o runner monta --allowedTools só a
+// partir daqui), nunca no renderer. Convive com o --disallowedTools (lockdown): as
+// browser tools não estão no denylist, então não há conflito de precedência.
+export function resolveJobAllowedTools(kind: string): string[] {
+  return kind === 'web-audit' ? [...WEB_AUDIT_BROWSER_TOOLS] : []
+}
+
 // Read-only lockdown EXCLUSIVO de jobs headless: bloqueia TODA escrita de arquivo.
 // Um job observe-only roda em `default` (pergunta tudo) mas sem humano pra confirmar
 // — então nenhuma tool de escrita pode existir. Ele LÊ/analisa (Read/Grep/Glob/Bash

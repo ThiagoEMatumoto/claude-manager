@@ -80,9 +80,10 @@ export function JobDialog({ open, onClose, job }: Props) {
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState<string>('')
   const [effort, setEffort] = useState<'' | EffortLevel>('')
-  // Observe-only por default: um job roda sem supervisão, então o padrão seguro
-  // é 'plan' (read-only, produz crítica/relatório sem tocar em nada).
-  const [permission, setPermission] = useState<PermissionMode>('plan')
+  // Observe-only por default: um job roda sem supervisão. O padrão é 'default' —
+  // a crítica vai direto pro relatório (plan desviaria pro ExitPlanMode em headless)
+  // e o read-only lockdown do runner impede qualquer escrita de arquivo.
+  const [permission, setPermission] = useState<PermissionMode>('default')
   const [advisorModel, setAdvisorModel] = useState<'' | AdvisorModel>('')
   const [selectedPreset, setSelectedPreset] = useState<string>('default')
   const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(DEFAULT_SCHEDULE_FORM)
@@ -112,7 +113,7 @@ export function JobDialog({ open, onClose, job }: Props) {
       setPrompt('')
       setModel('')
       setEffort('')
-      setPermission('plan')
+      setPermission('default')
       setAdvisorModel('')
       setScheduleForm(DEFAULT_SCHEDULE_FORM)
     }
@@ -164,7 +165,7 @@ export function JobDialog({ open, onClose, job }: Props) {
     if (id === 'default') {
       setModel('')
       setEffort('')
-      setPermission('plan')
+      setPermission('default')
       setAdvisorModel('')
       return
     }

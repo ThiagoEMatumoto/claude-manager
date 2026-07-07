@@ -26,6 +26,7 @@ export const handoffsApi = api.handoffs
 export const dossiersApi = api.dossiers
 export const architectureApi = api.repoDeps
 export const tasksApi = api.tasks
+export const scheduledJobsApi = api.scheduledJobs
 export const meetingsApi = api.meetings
 export const windowApi = api.window
 export const notificationsApi = api.notifications

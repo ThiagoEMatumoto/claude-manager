@@ -29,6 +29,13 @@ import { mcpClientConfigPath } from '../services/mcp/config'
 import { chatTranscriptService } from '../services/chat-transcript-service'
 import { captureJobRunOnExit } from '../services/job-capture'
 import {
+  resolvePermissionMode,
+  resolveDisallowedTools,
+  resolveModel,
+  resolveEffort,
+  resolveAdvisor,
+} from '../services/spawn-flags'
+import {
   buildImageFilename,
   isImageTempFile,
   isSessionImageTempFile,
@@ -68,76 +75,11 @@ function shquote(s: string): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// Whitelist do --model no spawn: o valor vem do renderer (segmented control),
-// mas o main re-valida — nada fora desta lista chega à linha de comando.
-// 'opusplan' é o alias híbrido nativo da CLI (Opus no plan mode, Sonnet na
-// execução) — sem variante própria de contexto 1M, mesma elegibilidade de conta
-// do 'opus'.
-const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku', 'opusplan'])
-
-// Whitelist do --effort no spawn: espelha SPAWN_MODEL_WHITELIST. O valor vem do
-// renderer (segmented control / default persistido), mas o main re-valida — nada
-// fora desta lista chega à linha de comando.
-const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
-
-// Whitelist do --advisor no spawn: mesma defesa-em-profundidade de model/effort.
-// Feature experimental (só Anthropic API direta) — sem detecção de provider por
-// ora; se o CLI rejeitar em runtime (Bedrock/Vertex), a sessão falha visível
-// (mesmo tratamento de outras flags incompatíveis).
-const SPAWN_ADVISOR_WHITELIST = new Set(['opus', 'sonnet', 'fable'])
-
-// Whitelist do --permission-mode no spawn: TODOS os choices da CLI claude. O main
-// é a autoridade — qualquer valor fora desta lista é descartado (vira null = sem
-// flag = default do claude). Espelha o tipo PermissionMode em shared/types/ipc.
-const SPAWN_PERMISSION_MODES = [
-  'default',
-  'plan',
-  'acceptEdits',
-  'auto',
-  'bypassPermissions',
-  'dontAsk',
-] as const
-const SPAWN_PERMISSION_MODE_WHITELIST = new Set<string>(SPAWN_PERMISSION_MODES)
-
-// Modos autônomos (editam/agem sem confirmar cada ação) que recebem o denylist
-// destrutivo como guard-rail. plan é read-only e default pergunta tudo — não
-// precisam. (dontAsk fica fora por ora: não é um modo autônomo de edição.)
-const AUTONOMOUS_PERMISSION_MODES = new Set<string>(['acceptEdits', 'auto', 'bypassPermissions'])
-
-// Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a sessão
-// sobe em modo autônomo. Bloqueia as ops irreversíveis das regras do usuário. O
-// main mescla isto a qualquer denylist vindo do renderer, então o renderer não
-// consegue enfraquecê-lo.
-const DESTRUCTIVE_DENYLIST = [
-  'Bash(rm:*)',
-  'Bash(git push:*)',
-  'Bash(git reset --hard:*)',
-  'Bash(git push --force:*)',
-  'Bash(git push -f:*)',
-  'Bash(git clean:*)',
-]
-
-// Valida o modo de permissão vindo do renderer/handoff contra a whitelist. PURA:
-// retorna o modo se válido, senão null (= sem flag = default do claude).
-export function resolvePermissionMode(value: string | null | undefined): string | null {
-  return value && SPAWN_PERMISSION_MODE_WHITELIST.has(value) ? value : null
-}
-
-// Monta o denylist final do spawn. PURA: mescla o denylist destrutivo canônico
-// quando o modo é autônomo (o renderer não pode enfraquecê-lo); senão devolve só
-// o denylist do renderer (ou null se vazio). Filtra specs não-string/vazios.
-export function resolveDisallowedTools(
-  permissionMode: string | null,
-  rendererDeny: readonly unknown[] | null | undefined,
-): string[] | null {
-  const deny = (rendererDeny ?? []).filter(
-    (t): t is string => typeof t === 'string' && t.length > 0,
-  )
-  if (permissionMode && AUTONOMOUS_PERMISSION_MODES.has(permissionMode)) {
-    return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST]))
-  }
-  return deny.length > 0 ? deny : null
-}
+// Whitelists + resolução de flags (permission-mode, denylist destrutivo, model,
+// effort, advisor) vivem em services/spawn-flags.ts — módulo PURO compartilhado
+// com o job-runner headless. Re-exportamos resolvePermissionMode/resolveDisallowedTools
+// para manter a superfície pública de './sessions' estável (sessions.test importa daqui).
+export { resolvePermissionMode, resolveDisallowedTools } from '../services/spawn-flags'
 
 const toSession = (row: SessionRow): Session => ({
   id: row.id,
@@ -467,12 +409,9 @@ export function spawnSession(input: SpawnSessionInput): Session {
   const claudeCmd = resolveClaudeCommand()
 
   // Defesa em profundidade: só passa adiante o valor que estiver na whitelist.
-  const model = input.model && SPAWN_MODEL_WHITELIST.has(input.model) ? input.model : null
-  const effort = input.effort && SPAWN_EFFORT_WHITELIST.has(input.effort) ? input.effort : null
-  const advisorModel =
-    input.advisorModel && SPAWN_ADVISOR_WHITELIST.has(input.advisorModel)
-      ? input.advisorModel
-      : null
+  const model = resolveModel(input.model)
+  const effort = resolveEffort(input.effort)
+  const advisorModel = resolveAdvisor(input.advisorModel)
 
   // System-prompt anexado via --append-system-prompt-file vem de até três fontes
   // (arquitetura do repo, contexto da feature, systemPromptText) concatenadas num

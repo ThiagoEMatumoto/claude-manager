@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, Pause, Play, Plus } from 'lucide-react'
+import { CalendarClock, Pause, Pencil, Play, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer'
 import { projectsApi } from '@/lib/ipc'
 import { useJobsStore } from '@/store/jobsStore'
 import type { JobRun, JobRunStatus, Repo, ScheduledJob } from '../../../shared/types/ipc'
 import { formatSchedule } from './schedule-format'
+import { JobDialog } from './JobDialog'
 
 // JobRunStatus não é assignável a HandoffStatus (scheduled/success/missed são
 // exclusivos daqui), então não reusamos o StatusBadge de handoffs — mapa local
@@ -81,6 +82,19 @@ export function JobsArea() {
   const [reposById, setReposById] = useState<Map<string, Repo>>(new Map())
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  // Dialog de criar/editar. editingJob null = modo criar.
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null)
+
+  function openCreate() {
+    setEditingJob(null)
+    setDialogOpen(true)
+  }
+
+  function openEdit(job: ScheduledJob) {
+    setEditingJob(job)
+    setDialogOpen(true)
+  }
 
   useEffect(() => {
     void load()
@@ -133,12 +147,11 @@ export function JobsArea() {
       <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <span className="text-sm font-semibold text-[var(--color-text)]">Jobs agendados</span>
-          {/* Criação de job chega na Fase 3b — placeholder desabilitado por ora. */}
           <button
             type="button"
-            disabled
-            title="Novo job (em breve)"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-dim)] opacity-50"
+            onClick={openCreate}
+            title="Novo job"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
           >
             <Icon as={Plus} size={14} />
             Novo
@@ -230,6 +243,14 @@ export function JobsArea() {
                   <Icon as={selectedJob.enabled ? Pause : Play} size={14} />
                   {selectedJob.enabled ? 'Pausar' : 'Ativar'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => openEdit(selectedJob)}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
+                >
+                  <Icon as={Pencil} size={14} />
+                  Editar
+                </button>
               </div>
             </header>
 
@@ -291,6 +312,8 @@ export function JobsArea() {
           </>
         )}
       </main>
+
+      <JobDialog open={dialogOpen} onClose={() => setDialogOpen(false)} job={editingJob} />
     </>
   )
 }

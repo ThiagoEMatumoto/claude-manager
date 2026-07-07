@@ -436,3 +436,39 @@ export function getLastRun(jobId: string): JobRun | null {
     .get(jobId) as JobRunRow | undefined
   return row ? rowToRun(row) : null
 }
+
+// ---- Scheduler (Fase 2): consultas de vencidos + reconcile de órfãos ----
+
+// Jobs elegíveis para disparo AGORA: habilitados e vencidos. O scheduler itera
+// este snapshot e reivindica cada um via claimDueJob (que re-checa atômico) —
+// aqui não há claim, só a listagem. Ordena por next_run_at pra disparar o mais
+// atrasado primeiro.
+export function listDueJobs(now: number): ScheduledJob[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM scheduled_jobs WHERE enabled = 1 AND next_run_at <= ? ORDER BY next_run_at ASC')
+    .all(now) as ScheduledJobRow[]
+  return rows.map(rowToJob)
+}
+
+// A run 'running' associada a uma sessão (sessions.id interno). Usado na captura
+// no evento 'exit' do PTY pra ligar sessão→run. Só há uma run viva por sessão
+// (o scheduler grava session_id ao transicionar scheduled→running).
+export function getRunningRunBySession(sessionId: string): JobRun | null {
+  const row = getDb()
+    .prepare("SELECT * FROM job_runs WHERE session_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1")
+    .get(sessionId) as JobRunRow | undefined
+  return row ? rowToRun(row) : null
+}
+
+// Reconcile de boot: num processo fresco NENHUMA PTY das runs anteriores está
+// viva, então toda run ainda 'running' é órfã → 'interrupted'. Chamado no start()
+// do scheduler ANTES do catch-up (senão marcaria as runs recém-criadas do boot).
+// Retorna o nº de runs reconciliadas.
+export function reconcileOrphanRuns(now: number): number {
+  const res = getDb()
+    .prepare(
+      "UPDATE job_runs SET status = 'interrupted', finished_at = COALESCE(finished_at, ?) WHERE status = 'running'",
+    )
+    .run(now)
+  return res.changes
+}

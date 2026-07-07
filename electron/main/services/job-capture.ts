@@ -1,4 +1,5 @@
 import * as jobStore from './scheduled-job-store'
+import { notify } from './notifications'
 import { getActivityFor, MAX_TEXT, type ActivitySnapshot } from './session-activity'
 import type { CaptureQuality, JobRun } from '../../../shared/types/ipc'
 
@@ -20,6 +21,14 @@ export interface JobCaptureDeps {
   now?: () => number
   // Agenda o retry único (default: setTimeout unref). Injetável p/ teste.
   scheduleRetry?: (fn: () => void) => void
+  // Notificação ASSIMÉTRICA: só falha avisa (sucesso é silencioso). Injetável p/
+  // teste; default resolve o nome do job e dispara a Notification nativa.
+  notifyFailure?: (jobId: string) => void
+}
+
+function defaultNotifyFailure(jobId: string): void {
+  const name = jobStore.get(jobId)?.name ?? 'Job'
+  notify({ title: 'Job falhou', body: `"${name}" falhou.` })
 }
 
 // tokens single-number: soma output + context da última msg assistant (snapshot
@@ -66,13 +75,17 @@ export function captureJobRunOnExit(
     return
   }
 
+  const failed = exitCode !== 0
   updateRun({
     id: run.id,
-    status: exitCode === 0 ? 'success' : 'failed',
+    status: failed ? 'failed' : 'success',
     reportText: lastText,
     tokens: reduceTokens(activity),
     captureQuality: classifyCapture(lastText),
     finishedAt: now(),
-    error: exitCode === 0 ? null : `Sessão encerrou com exit code ${exitCode}.`,
+    error: failed ? `Sessão encerrou com exit code ${exitCode}.` : null,
   })
+
+  // Sucesso é silencioso; só a falha pipoca o SO (notificação assimétrica).
+  if (failed) (deps.notifyFailure ?? defaultNotifyFailure)(run.jobId)
 }

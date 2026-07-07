@@ -7,9 +7,12 @@ vi.mock('./db', () => ({ getDb: () => ({}) }))
 // notify importa electron (BrowserWindow) — mock no-op pra o runner broadcastar sem
 // tocar electron. Os testes de Fix 1 asseram sobre este mock.
 vi.mock('./notify', () => ({ broadcast: vi.fn() }))
+// notifications importa electron (Notification) — mock no-op; testes de Fix 2 asseram.
+vi.mock('./notifications', () => ({ notify: vi.fn() }))
 
 import { runJob, buildHeadlessArgs, type JobRunParams, type ClaudeHeadlessResult } from './job-runner'
 import { broadcast } from './notify'
+import { notify } from './notifications'
 import type { RunResult } from './claude-cli'
 import type { JobRun } from '../../../shared/types/ipc'
 
@@ -87,6 +90,28 @@ describe('buildHeadlessArgs', () => {
 describe('runJob (finalização async)', () => {
   beforeEach(() => {
     vi.mocked(broadcast).mockClear()
+    vi.mocked(notify).mockClear()
+  })
+
+  it('failed → notify com o nome do job (Fix 2)', async () => {
+    await runJob(baseParams({ name: 'critique-noturno' }), {
+      runJson: stubJson(null, 1, 'boom'),
+      updateRun: vi.fn((input) => input as unknown as JobRun),
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(vi.mocked(notify)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(notify).mock.calls[0]![0].body).toContain('critique-noturno')
+  })
+
+  it('success → NÃO notifica (silencioso) (Fix 2)', async () => {
+    await runJob(baseParams({ name: 'critique-noturno' }), {
+      runJson: stubJson({ result: 'ok', is_error: false }),
+      updateRun: vi.fn((input) => input as unknown as JobRun),
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(vi.mocked(notify)).not.toHaveBeenCalled()
   })
 
   it('success → broadcast jobRun:updated com a run finalizada (Fix 1)', async () => {

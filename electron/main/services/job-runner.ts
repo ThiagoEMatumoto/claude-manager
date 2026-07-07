@@ -5,6 +5,7 @@ import { runClaudeJson, type RunOpts, type RunResult } from './claude-cli'
 import * as jobStore from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
 import { broadcast } from './notify'
+import { notify } from './notifications'
 import { getDb } from './db'
 import {
   resolvePermissionMode,
@@ -152,6 +153,13 @@ function tokensOf(data: ClaudeHeadlessResult | null): number | null {
   return total > 0 ? total : null
 }
 
+// Notificação de falha (regressão: vivia em job-capture.ts, removido no refactor
+// headless, e nunca foi re-conectada). Só failed notifica — sucesso é silencioso.
+// O nome vem do snapshot dos params (jobToSpawnParams grava job.name).
+function notifyJobFailure(name: string | null | undefined): void {
+  notify({ title: 'Scheduled job falhou', body: `Job '${name?.trim() || 'sem nome'}' falhou.` })
+}
+
 // Executa o job em HEADLESS (`claude -p`), processa até o exit code e finaliza a
 // JobRun DIRETO: success no exit 0 com relatório, senão failed. Async e
 // fire-and-forget — o scheduler já transicionou a run pra 'running'. INVARIANTE:
@@ -182,6 +190,7 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
     // Runner muta a run FORA de um IPC handler → emite o broadcast que o handler
     // emitiria (mesmo canal que o jobsStore escuta) pra a UI atualizar ao vivo.
     broadcast('jobRun:updated', run)
+    notifyJobFailure(params.name)
     return
   }
 
@@ -205,6 +214,7 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
         : null,
     })
     broadcast('jobRun:updated', run)
+    if (failed) notifyJobFailure(params.name)
   } catch (err) {
     const run = updateRun({
       id: runId,
@@ -213,5 +223,6 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
       error: String((err as Error)?.message ?? err),
     })
     broadcast('jobRun:updated', run)
+    notifyJobFailure(params.name)
   }
 }

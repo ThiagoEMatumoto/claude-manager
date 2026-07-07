@@ -70,6 +70,7 @@ describe('buildCreateInput', () => {
     repoId: 'repo-1',
     prompt: '  critique the diff  ',
     schedule: { type: 'interval', hours: 6 },
+    catchUp: false,
     model: '',
     effort: '',
     permissionMode: 'plan',
@@ -82,11 +83,16 @@ describe('buildCreateInput', () => {
       repoId: 'repo-1',
       prompt: 'critique the diff',
       schedule: { type: 'interval', hours: 6 },
+      catchUp: false,
       model: null,
       effort: null,
       permissionMode: 'plan',
       advisorModel: null,
     })
+  })
+
+  it('propaga catchUp quando ligado', () => {
+    expect(buildCreateInput({ ...base, catchUp: true })).toMatchObject({ catchUp: true })
   })
 
   it('preserva overrides preenchidos e repoId null (avulso)', () => {

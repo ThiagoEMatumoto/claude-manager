@@ -82,6 +82,9 @@ export interface JobFormValues {
   repoId: string | null
   prompt: string
   schedule: JobSchedule
+  // Opt-in de catch-up: recupera execuções perdidas ao abrir o app (senão a run
+  // vencida com o app fechado é marcada 'missed' — skip-with-marker).
+  catchUp: boolean
   model: string
   effort: '' | EffortLevel
   permissionMode: PermissionMode
@@ -96,6 +99,7 @@ export function buildCreateInput(v: JobFormValues): CreateScheduledJobInput {
     repoId: v.repoId,
     prompt: v.prompt.trim(),
     schedule: v.schedule,
+    catchUp: v.catchUp,
     model: v.model || null,
     effort: v.effort || null,
     permissionMode: v.permissionMode,

@@ -85,6 +85,8 @@ export function JobDialog({ open, onClose, job }: Props) {
   // e o read-only lockdown do runner impede qualquer escrita de arquivo.
   const [permission, setPermission] = useState<PermissionMode>('default')
   const [advisorModel, setAdvisorModel] = useState<'' | AdvisorModel>('')
+  // Opt-in de catch-up: recupera execuções perdidas ao reabrir o app.
+  const [catchUp, setCatchUp] = useState(false)
   const [selectedPreset, setSelectedPreset] = useState<string>('default')
   const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(DEFAULT_SCHEDULE_FORM)
   const [submitting, setSubmitting] = useState(false)
@@ -106,6 +108,7 @@ export function JobDialog({ open, onClose, job }: Props) {
       setEffort(job.effort ?? '')
       setPermission(job.permissionMode)
       setAdvisorModel(job.advisorModel ?? '')
+      setCatchUp(job.catchUp)
       setScheduleForm(scheduleToForm(job.schedule))
     } else {
       setName('')
@@ -115,6 +118,7 @@ export function JobDialog({ open, onClose, job }: Props) {
       setEffort('')
       setPermission('default')
       setAdvisorModel('')
+      setCatchUp(false)
       setScheduleForm(DEFAULT_SCHEDULE_FORM)
     }
     setSelectedPreset('default')
@@ -195,6 +199,7 @@ export function JobDialog({ open, onClose, job }: Props) {
         repoId,
         prompt,
         schedule,
+        catchUp,
         model,
         effort,
         permissionMode: permission,
@@ -375,6 +380,21 @@ export function JobDialog({ open, onClose, job }: Props) {
             </div>
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-start gap-2 text-xs text-[var(--color-text)]">
+          <input
+            type="checkbox"
+            checked={catchUp}
+            onChange={(e) => setCatchUp(e.target.checked)}
+            className="mt-0.5 accent-[var(--color-accent)]"
+          />
+          <span>
+            Recuperar execuções perdidas ao abrir o app
+            <span className="mt-0.5 block text-[11px] text-[var(--color-text-dim)]">
+              Se desligado, execuções vencidas com o app fechado são marcadas como perdidas.
+            </span>
+          </span>
+        </label>
 
         <div className="flex flex-wrap gap-4">
           <div>

@@ -252,7 +252,7 @@ export function create(input: CreateScheduledJobInput): ScheduledJob {
     catchUp: input.catchUp ?? false,
     model: input.model ?? null,
     effort: input.effort ?? null,
-    permissionMode: input.permissionMode ?? 'plan',
+    permissionMode: input.permissionMode ?? 'default',
     advisorModel: input.advisorModel ?? null,
     disallowedTools: input.disallowedTools ?? [],
     createdAt: now,

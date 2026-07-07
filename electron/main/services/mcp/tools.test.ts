@@ -397,8 +397,8 @@ describe('mcp tools — scheduled jobs', () => {
     expect(job.name).toBe('crítique das extrações')
     expect(job.enabled).toBe(true)
     expect(job.nextRunAt).toBeGreaterThan(Date.now())
-    // permissionMode default = observe-only.
-    expect(job.permissionMode).toBe('plan')
+    // permissionMode default = observe-only ('default': crítica no relatório + lockdown).
+    expect(job.permissionMode).toBe('default')
     expect(notify.calls.at(-1)).toEqual(['scheduledJob:updated', job])
 
     const { items } = call<{ items: ScheduledJob[] }>('scheduled_job_list', {})

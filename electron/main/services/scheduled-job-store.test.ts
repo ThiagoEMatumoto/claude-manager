@@ -160,7 +160,7 @@ describe('scheduled-job-store', () => {
       })
       expect(job.enabled).toBe(true)
       expect(job.catchUp).toBe(false)
-      expect(job.permissionMode).toBe('plan')
+      expect(job.permissionMode).toBe('default')
       expect(job.disallowedTools).toEqual([])
       expect(store.get(job.id)?.name).toBe('J')
     })

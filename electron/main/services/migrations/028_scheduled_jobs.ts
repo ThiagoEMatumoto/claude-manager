@@ -11,8 +11,9 @@ export const name = '028_scheduled_jobs'
 // permission_mode/advisor/prompt/system_prompt) — self-contained, imune a
 // mudança de preset depois. `next_run_at` é a FONTE ÚNICA do claim atômico
 // (UPDATE ... WHERE next_run_at<=now AND enabled=1). `permission_mode` default
-// 'plan' = observe-only (read-only, sem write/commit) por padrão; modo autônomo
-// exige opt-in explícito. `schedule` e `disallowed_tools` são JSON em TEXT.
+// 'default' = observe-only (a crítica vai pro relatório; o runner aplica read-only
+// lockdown = sem write/commit) por padrão; modo autônomo exige opt-in explícito.
+// `schedule` e `disallowed_tools` são JSON em TEXT.
 //
 // repo_id é TEXT nullable SEM FK (igual a sessions.repo_id): job apontando pra
 // repo removido falha visível no spawn, não some silenciosamente. job_runs é o
@@ -32,7 +33,7 @@ export function up(db: Database.Database): void {
       catch_up INTEGER NOT NULL DEFAULT 0 CHECK (catch_up IN (0, 1)),
       model TEXT,
       effort TEXT,
-      permission_mode TEXT NOT NULL DEFAULT 'plan',
+      permission_mode TEXT NOT NULL DEFAULT 'default',
       advisor_model TEXT,
       disallowed_tools TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL,

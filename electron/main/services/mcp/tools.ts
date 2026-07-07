@@ -982,7 +982,7 @@ function scheduledJobTools(notify: McpNotify): ToolDef[] {
       name: 'scheduled_job_create',
       title: 'Create scheduled job',
       description:
-        'Create a scheduled job that periodically runs a Claude Code session in a target repo and captures a critique report. schedule is interval (every N hours), daily (HH:MM local time), or weekly (dayOfWeek 0=Sun..6=Sat + HH:MM). permissionMode defaults to plan (observe-only, no writes). The prompt should impose the report template (findings + suggestions in markdown).',
+        'Create a scheduled job that periodically runs a Claude Code session in a target repo and captures a critique report. schedule is interval (every N hours), daily (HH:MM local time), or weekly (dayOfWeek 0=Sun..6=Sat + HH:MM). permissionMode defaults to default (observe-only, read-only lockdown — no writes). The prompt should impose the report template (findings + suggestions in markdown).',
       inputSchema: scheduledJobCreateSchema,
       handler: (args) => {
         const input = scheduledJobCreateSchema.parse(args)

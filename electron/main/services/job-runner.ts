@@ -33,8 +33,13 @@ import type {
 // vira 'failed' — a run NUNCA fica presa em 'running' (o bug que esta migração corrige).
 const JOB_TIMEOUT_MS = 10 * 60 * 1000
 
-// Observe-only: sem write/commit. Modo autônomo exige opt-in explícito por job.
-const DEFAULT_PERMISSION_MODE: PermissionMode = 'plan'
+// Observe-only via `default` + read-only lockdown: o job roda em `default` (a crítica
+// vai DIRETO pro stdout/.result; `plan` desviaria pro ExitPlanMode, indisponível em
+// headless) mas o denylist bloqueia TODA escrita de arquivo (Write/Edit/MultiEdit/
+// NotebookEdit) + as ops destrutivas de Bash — ver resolveJobDisallowedTools. Só cobre
+// o caso permissionMode=null (jobs reais trazem o modo da row); modo autônomo exige
+// opt-in explícito e é barrado pelo guard fail-closed.
+const DEFAULT_PERMISSION_MODE: PermissionMode = 'default'
 const SCRATCH_DIR_KEY = 'scratch_dir'
 
 // Snapshot self-contained dos params resolvidos do job (nada de lookup de preset

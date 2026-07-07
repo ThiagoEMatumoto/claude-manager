@@ -50,6 +50,13 @@ export const DESTRUCTIVE_DENYLIST = [
   'Bash(git clean:*)',
 ]
 
+// Read-only lockdown EXCLUSIVO de jobs headless: bloqueia TODA escrita de arquivo.
+// Um job observe-only roda em `default` (pergunta tudo) mas sem humano pra confirmar
+// — então nenhuma tool de escrita pode existir. Ele LÊ/analisa (Read/Grep/Glob/Bash
+// não-destrutivo) e produz a crítica no relatório, sem tocar em nada. NÃO se aplica
+// ao spawn interativo (sessions), onde o humano supervisiona cada edição.
+export const JOB_READONLY_DISALLOW = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
+
 // Valida o modo de permissão contra a whitelist. Retorna o modo se válido, senão
 // null (= sem flag = default do claude).
 export function resolvePermissionMode(value: string | null | undefined): string | null {
@@ -65,16 +72,17 @@ export function isObserveOnlyMode(mode: string): boolean {
 }
 
 // Denylist de um job HEADLESS. Diferente do spawn interativo, o job SEMPRE recebe o
-// denylist destrutivo — mesmo em observe-only (default/plan): roda sem supervisão,
-// então nenhum modo pode ficar sem o guard-rail. Mescla o denylist do renderer/job
-// (que não consegue enfraquecê-lo). Fonte única = DESTRUCTIVE_DENYLIST.
+// denylist destrutivo E o read-only lockdown — mesmo em observe-only (default/plan):
+// roda sem supervisão, então nenhum modo pode ficar sem o guard-rail e nenhuma tool
+// de escrita pode existir. Mescla o denylist do renderer/job (que não consegue
+// enfraquecê-lo). Fontes = DESTRUCTIVE_DENYLIST + JOB_READONLY_DISALLOW.
 export function resolveJobDisallowedTools(
   rendererDeny: readonly unknown[] | null | undefined,
 ): string[] {
   const deny = (rendererDeny ?? []).filter(
     (t): t is string => typeof t === 'string' && t.length > 0,
   )
-  return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST]))
+  return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST, ...JOB_READONLY_DISALLOW]))
 }
 
 // Monta o denylist final do spawn. Mescla o denylist destrutivo canônico quando o

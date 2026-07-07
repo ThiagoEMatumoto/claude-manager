@@ -29,14 +29,15 @@ function argValue(args: string[], flag: string): string | undefined {
 }
 
 describe('buildHeadlessArgs', () => {
-  it('monta -p com kickoff posicional + session-id + json + plan default', () => {
+  it('monta -p com kickoff posicional + session-id + json + default mode', () => {
     const args = buildHeadlessArgs(baseParams())
     expect(args[0]).toBe('-p')
     expect(typeof args[1]).toBe('string') // kickoff posicional
     expect(argValue(args, '--session-id')).toBe('cc-123')
     expect(argValue(args, '--output-format')).toBe('json')
-    // sem permissionMode explícito → default plan (observe-only).
-    expect(argValue(args, '--permission-mode')).toBe('plan')
+    // sem permissionMode explícito → default 'default' (observe-only; a crítica vai
+    // direto pro stdout, sem desviar pro ExitPlanMode indisponível em headless).
+    expect(argValue(args, '--permission-mode')).toBe('default')
   })
 
   it('inclui --model/--effort só na whitelist + --append-system-prompt', () => {
@@ -53,20 +54,28 @@ describe('buildHeadlessArgs', () => {
     expect(args).not.toContain('--model')
   })
 
-  it('SEMPRE aplica o denylist destrutivo — inclusive default/plan (job sem supervisão)', () => {
-    // default → plan (observe-only) também recebe o guard-rail: é a mudança do Fix 2.
+  it('SEMPRE aplica o denylist destrutivo + read-only lockdown (job sem supervisão)', () => {
+    // Job observe-only em default recebe o guard-rail completo: destrutivo do Bash E
+    // bloqueio de TODA escrita de arquivo (o job lê/analisa mas não modifica nada).
     const args = buildHeadlessArgs(baseParams())
     const i = args.indexOf('--disallowedTools')
     expect(i).toBeGreaterThan(-1)
-    expect(args.slice(i + 1)).toContain('Bash(rm:*)')
+    const specs = args.slice(i + 1)
+    expect(specs).toContain('Bash(rm:*)')
+    // read-only lockdown: nenhuma tool de escrita de arquivo.
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+      expect(specs).toContain(tool)
+    }
   })
 
-  it('mescla o denylist do renderer com o destrutivo (sem enfraquecer)', () => {
-    const args = buildHeadlessArgs(baseParams({ disallowedTools: ['Write'] }))
+  it('mescla o denylist do renderer com o destrutivo/lockdown (sem enfraquecer)', () => {
+    const args = buildHeadlessArgs(baseParams({ disallowedTools: ['Custom(x)'] }))
     const i = args.indexOf('--disallowedTools')
     const specs = args.slice(i + 1)
-    expect(specs).toContain('Write')
+    expect(specs).toContain('Custom(x)')
     expect(specs).toContain('Bash(rm:*)')
+    expect(specs).toContain('Write')
+    expect(specs).toContain('Edit')
   })
 })
 

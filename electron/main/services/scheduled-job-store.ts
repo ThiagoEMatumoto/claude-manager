@@ -466,16 +466,6 @@ export function listDueJobs(now: number): ScheduledJob[] {
   return rows.map(rowToJob)
 }
 
-// A run 'running' associada a uma sessão (sessions.id interno). Usado na captura
-// no evento 'exit' do PTY pra ligar sessão→run. Só há uma run viva por sessão
-// (o scheduler grava session_id ao transicionar scheduled→running).
-export function getRunningRunBySession(sessionId: string): JobRun | null {
-  const row = getDb()
-    .prepare("SELECT * FROM job_runs WHERE session_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1")
-    .get(sessionId) as JobRunRow | undefined
-  return row ? rowToRun(row) : null
-}
-
 // Reconcile de boot: num processo fresco NENHUMA PTY das runs anteriores está
 // viva, então toda run ainda 'running' é órfã → 'interrupted'. Chamado no start()
 // do scheduler ANTES do catch-up (senão marcaria as runs recém-criadas do boot).

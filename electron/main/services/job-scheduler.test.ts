@@ -17,6 +17,7 @@ vi.mock('./job-runner', () => ({
 import { JobScheduler } from './job-scheduler'
 import * as store from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
+import type { SpawnJobSessionParams, SpawnJobSessionResult } from './job-runner'
 
 function applyAllMigrations(db: Database.Database): void {
   for (const m of migrations) {
@@ -182,12 +183,17 @@ describe('JobScheduler', () => {
     // run2: missed sem relatório (app fechado no vencimento) — NÃO deve suprimir o delta.
     store.createRun({ jobId: job.id, status: 'missed' })
 
-    const spawn = vi.fn(() => ({ sessionId: 's3', ccSessionId: 'cc3' }))
+    const spawn = vi.fn(
+      (_params: SpawnJobSessionParams): SpawnJobSessionResult => ({
+        sessionId: 's3',
+        ccSessionId: 'cc3',
+      }),
+    )
     const scheduler = new JobScheduler({ now: () => Date.now(), spawn })
 
     scheduler.runJobNow(job.id)
 
-    const params = spawn.mock.calls[0][0]
+    const params = spawn.mock.calls[0]![0]
     expect(params.previousReport).toBe('## Achados\n- gap na extração')
     // o kickoff efetivo injeta o report do success anterior (pula o missed do meio).
     expect(composeJobKickoff(params)).toContain('gap na extração')

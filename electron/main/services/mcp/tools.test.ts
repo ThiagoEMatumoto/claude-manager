@@ -536,9 +536,10 @@ describe('composeJobKickoff (delta-via-prompt)', () => {
     expect(kickoff).not.toContain('execução anterior')
   })
 
-  it('instrui a sessão a fechar com job_report(runId)', () => {
+  it('NÃO injeta a instrução job_report (MCP inalcançável no spawn headless)', () => {
     const kickoff = composeJobKickoff({ prompt: 'roda', runId: 'run-42' })
-    expect(kickoff).toContain('job_report')
-    expect(kickoff).toContain('run-42')
+    expect(kickoff).not.toContain('job_report')
+    // sem run anterior nem delta: o kickoff é só o prompt do job.
+    expect(kickoff).toBe('roda')
   })
 })

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import * as jobStore from './scheduled-job-store'
 import { runJob, type JobRunParams } from './job-runner'
 import { setRunJobNow } from './job-run-now'
+import { broadcast } from './notify'
 import type { JobRun, ScheduledJob } from '../../../shared/types/ipc'
 
 // Scheduler de Scheduled Jobs (Fase 2). Molde de calendar-watcher: um único timer
@@ -91,7 +92,11 @@ export class JobScheduler {
   private bootReconcileAndCatchUp(): void {
     const now = this.deps.now()
     try {
-      jobStore.reconcileOrphanRuns(now)
+      const reconciled = jobStore.reconcileOrphanRuns(now)
+      // Órfãs running→interrupted mutam runs FORA de um IPC handler. A janela já
+      // existe no boot (createMainWindow roda antes de start), então sinaliza o
+      // reload — o jobsStore recarrega lista/histórico no evento (ignora o payload).
+      if (reconciled > 0) broadcast('jobRun:updated', { reconciled })
     } catch (err) {
       console.error('[job-scheduler] reconcile de órfãos no boot falhou:', err)
     }
@@ -101,12 +106,22 @@ export class JobScheduler {
       const previousReport = jobStore.getLastReport(job.id)
       const run = jobStore.claimDueJob(job.id, now)
       if (!run) continue
+      // claim avançou next_run_at/last_run_at → a UI precisa do job atualizado.
+      this.broadcastJobUpdated(job.id)
       if (job.catchUp) {
         this.spawnClaimedRun(job, run, previousReport, now)
       } else {
-        jobStore.updateRun({ id: run.id, status: 'missed', finishedAt: now })
+        const missed = jobStore.updateRun({ id: run.id, status: 'missed', finishedAt: now })
+        broadcast('jobRun:updated', missed)
       }
     }
+  }
+
+  // Rebroadcast do job após uma mutação fora de IPC (claim avança next_run_at):
+  // relê fresco e emite no MESMO canal que o handler scheduledJobs:update usa.
+  private broadcastJobUpdated(jobId: string): void {
+    const job = jobStore.get(jobId)
+    if (job) broadcast('scheduledJob:updated', job)
   }
 
   // Poll de runtime: cada job vencido → claim atômico → spawn. O claim re-checa
@@ -121,6 +136,8 @@ export class JobScheduler {
         const previousReport = jobStore.getLastReport(job.id)
         const run = jobStore.claimDueJob(job.id, now)
         if (!run) continue
+        // claim avançou next_run_at → a UI precisa do job atualizado ao vivo.
+        this.broadcastJobUpdated(job.id)
         this.spawnClaimedRun(job, run, previousReport, now)
       }
     } catch (err) {
@@ -160,32 +177,36 @@ export class JobScheduler {
   ): void {
     try {
       const ccSessionId = this.deps.genId()
-      jobStore.updateRun({
+      const running = jobStore.updateRun({
         id: run.id,
         status: 'running',
         sessionId: ccSessionId,
         ccSessionId,
         startedAt: now,
       })
+      // Transição scheduled→running fora de IPC → broadcast pra UI acompanhar ao vivo.
+      broadcast('jobRun:updated', running)
       void Promise.resolve(
         this.deps.run({ ...jobToSpawnParams(job, run, previousReport), ccSessionId }),
       ).catch((err) => {
         console.error(`[job-scheduler] runner do job ${job.id} rejeitou:`, err)
-        jobStore.updateRun({
+        const failed = jobStore.updateRun({
           id: run.id,
           status: 'failed',
           finishedAt: this.deps.now(),
           error: String((err as Error)?.message ?? err),
         })
+        broadcast('jobRun:updated', failed)
       })
     } catch (err) {
       console.error(`[job-scheduler] disparo do job ${job.id} falhou:`, err)
-      jobStore.updateRun({
+      const failed = jobStore.updateRun({
         id: run.id,
         status: 'failed',
         finishedAt: now,
         error: String((err as Error)?.message ?? err),
       })
+      broadcast('jobRun:updated', failed)
     }
   }
 }

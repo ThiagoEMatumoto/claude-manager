@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { runClaudeJson, type RunOpts, type RunResult } from './claude-cli'
 import * as jobStore from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
+import { broadcast } from './notify'
 import { getDb } from './db'
 import {
   resolvePermissionMode,
@@ -172,12 +173,15 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
   // runner nunca confia cegamente na row.
   const mode = resolvePermissionMode(params.permissionMode) ?? DEFAULT_PERMISSION_MODE
   if (!isObserveOnlyMode(mode)) {
-    updateRun({
+    const run = updateRun({
       id: runId,
       status: 'failed',
       finishedAt: now(),
       error: `permissionMode autônomo (${mode}) não permitido em job agendado (MVP observe-only).`,
     })
+    // Runner muta a run FORA de um IPC handler → emite o broadcast que o handler
+    // emitiria (mesmo canal que o jobsStore escuta) pra a UI atualizar ao vivo.
+    broadcast('jobRun:updated', run)
     return
   }
 
@@ -189,7 +193,7 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
     const text = typeof data?.result === 'string' ? data.result : null
     const failed = result.code !== 0 || !data || data.is_error === true
 
-    updateRun({
+    const run = updateRun({
       id: runId,
       status: failed ? 'failed' : 'success',
       reportText: text,
@@ -200,12 +204,14 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
         ? (result.stderr || '').trim() || `claude -p encerrou com exit code ${result.code}.`
         : null,
     })
+    broadcast('jobRun:updated', run)
   } catch (err) {
-    updateRun({
+    const run = updateRun({
       id: runId,
       status: 'failed',
       finishedAt: now(),
       error: String((err as Error)?.message ?? err),
     })
+    broadcast('jobRun:updated', run)
   }
 }

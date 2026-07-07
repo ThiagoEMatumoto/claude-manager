@@ -13,6 +13,9 @@ vi.mock('./db', () => ({
 vi.mock('./job-runner', () => ({
   runJob: vi.fn(() => {}),
 }))
+// notify importa electron (BrowserWindow) — mock no-op pra o scheduler broadcastar
+// (claim/spawn/missed/reconcile) sem tocar electron no teste.
+vi.mock('./notify', () => ({ broadcast: vi.fn() }))
 
 import { JobScheduler } from './job-scheduler'
 import * as store from './scheduled-job-store'

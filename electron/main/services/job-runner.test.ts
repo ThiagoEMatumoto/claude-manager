@@ -1,12 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // job-runner importa claude-cli/scheduled-job-store, que puxam './db' (electron no
 // topo). Mockamos './db' pra o import não tocar electron; o teste injeta TODAS as
 // deps (runJson/updateRun/resolveCwd/now), então nada real de claude/db/fs roda.
 vi.mock('./db', () => ({ getDb: () => ({}) }))
+// notify importa electron (BrowserWindow) — mock no-op pra o runner broadcastar sem
+// tocar electron. Os testes de Fix 1 asseram sobre este mock.
+vi.mock('./notify', () => ({ broadcast: vi.fn() }))
 
 import { runJob, buildHeadlessArgs, type JobRunParams, type ClaudeHeadlessResult } from './job-runner'
+import { broadcast } from './notify'
 import type { RunResult } from './claude-cli'
+import type { JobRun } from '../../../shared/types/ipc'
 
 function baseParams(over: Partial<JobRunParams> = {}): JobRunParams {
   return {
@@ -80,6 +85,38 @@ describe('buildHeadlessArgs', () => {
 })
 
 describe('runJob (finalização async)', () => {
+  beforeEach(() => {
+    vi.mocked(broadcast).mockClear()
+  })
+
+  it('success → broadcast jobRun:updated com a run finalizada (Fix 1)', async () => {
+    const updateRun = vi.fn((input) => input as unknown as JobRun)
+    await runJob(baseParams(), {
+      runJson: stubJson({ result: 'ok', is_error: false }),
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(vi.mocked(broadcast)).toHaveBeenCalledWith(
+      'jobRun:updated',
+      expect.objectContaining({ id: 'run-1', status: 'success' }),
+    )
+  })
+
+  it('failed → broadcast jobRun:updated com a run finalizada (Fix 1)', async () => {
+    const updateRun = vi.fn((input) => input as unknown as JobRun)
+    await runJob(baseParams(), {
+      runJson: stubJson(null, 1, 'boom'),
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(vi.mocked(broadcast)).toHaveBeenCalledWith(
+      'jobRun:updated',
+      expect.objectContaining({ id: 'run-1', status: 'failed' }),
+    )
+  })
+
   it('exit 0 com .result → success + report_text + capture_quality full + tokens', async () => {
     const updateRun = vi.fn()
     await runJob(baseParams(), {

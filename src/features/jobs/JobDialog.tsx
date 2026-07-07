@@ -48,13 +48,11 @@ const WEEKDAY_OPTIONS = [
   'Sábado',
 ]
 
-// Modos que editam/executam sem supervisão. Num job (não-assistido) exigem um 2º
-// clique de confirmação + selo de risco — molde do bypass do SpawnSessionDialog,
-// aqui ampliado pra todos os modos autônomos.
-const AUTONOMOUS_MODES: PermissionMode[] = ['acceptEdits', 'auto', 'bypassPermissions', 'dontAsk']
-function isAutonomous(p: PermissionMode): boolean {
-  return AUTONOMOUS_MODES.includes(p)
-}
+// MVP observe-only: jobs rodam sem supervisão, então só expomos os modos que não
+// editam/executam (plan = read-only, default = pergunta tudo). Os autônomos ficam
+// gated (bloqueados na UI e no MCP) até existirem os guards de segurança.
+const OBSERVE_ONLY_MODES: PermissionMode[] = ['default', 'plan']
+const PERMISSION_CHOICES = PERMISSION_OPTIONS.filter((o) => OBSERVE_ONLY_MODES.includes(o.value))
 
 const segBtn = (active: boolean) =>
   `px-3 py-1.5 text-xs transition ${
@@ -88,8 +86,6 @@ export function JobDialog({ open, onClose, job }: Props) {
   const [advisorModel, setAdvisorModel] = useState<'' | AdvisorModel>('')
   const [selectedPreset, setSelectedPreset] = useState<string>('default')
   const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(DEFAULT_SCHEDULE_FORM)
-  // 2º clique pros modos autônomos (selo de risco).
-  const [confirmingRisk, setConfirmingRisk] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -121,7 +117,6 @@ export function JobDialog({ open, onClose, job }: Props) {
       setScheduleForm(DEFAULT_SCHEDULE_FORM)
     }
     setSelectedPreset('default')
-    setConfirmingRisk(false)
     setSubmitting(false)
     setError(null)
   }, [open, job])
@@ -171,21 +166,16 @@ export function JobDialog({ open, onClose, job }: Props) {
       setEffort('')
       setPermission('plan')
       setAdvisorModel('')
-      setConfirmingRisk(false)
       return
     }
     if (preset.model !== undefined) setModel(preset.model)
     if (preset.effort !== undefined) setEffort(preset.effort)
-    if (preset.permission !== undefined) {
-      setPermission(preset.permission)
-      setConfirmingRisk(false)
-    }
+    if (preset.permission !== undefined) setPermission(preset.permission)
     if (preset.advisorModel !== undefined) setAdvisorModel(preset.advisorModel)
   }
 
   function pickPermission(v: PermissionMode) {
     setPermission(v)
-    setConfirmingRisk(false)
   }
 
   function patchSchedule(patch: Partial<ScheduleFormState>) {
@@ -193,15 +183,9 @@ export function JobDialog({ open, onClose, job }: Props) {
   }
 
   const canSubmit = name.trim().length > 0 && prompt.trim().length > 0
-  const showRiskSeal = isAutonomous(permission)
 
   async function confirm() {
     if (!canSubmit || submitting) return
-    // Modo autônomo pede confirmação explícita (2º clique).
-    if (showRiskSeal && !confirmingRisk) {
-      setConfirmingRisk(true)
-      return
-    }
     setSubmitting(true)
     setError(null)
     try {
@@ -228,7 +212,7 @@ export function JobDialog({ open, onClose, job }: Props) {
     }
   }
 
-  const submitLabel = confirmingRisk ? 'Confirmar' : job ? 'Salvar' : 'Criar'
+  const submitLabel = job ? 'Salvar' : 'Criar'
 
   return (
     <Dialog
@@ -444,7 +428,7 @@ export function JobDialog({ open, onClose, job }: Props) {
         <div>
           <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Permissão</label>
           <div className="inline-flex max-w-full flex-wrap overflow-hidden rounded-md border border-[var(--color-border)]">
-            {PERMISSION_OPTIONS.map((opt) => (
+            {PERMISSION_CHOICES.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
@@ -455,12 +439,9 @@ export function JobDialog({ open, onClose, job }: Props) {
               </button>
             ))}
           </div>
-          {showRiskSeal && (
-            <div className="mt-1.5 text-[11px] text-[var(--color-danger)]">
-              Modo autônomo — o job vai editar/executar sem supervisão a cada disparo.
-              {confirmingRisk ? ' Clique em "Confirmar" para prosseguir.' : ''}
-            </div>
-          )}
+          <div className="mt-1.5 text-[11px] text-[var(--color-text-dim)]">
+            Modos autônomos indisponíveis nesta versão — jobs rodam observe-only.
+          </div>
         </div>
 
         {error && (

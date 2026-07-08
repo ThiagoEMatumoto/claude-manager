@@ -942,6 +942,16 @@ export interface ScheduledJob {
   updatedAt: number
 }
 
+// Métricas estruturadas de um web-audit, parseadas do bloco ```json que a sessão
+// emite ao fim do relatório (ver web-audit-metrics.ts). Cada chave é número|null
+// (null = não medido). Persistido como JSON string em job_runs.metrics_json.
+export interface JobMetrics {
+  lcp: number | null
+  ttfb: number | null
+  consoleErrors: number | null
+  networkFailures: number | null
+}
+
 // Uma execução do job. sessionId = sessions.id interno; ccSessionId = id da
 // sessão Claude Code (usado pra achar o transcript na captura). reportText =
 // markdown do crítique capturado (Fase 2).

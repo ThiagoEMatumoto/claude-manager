@@ -1,4 +1,4 @@
-import type { JobKind } from '../../../shared/types/ipc'
+import type { JobKind, JobMetrics } from '../../../shared/types/ipc'
 
 // Composição do kickoff de um Scheduled Job. Função PURA (sem I/O, sem electron),
 // molde de handoff/compose-prompt.ts — trivialmente testável e importável por
@@ -29,6 +29,31 @@ export interface JobKickoffParams {
   runId?: string | null
   // report_text da execução ANTERIOR (null/vazio no 1º run → bloco omitido).
   previousReport?: string | null
+  // metrics_json (string JSON crua de getLastMetrics) da execução ANTERIOR — só
+  // web-audit. Injeta a tendência de métricas no kickoff. null/vazio/inválido →
+  // bloco omitido (best-effort, molde do previousReport).
+  previousMetrics?: string | null
+}
+
+// Formata as métricas da execução anterior (string JSON crua) numa linha legível
+// pro modelo comparar. Tolerante: JSON inválido → null (bloco omitido). Métrica
+// null vira 'n/d' (não medida na run anterior).
+function formatPreviousMetrics(json: string): string | null {
+  let m: Partial<JobMetrics> | null
+  try {
+    m = JSON.parse(json) as Partial<JobMetrics>
+  } catch {
+    return null
+  }
+  if (!m || typeof m !== 'object') return null
+  const n = (v: unknown, unit = ''): string =>
+    typeof v === 'number' && Number.isFinite(v) ? `${v}${unit}` : 'n/d'
+  return [
+    '## Métricas da execução anterior',
+    `LCP=${n(m.lcp, 'ms')}, TTFB=${n(m.ttfb, 'ms')}, ` +
+      `erros de console=${n(m.consoleErrors)}, falhas de rede=${n(m.networkFailures)}.`,
+    'Meça as MESMAS métricas nesta execução e destaque regressões (piora) ou melhorias vs os valores acima.',
+  ].join('\n')
 }
 
 // Nomes das env vars de login do legal-ui, resolvidos DETERMINISTICAMENTE pela
@@ -132,6 +157,11 @@ export function composeJobKickoff(params: JobKickoffParams): string {
 
   if (params.kind === 'web-audit') {
     sections.push(webAuditPlaybook(params.targetUrl))
+    const prevMetrics = params.previousMetrics?.trim()
+    if (prevMetrics) {
+      const block = formatPreviousMetrics(prevMetrics)
+      if (block) sections.push(block)
+    }
   }
 
   const previous = params.previousReport?.trim()

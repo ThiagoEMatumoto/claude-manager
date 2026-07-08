@@ -78,6 +78,9 @@ export interface JobRunParams {
   runId?: string | null
   // report_text da execução anterior — injeta o delta no kickoff quando presente.
   previousReport?: string | null
+  // metrics_json (string JSON) da execução anterior — injeta a tendência de
+  // métricas no kickoff do web-audit (só forwarded ao composeJobKickoff).
+  previousMetrics?: string | null
   // --session-id do `claude -p`; gravado como cc_session_id da run pelo scheduler.
   ccSessionId: string
 }

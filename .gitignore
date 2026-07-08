@@ -22,3 +22,4 @@ __pycache__/
 
 # README media generation (anonymized userData copy — never commit)
 .readme-media-anon/
+.playwright-mcp/

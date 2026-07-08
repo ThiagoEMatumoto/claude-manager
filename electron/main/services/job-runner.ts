@@ -10,6 +10,7 @@ import { getDb } from './db'
 import {
   resolvePermissionMode,
   resolveJobDisallowedTools,
+  resolveJobAllowedTools,
   resolveModel,
   resolveEffort,
   resolveAdvisor,
@@ -19,6 +20,7 @@ import type {
   AdvisorModel,
   CaptureQuality,
   EffortLevel,
+  JobKind,
   JobRun,
   PermissionMode,
 } from '../../../shared/types/ipc'
@@ -34,6 +36,14 @@ import type {
 // Timeout generoso: um job pode fazer trabalho real (auditar extrações etc). Estouro
 // vira 'failed' — a run NUNCA fica presa em 'running' (o bug que esta migração corrige).
 const JOB_TIMEOUT_MS = 10 * 60 * 1000
+// web-audit é inerentemente mais lento: login + N round-trips de browser (navigate/
+// snapshot/screenshot/evaluate) + relatório. No opus default os 10min da crítica não
+// bastam — o job estourava 'failed' sem relatório. Dá o dobro de folga a esse kind.
+const WEB_AUDIT_TIMEOUT_MS = 20 * 60 * 1000
+
+function timeoutForKind(kind: JobKind | null | undefined): number {
+  return kind === 'web-audit' ? WEB_AUDIT_TIMEOUT_MS : JOB_TIMEOUT_MS
+}
 
 // Observe-only via `default` + read-only lockdown: o job roda em `default` (a crítica
 // vai DIRETO pro stdout/.result; `plan` desviaria pro ExitPlanMode, indisponível em
@@ -50,8 +60,13 @@ const SCRATCH_DIR_KEY = 'scratch_dir'
 export interface JobRunParams {
   repoId: string | null
   name?: string | null
+  // 'critique' (default) ou 'web-audit'. web-audit libera as browser tools e injeta
+  // o playbook de auditoria no kickoff. Ausente/null → tratado como 'critique'.
+  kind?: JobKind | null
   prompt: string
   systemPrompt?: string | null
+  // URL auditada (só web-audit) — injetada no kickoff pelo composeJobKickoff.
+  targetUrl?: string | null
   model?: string | null
   effort?: EffortLevel | null
   // Observe-only por padrão: sem opt-in explícito, o job sobe read-only (plan).
@@ -132,6 +147,12 @@ export function buildHeadlessArgs(params: JobRunParams): string[] {
   // sem supervisão, nenhum modo fica sem o guard-rail). Ver resolveJobDisallowedTools.
   const deny = resolveJobDisallowedTools(params.disallowedTools)
   if (deny.length > 0) args.push('--disallowedTools', ...deny)
+  // web-audit: libera as browser tools do Playwright global via --allowedTools (arg
+  // ÚNICO space-joined, como confirmado no spike Fase 0 — difere do --disallowedTools
+  // que espalha). Aditivo (Read/Bash/Grep sobrevivem) e convive com o lockdown acima.
+  // critique → allow vazio → sem flag (comportamento atual).
+  const allow = resolveJobAllowedTools(params.kind ?? 'critique')
+  if (allow.length > 0) args.push('--allowedTools', allow.join(' '))
   const systemPrompt = params.systemPrompt?.trim()
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
   return args
@@ -197,7 +218,7 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
   try {
     const cwd = resolveCwd(params.repoId)
     const args = buildHeadlessArgs(params)
-    const { data, result } = await runJson(args, { cwd, timeoutMs: JOB_TIMEOUT_MS })
+    const { data, result } = await runJson(args, { cwd, timeoutMs: timeoutForKind(params.kind) })
 
     const text = typeof data?.result === 'string' ? data.result : null
     const failed = result.code !== 0 || !data || data.is_error === true

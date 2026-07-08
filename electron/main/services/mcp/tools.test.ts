@@ -542,4 +542,68 @@ describe('composeJobKickoff (delta-via-prompt)', () => {
     // sem run anterior nem delta: o kickoff é só o prompt do job.
     expect(kickoff).toBe('roda')
   })
+
+  it('critique NÃO injeta o playbook de browser', () => {
+    expect(composeJobKickoff({ prompt: 'roda' })).not.toContain('Playbook de auditoria web')
+    expect(composeJobKickoff({ prompt: 'roda', kind: 'critique' })).not.toContain(
+      'Playbook de auditoria web',
+    )
+  })
+})
+
+describe('composeJobKickoff (web-audit playbook)', () => {
+  it('injeta o playbook + a targetUrl + o formato de saída JSON', () => {
+    const kickoff = composeJobKickoff({
+      prompt: 'audite a home',
+      kind: 'web-audit',
+      targetUrl: 'https://app.legalstaging.lexter.ai',
+    })
+    expect(kickoff).toContain('audite a home')
+    expect(kickoff).toContain('Playbook de auditoria web')
+    expect(kickoff).toContain('https://app.legalstaging.lexter.ai')
+    // bloco JSON de métricas que a Fase 2 vai parsear.
+    expect(kickoff).toContain('"lcp"')
+    expect(kickoff).toContain('consoleErrors')
+    // regra de segurança presente.
+    expect(kickoff).toContain('NUNCA escreva as credenciais')
+    // proíbe delegar a sub-agentes (eles não herdam as browser tools do job).
+    expect(kickoff).toContain('NÃO delegue a sub-agentes')
+  })
+
+  it('resolve as env vars de login por staging vs prod pela targetUrl (determinístico)', () => {
+    const staging = composeJobKickoff({
+      prompt: 'x',
+      kind: 'web-audit',
+      targetUrl: 'https://app.legalstaging.lexter.ai/app/casos',
+    })
+    expect(staging).toContain('LEGAL_UI_STAGING_USERNAME')
+    expect(staging).toContain('LEGAL_UI_STAGING_PASSWORD')
+    expect(staging).not.toContain('LEGAL_UI_PROD_USERNAME')
+
+    const prod = composeJobKickoff({
+      prompt: 'x',
+      kind: 'web-audit',
+      targetUrl: 'https://app.legal.lexter.ai/app/casos',
+    })
+    expect(prod).toContain('LEGAL_UI_PROD_USERNAME')
+    expect(prod).not.toContain('LEGAL_UI_STAGING_USERNAME')
+  })
+
+  it('ambíguo/sem URL cai em STAGING (fail toward non-prod)', () => {
+    const kickoff = composeJobKickoff({ prompt: 'x', kind: 'web-audit', targetUrl: null })
+    expect(kickoff).toContain('LEGAL_UI_STAGING_USERNAME')
+    expect(kickoff).not.toContain('LEGAL_UI_PROD_USERNAME')
+  })
+
+  it('NUNCA embute o valor real de uma credencial (só os nomes das env vars)', () => {
+    // O playbook referencia printenv <VAR>; jamais o valor. Prova textual: não há
+    // "password=" nem literais de senha — só instruções de leitura via env.
+    const kickoff = composeJobKickoff({
+      prompt: 'x',
+      kind: 'web-audit',
+      targetUrl: 'https://app.legalstaging.lexter.ai',
+    })
+    expect(kickoff).toContain('printenv LEGAL_UI_STAGING_PASSWORD')
+    expect(kickoff.toLowerCase()).not.toContain('senha real')
+  })
 })

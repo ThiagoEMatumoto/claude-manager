@@ -916,6 +916,9 @@ const jobPermissionMode = z.enum(OBSERVE_ONLY_PERMISSION_MODES, {
 })
 const jobEffort = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
 const jobAdvisorModel = z.enum(['opus', 'sonnet', 'fable'])
+// Discriminador do tipo de job (espelha JobKind). 'web-audit' dirige um browser
+// contra targetUrl; 'critique' é o default retrocompatível.
+const jobKind = z.enum(['critique', 'web-audit'])
 const jobRunStatus = z.enum(['scheduled', 'running', 'success', 'failed', 'interrupted', 'missed'])
 
 // Espelha JobSchedule (discriminated union em shared/types/ipc.ts). next_run_at é
@@ -938,9 +941,13 @@ const jobSchedule = z.discriminatedUnion('type', [
 // Espelha CreateScheduledJobInput.
 const scheduledJobCreateSchema = z.object({
   name: z.string().min(1),
+  // Default 'critique' quando omitido (o store aplica o default). web-audit dirige
+  // um browser contra targetUrl — o kind é o que libera as browser tools no runner.
+  kind: jobKind.optional(),
   repoId: z.string().nullish(),
   prompt: z.string().min(1),
   systemPrompt: z.string().nullish(),
+  targetUrl: z.string().nullish(),
   schedule: jobSchedule,
   enabled: z.boolean().optional(),
   catchUp: z.boolean().optional(),

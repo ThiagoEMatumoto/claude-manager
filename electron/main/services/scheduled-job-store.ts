@@ -6,6 +6,7 @@ import type {
   CreateJobRunInput,
   CreateScheduledJobInput,
   EffortLevel,
+  JobKind,
   JobRun,
   JobRunListFilter,
   JobRunStatus,
@@ -31,9 +32,11 @@ const HOUR_MS = 3_600_000
 interface ScheduledJobRow {
   id: string
   name: string
+  kind: string
   repo_id: string | null
   prompt: string
   system_prompt: string | null
+  target_url: string | null
   schedule: string
   next_run_at: number
   last_run_at: number | null
@@ -58,6 +61,7 @@ interface JobRunRow {
   cc_session_id: string | null
   report_text: string | null
   capture_quality: string | null
+  metrics_json: string | null
   tokens: number | null
   model: string | null
   error: string | null
@@ -92,9 +96,11 @@ function rowToJob(row: ScheduledJobRow): ScheduledJob {
   return {
     id: row.id,
     name: row.name,
+    kind: (row.kind as JobKind) ?? 'critique',
     repoId: row.repo_id,
     prompt: row.prompt,
     systemPrompt: row.system_prompt,
+    targetUrl: row.target_url,
     schedule: parseSchedule(row.schedule),
     nextRunAt: row.next_run_at,
     lastRunAt: row.last_run_at,
@@ -114,9 +120,11 @@ function jobToRowParams(job: ScheduledJob): Record<string, unknown> {
   return {
     id: job.id,
     name: job.name,
+    kind: job.kind,
     repo_id: job.repoId,
     prompt: job.prompt,
     system_prompt: job.systemPrompt,
+    target_url: job.targetUrl,
     schedule: JSON.stringify(job.schedule),
     next_run_at: job.nextRunAt,
     last_run_at: job.lastRunAt,
@@ -143,6 +151,7 @@ function rowToRun(row: JobRunRow): JobRun {
     ccSessionId: row.cc_session_id,
     reportText: row.report_text,
     captureQuality: row.capture_quality as CaptureQuality | null,
+    metricsJson: row.metrics_json,
     tokens: row.tokens,
     model: row.model,
     error: row.error,
@@ -161,6 +170,7 @@ function runToRowParams(run: JobRun): Record<string, unknown> {
     cc_session_id: run.ccSessionId,
     report_text: run.reportText,
     capture_quality: run.captureQuality,
+    metrics_json: run.metricsJson,
     tokens: run.tokens,
     model: run.model,
     error: run.error,
@@ -229,11 +239,11 @@ export function get(id: string): ScheduledJob | null {
 }
 
 const INSERT_JOB_SQL = `INSERT INTO scheduled_jobs
-    (id, name, repo_id, prompt, system_prompt, schedule, next_run_at, last_run_at,
+    (id, name, kind, repo_id, prompt, system_prompt, target_url, schedule, next_run_at, last_run_at,
      enabled, catch_up, model, effort, permission_mode, advisor_model, disallowed_tools,
      created_at, updated_at)
    VALUES
-    (@id, @name, @repo_id, @prompt, @system_prompt, @schedule, @next_run_at, @last_run_at,
+    (@id, @name, @kind, @repo_id, @prompt, @system_prompt, @target_url, @schedule, @next_run_at, @last_run_at,
      @enabled, @catch_up, @model, @effort, @permission_mode, @advisor_model, @disallowed_tools,
      @created_at, @updated_at)`
 
@@ -242,9 +252,11 @@ export function create(input: CreateScheduledJobInput): ScheduledJob {
   const job: ScheduledJob = {
     id: randomUUID(),
     name: input.name.trim(),
+    kind: input.kind ?? 'critique',
     repoId: input.repoId ?? null,
     prompt: input.prompt,
     systemPrompt: input.systemPrompt?.trim() ? input.systemPrompt : null,
+    targetUrl: input.targetUrl?.trim() ? input.targetUrl.trim() : null,
     schedule: input.schedule,
     nextRunAt: computeNextRunAt(input.schedule, now),
     lastRunAt: null,
@@ -273,9 +285,11 @@ export function update(input: UpdateScheduledJobInput): ScheduledJob {
   const next: ScheduledJob = {
     ...current,
     name: input.name?.trim() || current.name,
+    kind: input.kind ?? current.kind,
     repoId: keep(input.repoId, current.repoId),
     prompt: input.prompt ?? current.prompt,
     systemPrompt: keep(input.systemPrompt, current.systemPrompt),
+    targetUrl: keep(input.targetUrl, current.targetUrl),
     schedule,
     // Trocar o schedule reancora o next_run_at em "agora"; senão preserva o
     // agendamento vigente (não reinicia o relógio a cada edição de outro campo).
@@ -293,7 +307,8 @@ export function update(input: UpdateScheduledJobInput): ScheduledJob {
   getDb()
     .prepare(
       `UPDATE scheduled_jobs SET
-         name = @name, repo_id = @repo_id, prompt = @prompt, system_prompt = @system_prompt,
+         name = @name, kind = @kind, repo_id = @repo_id, prompt = @prompt,
+         system_prompt = @system_prompt, target_url = @target_url,
          schedule = @schedule, next_run_at = @next_run_at, last_run_at = @last_run_at,
          enabled = @enabled, catch_up = @catch_up, model = @model, effort = @effort,
          permission_mode = @permission_mode, advisor_model = @advisor_model,
@@ -311,10 +326,10 @@ export function remove(id: string): void {
 
 const INSERT_RUN_SQL = `INSERT INTO job_runs
     (id, job_id, status, started_at, finished_at, session_id, cc_session_id,
-     report_text, capture_quality, tokens, model, error, created_at)
+     report_text, capture_quality, metrics_json, tokens, model, error, created_at)
    VALUES
     (@id, @job_id, @status, @started_at, @finished_at, @session_id, @cc_session_id,
-     @report_text, @capture_quality, @tokens, @model, @error, @created_at)`
+     @report_text, @capture_quality, @metrics_json, @tokens, @model, @error, @created_at)`
 
 function newRun(jobId: string, now: number, status: JobRunStatus, model: string | null): JobRun {
   return {
@@ -327,6 +342,7 @@ function newRun(jobId: string, now: number, status: JobRunStatus, model: string 
     ccSessionId: null,
     reportText: null,
     captureQuality: null,
+    metricsJson: null,
     tokens: null,
     model,
     error: null,
@@ -394,6 +410,7 @@ export function updateRun(input: UpdateJobRunInput): JobRun {
     ccSessionId: keep(input.ccSessionId, current.ccSessionId),
     reportText: keep(input.reportText, current.reportText),
     captureQuality: keep(input.captureQuality, current.captureQuality),
+    metricsJson: keep(input.metricsJson, current.metricsJson),
     tokens: keep(input.tokens, current.tokens),
     model: keep(input.model, current.model),
     error: keep(input.error, current.error),
@@ -404,7 +421,8 @@ export function updateRun(input: UpdateJobRunInput): JobRun {
       `UPDATE job_runs SET
          status = @status, started_at = @started_at, finished_at = @finished_at,
          session_id = @session_id, cc_session_id = @cc_session_id, report_text = @report_text,
-         capture_quality = @capture_quality, tokens = @tokens, model = @model, error = @error
+         capture_quality = @capture_quality, metrics_json = @metrics_json,
+         tokens = @tokens, model = @model, error = @error
        WHERE id = @id`,
     )
     .run(runToRowParams(next))

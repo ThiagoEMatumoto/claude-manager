@@ -13,6 +13,9 @@ export interface RunResult {
 
 export interface RunOpts {
   timeoutMs?: number
+  // Diretório de trabalho do processo claude. Sem isso, herda o cwd do app
+  // (inútil pra job em repo). O job-runner headless passa o path do repo/scratch.
+  cwd?: string
 }
 
 const CLAUDE_COMMAND_KEY = 'claude_command'
@@ -79,6 +82,7 @@ export async function runClaude(args: string[], opts: RunOpts = {}): Promise<Run
       timeout: opts.timeoutMs ?? 60_000,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
+      cwd: opts.cwd,
       // process.env + vars customizadas do usuário (Configurações), lidas agora.
       env: spawnEnv(),
     })

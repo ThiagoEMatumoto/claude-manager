@@ -20,12 +20,17 @@ import { existsSync } from 'node:fs'
 import { app } from 'electron'
 import { closeDb, getDb } from '../db'
 import { buildTools, type McpNotify, type ToolDef } from './tools'
+// Módulos leves (sem electron): store lê só o DB mockado; composeJobKickoff é puro.
+import * as jobStore from '../scheduled-job-store'
+import { composeJobKickoff } from '../job-kickoff'
 import type {
   Feature,
+  JobRun,
   KeyResult,
   Objective,
   ObjectiveDetail,
   OverviewData,
+  ScheduledJob,
   Task,
 } from '../../../../shared/types/ipc'
 
@@ -378,5 +383,163 @@ describe('mcp tools — overview', () => {
     expect(Array.isArray(overview.objectives)).toBe(true)
     expect(Array.isArray(overview.pending)).toBe(true)
     expect(Array.isArray(overview.features)).toBe(true)
+  })
+})
+
+describe('mcp tools — scheduled jobs', () => {
+  it('scheduled_job_create persiste + broadcasta e scheduled_job_list lista', () => {
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      name: 'crítique das extrações',
+      prompt: 'audite as extrações do TRF2',
+      schedule: { type: 'interval', hours: 24 },
+    })
+    expect(job.id).toBeTruthy()
+    expect(job.name).toBe('crítique das extrações')
+    expect(job.enabled).toBe(true)
+    expect(job.nextRunAt).toBeGreaterThan(Date.now())
+    // permissionMode default = observe-only ('default': crítica no relatório + lockdown).
+    expect(job.permissionMode).toBe('default')
+    expect(notify.calls.at(-1)).toEqual(['scheduledJob:updated', job])
+
+    const { items } = call<{ items: ScheduledJob[] }>('scheduled_job_list', {})
+    expect(items.some((j) => j.id === job.id)).toBe(true)
+  })
+
+  it('scheduled_job_create rejeita input inválido (zod)', () => {
+    expect(() =>
+      tool('scheduled_job_create').handler({
+        name: '',
+        prompt: 'x',
+        schedule: { type: 'interval', hours: 24 },
+      }),
+    ).toThrow()
+    // HH:MM fora do range no schedule daily.
+    expect(() =>
+      tool('scheduled_job_create').handler({
+        name: 'X',
+        prompt: 'x',
+        schedule: { type: 'daily', hour: 99, minute: 0 },
+      }),
+    ).toThrow()
+  })
+
+  it('scheduled_job_create/update rejeitam permissionMode autônomo (gate observe-only)', () => {
+    const base = { name: 'gated', prompt: 'roda', schedule: { type: 'interval', hours: 24 } }
+    // Modos autônomos barrados na fronteira MCP (fecha a self-elevation por injection).
+    for (const permissionMode of ['bypassPermissions', 'dontAsk', 'acceptEdits', 'auto']) {
+      expect(() =>
+        tool('scheduled_job_create').handler({ ...base, permissionMode }),
+      ).toThrow(/autônomo indisponível via MCP/)
+    }
+    // Observe-only passa: plan e default são aceitos.
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      ...base,
+      permissionMode: 'plan',
+    })
+    expect(job.permissionMode).toBe('plan')
+
+    // O gate sobrevive ao .partial() do update schema.
+    expect(() =>
+      tool('scheduled_job_update').handler({ id: job.id, permissionMode: 'bypassPermissions' }),
+    ).toThrow(/autônomo indisponível via MCP/)
+    const { job: updated } = call<{ job: ScheduledJob }>('scheduled_job_update', {
+      id: job.id,
+      permissionMode: 'default',
+    })
+    expect(updated.permissionMode).toBe('default')
+  })
+
+  it('scheduled_job_update pausa o job (enabled=false → row enabled=0)', () => {
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      name: 'pausável',
+      prompt: 'roda',
+      schedule: { type: 'interval', hours: 12 },
+    })
+    const { job: paused } = call<{ job: ScheduledJob }>('scheduled_job_update', {
+      id: job.id,
+      enabled: false,
+    })
+    expect(paused.enabled).toBe(false)
+    const row = getDb()
+      .prepare('SELECT enabled FROM scheduled_jobs WHERE id = ?')
+      .get(job.id) as { enabled: number }
+    expect(row.enabled).toBe(0)
+    expect(notify.calls.at(-1)).toEqual(['scheduledJob:updated', paused])
+  })
+
+  it('job_run_list retorna o histórico de runs de um job (com filtro por status)', () => {
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      name: 'com runs',
+      prompt: 'roda',
+      schedule: { type: 'interval', hours: 6 },
+    })
+    // Semeia runs direto no store (não há tool de create-run; runs nascem do scheduler).
+    const r1 = jobStore.createRun({ jobId: job.id, status: 'success' })
+    jobStore.createRun({ jobId: job.id, status: 'failed' })
+
+    const { items } = call<{ items: JobRun[] }>('job_run_list', { jobId: job.id })
+    expect(items.length).toBe(2)
+    expect(items.every((r) => r.jobId === job.id)).toBe(true)
+
+    const { items: onlySuccess } = call<{ items: JobRun[] }>('job_run_list', {
+      jobId: job.id,
+      status: 'success',
+    })
+    expect(onlySuccess.map((r) => r.id)).toEqual([r1.id])
+  })
+
+  it('job_report grava o report e marca a run success', () => {
+    const { job } = call<{ job: ScheduledJob }>('scheduled_job_create', {
+      name: 'reportável',
+      prompt: 'roda',
+      schedule: { type: 'interval', hours: 6 },
+    })
+    const run = jobStore.createRun({ jobId: job.id, status: 'running' })
+    const { run: reported } = call<{ run: JobRun }>('job_report', {
+      runId: run.id,
+      report: '## Achados\n- item novo detectado',
+    })
+    expect(reported.id).toBe(run.id)
+    expect(reported.status).toBe('success')
+    expect(reported.reportText).toContain('item novo detectado')
+    expect(reported.captureQuality).toBe('full')
+    expect(notify.calls.at(-1)).toEqual(['jobRun:updated', reported])
+  })
+
+  it('job_report lança quando o runId não existe', () => {
+    expect(() => tool('job_report').handler({ runId: 'nao-existe', report: 'x' })).toThrow()
+  })
+})
+
+describe('composeJobKickoff (delta-via-prompt)', () => {
+  it('com run anterior: injeta o relatório pedindo novo/resolvido/persistente', () => {
+    const kickoff = composeJobKickoff({
+      prompt: 'audite as extrações',
+      runId: 'run-1',
+      previousReport: '## Achados anteriores\n- fan-out no endpoint X',
+    })
+    expect(kickoff).toContain('audite as extrações')
+    expect(kickoff).toContain('execução anterior')
+    expect(kickoff).toContain('novo')
+    expect(kickoff).toContain('persistente')
+    // o texto do relatório anterior é embutido literalmente.
+    expect(kickoff).toContain('fan-out no endpoint X')
+  })
+
+  it('sem run anterior: kickoff limpo (não injeta o bloco de delta)', () => {
+    const kickoff = composeJobKickoff({
+      prompt: 'audite as extrações',
+      runId: 'run-1',
+      previousReport: null,
+    })
+    expect(kickoff).toContain('audite as extrações')
+    expect(kickoff).not.toContain('execução anterior')
+  })
+
+  it('NÃO injeta a instrução job_report (MCP inalcançável no spawn headless)', () => {
+    const kickoff = composeJobKickoff({ prompt: 'roda', runId: 'run-42' })
+    expect(kickoff).not.toContain('job_report')
+    // sem run anterior nem delta: o kickoff é só o prompt do job.
+    expect(kickoff).toBe('roda')
   })
 })

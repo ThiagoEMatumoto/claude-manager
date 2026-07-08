@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Blocks,
+  CalendarClock,
   ClipboardList,
   Folder,
   Home,
@@ -34,6 +35,7 @@ const AREAS: AreaDef[] = [
   { id: 'features', icon: ClipboardList, label: 'Features' },
   { id: 'objectives', icon: Target, label: 'Objetivos' },
   { id: 'tasks', icon: ListTodo, label: 'Tarefas' },
+  { id: 'jobs', icon: CalendarClock, label: 'Jobs' },
   { id: 'meetings', icon: Mic, label: 'Reuniões' },
   { id: 'cc-configs', icon: Blocks, label: 'Configs do CC' },
   { id: 'metrics', icon: BarChart3, label: 'Métricas' },

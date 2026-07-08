@@ -21,6 +21,7 @@ import { ObjectivesArea } from '@/features/objectives/ObjectivesArea'
 import { ArchitectureArea } from '@/features/architecture/ArchitectureArea'
 import { OverviewArea } from '@/features/overview/OverviewArea'
 import { TasksArea } from '@/features/tasks/TasksArea'
+import { JobsArea } from '@/features/jobs/JobsArea'
 import { MeetingsArea } from '@/features/meetings/MeetingsArea'
 import { Terminal } from '@/features/sessions/Terminal'
 import { SettingsDialog } from '@/features/settings/SettingsDialog'
@@ -645,6 +646,8 @@ export function AppShell() {
       {area === 'dossiers' && <DossiersPanel />}
 
       {area === 'tasks' && <TasksArea />}
+
+      {area === 'jobs' && <JobsArea />}
 
       {area === 'meetings' && <MeetingsArea />}
 

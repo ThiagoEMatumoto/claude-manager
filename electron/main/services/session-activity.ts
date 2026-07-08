@@ -24,7 +24,7 @@ export const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
 const TAIL_BYTES = 64 * 1024
 const DEBOUNCE_MS = 250
-const MAX_TEXT = 200
+export const MAX_TEXT = 200
 
 // Fonte primária de status/name/updatedAt: ~/.claude/sessions/<pid>.json (um por
 // processo, atualizado ao vivo pelo Claude Code). É leve (~300B) e preciso.

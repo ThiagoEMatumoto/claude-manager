@@ -880,6 +880,140 @@ export interface TaskListFilter {
   parentId?: string
 }
 
+// ---- Scheduled Jobs (Fase 1) ----
+
+// Ciclo de vida de uma execução: scheduled (row criada pelo claim, aguardando
+// spawn) → running (sessão viva) → success | failed | interrupted. `missed` =
+// vencido com o app fechado (skip-with-marker, sem spawn).
+export type JobRunStatus =
+  | 'scheduled'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'interrupted'
+  | 'missed'
+
+// Qualidade da captura do relatório pull (transcript): full (texto íntegro),
+// partial (truncado em MAX_TEXT) ou none (transcript ausente). Evita falha
+// silenciosa quando a sessão sai sem produzir texto.
+export type CaptureQuality = 'full' | 'partial' | 'none'
+
+// Agendamento hand-rolled (sem lib de cron no MVP). Discriminated union:
+// - interval: a cada N horas a partir do último run.
+// - daily: todo dia às HH:MM (hora local).
+// - weekly: no dia da semana (0=domingo..6=sábado) às HH:MM (hora local).
+// Persistido como JSON na coluna `schedule`. next_run_at é derivado dele num
+// único helper (computeNextRunAt) — fonte única do claim atômico.
+export type JobSchedule =
+  | { type: 'interval'; hours: number }
+  | { type: 'daily'; hour: number; minute: number }
+  | { type: 'weekly'; dayOfWeek: number; hour: number; minute: number }
+
+// Snapshot self-contained dos params de spawn (model/effort/permissionMode/
+// advisorModel/prompt/systemPrompt) — imune a mudança de preset. permissionMode
+// default 'plan' = observe-only; disallowedTools são strings opacas (JSON).
+export interface ScheduledJob {
+  id: string
+  name: string
+  repoId: string | null
+  prompt: string
+  systemPrompt: string | null
+  schedule: JobSchedule
+  nextRunAt: number
+  lastRunAt: number | null
+  enabled: boolean
+  catchUp: boolean
+  model: string | null
+  effort: EffortLevel | null
+  permissionMode: PermissionMode
+  advisorModel: AdvisorModel | null
+  disallowedTools: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+// Uma execução do job. sessionId = sessions.id interno; ccSessionId = id da
+// sessão Claude Code (usado pra achar o transcript na captura). reportText =
+// markdown do crítique capturado (Fase 2).
+export interface JobRun {
+  id: string
+  jobId: string
+  status: JobRunStatus
+  startedAt: number | null
+  finishedAt: number | null
+  sessionId: string | null
+  ccSessionId: string | null
+  reportText: string | null
+  captureQuality: CaptureQuality | null
+  tokens: number | null
+  model: string | null
+  error: string | null
+  createdAt: number
+}
+
+export interface CreateScheduledJobInput {
+  name: string
+  repoId?: string | null
+  prompt: string
+  systemPrompt?: string | null
+  schedule: JobSchedule
+  enabled?: boolean
+  catchUp?: boolean
+  model?: string | null
+  effort?: EffortLevel | null
+  permissionMode?: PermissionMode | null
+  advisorModel?: AdvisorModel | null
+  disallowedTools?: string[] | null
+}
+
+export interface UpdateScheduledJobInput {
+  id: string
+  name?: string
+  repoId?: string | null
+  prompt?: string
+  systemPrompt?: string | null
+  // Trocar o schedule recomputa next_run_at a partir de agora.
+  schedule?: JobSchedule
+  enabled?: boolean
+  catchUp?: boolean
+  model?: string | null
+  effort?: EffortLevel | null
+  permissionMode?: PermissionMode | null
+  advisorModel?: AdvisorModel | null
+  disallowedTools?: string[] | null
+}
+
+export interface CreateJobRunInput {
+  jobId: string
+  status?: JobRunStatus
+  model?: string | null
+}
+
+export interface UpdateJobRunInput {
+  id: string
+  status?: JobRunStatus
+  startedAt?: number | null
+  finishedAt?: number | null
+  sessionId?: string | null
+  ccSessionId?: string | null
+  reportText?: string | null
+  captureQuality?: CaptureQuality | null
+  tokens?: number | null
+  model?: string | null
+  error?: string | null
+}
+
+export interface ScheduledJobListFilter {
+  enabled?: boolean
+  repoId?: string
+}
+
+export interface JobRunListFilter {
+  jobId?: string
+  status?: JobRunStatus
+  limit?: number
+}
+
 // ---- Reuniões (Meeting Intelligence) ----
 
 export type MeetingStatus =
@@ -1828,6 +1962,24 @@ export interface Api {
     // o renderer trata como sinal de recarga. Mutações com parent
     // objective/key_result também emitem 'objective:updated' com {id}.
     onUpdated(handler: (payload: unknown) => void): () => void
+  }
+  scheduledJobs: {
+    list(filter?: ScheduledJobListFilter): Promise<ScheduledJob[]>
+    get(id: string): Promise<ScheduledJob | null>
+    create(input: CreateScheduledJobInput): Promise<ScheduledJob>
+    update(input: UpdateScheduledJobInput): Promise<ScheduledJob>
+    delete(id: string): Promise<void>
+    listRuns(filter?: JobRunListFilter): Promise<JobRun[]>
+    // Dispara um run ad-hoc agora (fora do schedule). Retorna a run criada.
+    runNow(id: string): Promise<JobRun>
+    // Preview dos próximos `count` disparos a partir de agora (timestamps ms).
+    // Puro: não cria runs nem toca next_run_at.
+    previewRuns(schedule: JobSchedule, count: number): Promise<number[]>
+    // Payload = ScheduledJob completo ou marcador {id, deleted} — o renderer
+    // trata como sinal de recarga.
+    onUpdated(handler: (payload: unknown) => void): () => void
+    // Payload = JobRun atualizado — sinal de recarga do histórico de runs.
+    onRunUpdated(handler: (payload: unknown) => void): () => void
   }
   meetings: {
     list(filter?: MeetingListFilter): Promise<Meeting[]>

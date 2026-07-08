@@ -1,0 +1,117 @@
+// Whitelists e resolução das flags de spawn do claude — módulo PURO (sem electron,
+// sem I/O). Fonte ÚNICA compartilhada entre o spawn interativo (ipc/sessions, via
+// PTY) e o job-runner headless (`claude -p`). Extrair aqui garante que o denylist
+// destrutivo (guard-rail de modo autônomo) NÃO drife entre os dois caminhos: um
+// job autônomo rodando sem supervisão é blast radius pior que a sessão interativa.
+
+// Whitelist do --model: o valor vem do renderer/preset, mas o main re-valida —
+// nada fora desta lista chega à linha de comando. 'opusplan' é o alias híbrido
+// nativo da CLI (Opus no plan mode, Sonnet na execução).
+export const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku', 'opusplan'])
+
+// Whitelist do --effort: espelha a defesa-em-profundidade do --model.
+export const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+
+// Whitelist do --advisor: feature experimental (só Anthropic API direta). Se o CLI
+// rejeitar em runtime, a sessão/job falha visível — mesmo tratamento de outras flags.
+export const SPAWN_ADVISOR_WHITELIST = new Set(['opus', 'sonnet', 'fable'])
+
+// Whitelist do --permission-mode: TODOS os choices da CLI claude. O main é a
+// autoridade — valor fora desta lista vira null (= sem flag = default do claude).
+export const SPAWN_PERMISSION_MODES = [
+  'default',
+  'plan',
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'dontAsk',
+] as const
+const SPAWN_PERMISSION_MODE_WHITELIST = new Set<string>(SPAWN_PERMISSION_MODES)
+
+// Modos autônomos (editam/agem sem confirmar cada ação) que recebem o denylist
+// destrutivo como guard-rail. plan é read-only e default pergunta tudo.
+const AUTONOMOUS_PERMISSION_MODES = new Set<string>(['acceptEdits', 'auto', 'bypassPermissions'])
+
+// Modos observe-only (read-only / pergunta-tudo) — os ÚNICOS permitidos para jobs
+// agendados no MVP. Um job roda sem supervisão, então os modos autônomos ficam
+// gated (bloqueados na UI e no MCP) até existirem os guards de segurança. É um
+// ALLOWLIST explícito (fail-closed): NÃO derivar como complemento do autônomo —
+// 'dontAsk' não está em AUTONOMOUS_PERMISSION_MODES e escaparia o gate.
+export const OBSERVE_ONLY_PERMISSION_MODES = ['default', 'plan'] as const
+
+// Denylist destrutivo canônico (defense-in-depth) aplicado SEMPRE que a sessão/job
+// sobe em modo autônomo. Bloqueia as ops irreversíveis das regras do usuário.
+export const DESTRUCTIVE_DENYLIST = [
+  'Bash(rm:*)',
+  'Bash(git push:*)',
+  'Bash(git reset --hard:*)',
+  'Bash(git push --force:*)',
+  'Bash(git push -f:*)',
+  'Bash(git clean:*)',
+]
+
+// Read-only lockdown EXCLUSIVO de jobs headless: bloqueia TODA escrita de arquivo.
+// Um job observe-only roda em `default` (pergunta tudo) mas sem humano pra confirmar
+// — então nenhuma tool de escrita pode existir. Ele LÊ/analisa (Read/Grep/Glob/Bash
+// não-destrutivo) e produz a crítica no relatório, sem tocar em nada. NÃO se aplica
+// ao spawn interativo (sessions), onde o humano supervisiona cada edição.
+export const JOB_READONLY_DISALLOW = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
+
+// Valida o modo de permissão contra a whitelist. Retorna o modo se válido, senão
+// null (= sem flag = default do claude).
+export function resolvePermissionMode(value: string | null | undefined): string | null {
+  return value && SPAWN_PERMISSION_MODE_WHITELIST.has(value) ? value : null
+}
+
+// Predicado do allowlist observe-only. Usado pelo job-runner como guard fail-closed
+// (defense-in-depth): um job cuja row resolva para modo autônomo é finalizado como
+// failed SEM spawnar — as fronteiras MCP/UI já barram a criação, este é o piso.
+const OBSERVE_ONLY_SET = new Set<string>(OBSERVE_ONLY_PERMISSION_MODES)
+export function isObserveOnlyMode(mode: string): boolean {
+  return OBSERVE_ONLY_SET.has(mode)
+}
+
+// Denylist de um job HEADLESS. Diferente do spawn interativo, o job SEMPRE recebe o
+// denylist destrutivo E o read-only lockdown — mesmo em observe-only (default/plan):
+// roda sem supervisão, então nenhum modo pode ficar sem o guard-rail e nenhuma tool
+// de escrita pode existir. Mescla o denylist do renderer/job (que não consegue
+// enfraquecê-lo). Fontes = DESTRUCTIVE_DENYLIST + JOB_READONLY_DISALLOW.
+export function resolveJobDisallowedTools(
+  rendererDeny: readonly unknown[] | null | undefined,
+): string[] {
+  const deny = (rendererDeny ?? []).filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+  return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST, ...JOB_READONLY_DISALLOW]))
+}
+
+// Monta o denylist final do spawn. Mescla o denylist destrutivo canônico quando o
+// modo é autônomo (o renderer/job não pode enfraquecê-lo); senão devolve só o
+// denylist do renderer (ou null se vazio). Filtra specs não-string/vazios.
+export function resolveDisallowedTools(
+  permissionMode: string | null,
+  rendererDeny: readonly unknown[] | null | undefined,
+): string[] | null {
+  const deny = (rendererDeny ?? []).filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  )
+  if (permissionMode && AUTONOMOUS_PERMISSION_MODES.has(permissionMode)) {
+    return Array.from(new Set([...deny, ...DESTRUCTIVE_DENYLIST]))
+  }
+  return deny.length > 0 ? deny : null
+}
+
+// Valida o --model contra a whitelist. Retorna o valor ou null (= sem flag).
+export function resolveModel(value: string | null | undefined): string | null {
+  return value && SPAWN_MODEL_WHITELIST.has(value) ? value : null
+}
+
+// Valida o --effort contra a whitelist. Retorna o valor ou null (= sem flag).
+export function resolveEffort(value: string | null | undefined): string | null {
+  return value && SPAWN_EFFORT_WHITELIST.has(value) ? value : null
+}
+
+// Valida o --advisor contra a whitelist. Retorna o valor ou null (= sem flag).
+export function resolveAdvisor(value: string | null | undefined): string | null {
+  return value && SPAWN_ADVISOR_WHITELIST.has(value) ? value : null
+}

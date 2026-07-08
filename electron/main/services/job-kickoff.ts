@@ -77,17 +77,29 @@ function resolveLegalUiCreds(targetUrl: string | null | undefined): {
 }
 
 // Snippet de timing (skill browser-validate). Passado ao browser_evaluate depois da
-// página estabilizar → TTFB / DOMContentLoaded / load / LCP.
-const TIMING_SNIPPET = `() => {
+// página estabilizar → TTFB / DOMContentLoaded / load / LCP. Retorna uma Promise: o
+// browser_evaluate do Playwright awaita o valor da função (page.evaluate resolve o
+// retorno), então async é suportado. Num SPA client-side (React, ex.: legal-ui) o LCP
+// NÃO aparece em getEntriesByType('largest-contentful-paint') — só via PerformanceObserver
+// com buffered:true, que entrega as entradas de LCP já ocorridas. Best-effort: qualquer
+// falha → lcp null (nunca quebra o run).
+const TIMING_SNIPPET = `() => new Promise((resolve) => {
   const nav = performance.getEntriesByType('navigation')[0] || {};
-  const lcp = performance.getEntriesByType('largest-contentful-paint').slice(-1)[0];
-  return {
+  let lcp = null;
+  try {
+    new PerformanceObserver((list) => {
+      const entries = list.getEntries();
+      if (entries.length) lcp = entries[entries.length - 1].startTime;
+    }).observe({ type: 'largest-contentful-paint', buffered: true });
+  } catch (e) { /* LCP indisponível neste browser → fallback null */ }
+  // buffered:true entrega as entradas de LCP já bufferizadas; damos um tick ao observer.
+  setTimeout(() => resolve({
     ttfb: Math.round(nav.responseStart || 0),
     domContentLoaded: Math.round(nav.domContentLoadedEventEnd || 0),
     load: Math.round(nav.loadEventEnd || 0),
-    lcp: lcp ? Math.round(lcp.startTime) : null,
-  };
-}`
+    lcp: lcp != null ? Math.round(lcp) : null,
+  }), 600);
+})`
 
 function webAuditPlaybook(targetUrl: string | null | undefined): string {
   const url = targetUrl?.trim() || '(URL não informada — peça ao operador antes de prosseguir)'
@@ -119,16 +131,20 @@ function webAuditPlaybook(targetUrl: string | null | undefined): string {
     '  `[data-testid=login-button]`, e `browser_wait_for` a URL casar `**/app/**`.',
     '',
     '### 2. Navegue e estabilize',
-    '`browser_navigate` até a rota alvo e `browser_wait_for` um elemento conhecido do',
-    '`browser_snapshot` (não um sleep fixo). Só meça DEPOIS de confirmar que a URL final',
-    'casa `**/app/**` (página autenticada) — nunca meça a performance em `/login`.',
+    '`browser_navigate` até a rota alvo e `browser_wait_for` um elemento REAL do conteúdo',
+    'autenticado (um texto/região do `browser_snapshot`, NÃO a tela de login e NÃO um sleep',
+    'fixo). Só meça DEPOIS de confirmar que a URL final casa `**/app/**` (página autenticada)',
+    'e que o conteúdo principal renderizou — nunca meça em `/login`. O LCP precisa de tempo',
+    'para ocorrer: se medir cedo demais (antes do maior elemento pintar) ele vem `null`.',
     '',
     '### 3. Capture evidência (rode TODAS)',
     '- `browser_snapshot` — árvore de acessibilidade; confirme que o conteúdo esperado renderizou.',
     '- `browser_take_screenshot` — artefato visual.',
     '- `browser_console_messages` — mantenha só `error`/`warning`.',
     '- `browser_network_requests` — sinalize `4xx`/`5xx`/falhas.',
-    '- `browser_evaluate` com o snippet de timing abaixo (após a página estabilizar):',
+    '- `browser_evaluate` com o snippet de timing abaixo — rode-o SÓ depois do conteúdo',
+    '  autenticado estabilizar (passo 2). O snippet usa PerformanceObserver bufferizado para',
+    '  capturar o LCP mesmo num SPA client-side e retorna uma Promise (aguarde o resultado):',
     '',
     '```js',
     TIMING_SNIPPET,

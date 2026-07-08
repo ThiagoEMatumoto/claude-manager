@@ -70,14 +70,24 @@ export const WEB_AUDIT_BROWSER_TOOLS = [
   'browser_wait_for',
 ].map((t) => PLAYWRIGHT_PREFIX + t)
 
+// Sob `claude -p --permission-mode default` headless, Read/Grep/Glob são
+// auto-aprovados mas Bash NÃO é — sem estar no --allowedTools, o modelo trava
+// pedindo aprovação a cada comando (não há humano pra confirmar → o job falha).
+// web-audit precisa ler as credenciais de login da feature de Env via `printenv`;
+// liberamos SÓ `Bash(printenv:*)` (ler env), o mínimo pra autenticar sem expor o
+// segredo na command line. Bash geral continua fora — o read-only lockdown
+// (JOB_READONLY_DISALLOW + DESTRUCTIVE_DENYLIST) permanece intacto.
+export const WEB_AUDIT_ENV_TOOL = 'Bash(printenv:*)'
+
 // Allowlist ADITIVO por kind (o spike provou que --allowedTools é aditivo: Read/
-// Grep/Glob/Bash sobrevivem fora dele). web-audit libera as browser tools; critique
-// (e qualquer kind desconhecido → fail-closed) recebe [] = sem allowlist, o
-// comportamento atual. A decisão vive no MAIN (o runner monta --allowedTools só a
-// partir daqui), nunca no renderer. Convive com o --disallowedTools (lockdown): as
-// browser tools não estão no denylist, então não há conflito de precedência.
+// Grep/Glob sobrevivem fora dele — Bash é a exceção headless, ver acima). web-audit
+// libera as browser tools + printenv; critique (e qualquer kind desconhecido →
+// fail-closed) recebe [] = sem allowlist, o comportamento atual. A decisão vive no
+// MAIN (o runner monta --allowedTools só a partir daqui), nunca no renderer. Convive
+// com o --disallowedTools (lockdown): nem as browser tools nem printenv estão no
+// denylist, então não há conflito de precedência.
 export function resolveJobAllowedTools(kind: string): string[] {
-  return kind === 'web-audit' ? [...WEB_AUDIT_BROWSER_TOOLS] : []
+  return kind === 'web-audit' ? [...WEB_AUDIT_BROWSER_TOOLS, WEB_AUDIT_ENV_TOOL] : []
 }
 
 // Read-only lockdown EXCLUSIVO de jobs headless: bloqueia TODA escrita de arquivo.

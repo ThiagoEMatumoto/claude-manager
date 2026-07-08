@@ -471,6 +471,23 @@ export function getLastReport(jobId: string): string | null {
   return row ? row.report_text : null
 }
 
+// metrics_json do run mais recente que TEM métricas — fonte da tendência entre runs
+// (o delta de métricas injetado no kickoff do web-audit). Molde de getLastReport:
+// prioriza success e, dentro disso, o mais recente; ignora metrics_json null/vazio
+// (runs 'critique'/'missed'/'failed' sem métricas não suprimem a tendência). Retorna
+// a string JSON crua — o composeJobKickoff a parseia e formata.
+export function getLastMetrics(jobId: string): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT metrics_json FROM job_runs
+       WHERE job_id = ? AND metrics_json IS NOT NULL AND TRIM(metrics_json) <> ''
+       ORDER BY (status = 'success') DESC, created_at DESC
+       LIMIT 1`,
+    )
+    .get(jobId) as { metrics_json: string } | undefined
+  return row ? row.metrics_json : null
+}
+
 // ---- Scheduler (Fase 2): consultas de vencidos + reconcile de órfãos ----
 
 // Jobs elegíveis para disparo AGORA: habilitados e vencidos. O scheduler itera

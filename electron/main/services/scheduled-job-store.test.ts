@@ -252,5 +252,36 @@ describe('scheduled-job-store', () => {
       store.updateRun({ id: r.id, reportText: '   ' }) // só espaço = vazio
       expect(store.getLastReport(job.id)).toBeNull()
     })
+
+    it('getLastMetrics pega o metrics_json do último run que o tem, pulando runs sem métricas', () => {
+      const job = store.create({
+        name: 'J',
+        repoId: 'r1',
+        prompt: 'p',
+        schedule: { type: 'interval', hours: 24 },
+      })
+      const metrics = '{"lcp":3000,"ttfb":200,"consoleErrors":1,"networkFailures":0}'
+      const r1 = store.createRun({ jobId: job.id, status: 'success' })
+      store.updateRun({ id: r1.id, metricsJson: metrics })
+      // runs posteriores SEM métricas (missed/failed) não devem suprimir a tendência.
+      store.createRun({ jobId: job.id, status: 'missed' })
+      store.createRun({ jobId: job.id, status: 'failed' })
+
+      expect(store.getLastMetrics(job.id)).toBe(metrics)
+    })
+
+    it('getLastMetrics retorna null sem nenhum run com métricas', () => {
+      const job = store.create({
+        name: 'J',
+        repoId: 'r1',
+        prompt: 'p',
+        schedule: { type: 'interval', hours: 24 },
+      })
+      expect(store.getLastMetrics(job.id)).toBeNull()
+      // run com relatório mas SEM métricas (ex.: critique) → segue null.
+      const r = store.createRun({ jobId: job.id, status: 'success' })
+      store.updateRun({ id: r.id, reportText: 'só relatório' })
+      expect(store.getLastMetrics(job.id)).toBeNull()
+    })
   })
 })

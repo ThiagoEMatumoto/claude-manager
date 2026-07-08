@@ -115,18 +115,32 @@ try {
 }
 
 // Pós-close: o WAL foi materializado no app.db da cópia → queryDb enxerga a run
-// finalizada. NÃO seleciona report_text (dados sensíveis) — só length e se tem "LCP".
-const dbRow = await queryDb<{ status: string; len: number; capture_quality: string | null }>(
+// finalizada. NÃO seleciona report_text (dados sensíveis). Evidência POSITIVA da
+// Fase 2: metrics_json populado com um lcp NUMÉRICO (números não são sensíveis) —
+// prova que o parseMetricsBlock rodou no relatório real e gravou a coluna. O
+// report_text conter "lcp" NÃO prova a coluna — só a coluna populada prova.
+const dbRow = await queryDb<{
+  status: string
+  len: number
+  capture_quality: string | null
+  metrics_lcp: number | null
+  has_metrics: number
+}>(
   userDataCopy,
-  `SELECT status, length(report_text) AS len, capture_quality
+  `SELECT status, length(report_text) AS len, capture_quality,
+          json_extract(metrics_json, '$.lcp') AS metrics_lcp,
+          (metrics_json IS NOT NULL) AS has_metrics
    FROM job_runs WHERE job_id='${jobId}' ORDER BY created_at DESC LIMIT 1`,
 )
-const hasLcp = await queryDb<{ has_lcp: number }>(
-  userDataCopy,
-  `SELECT (report_text LIKE '%LCP%' OR report_text LIKE '%lcp%') AS has_lcp
-   FROM job_runs WHERE job_id='${jobId}' ORDER BY created_at DESC LIMIT 1`,
-)
+const finalRow = dbRow[0]
 console.log(
   'DB_FINAL_ROW',
-  JSON.stringify({ ...dbRow[0], hasLCP: hasLcp[0]?.has_lcp === 1 }),
+  JSON.stringify({
+    status: finalRow?.status,
+    captureQuality: finalRow?.capture_quality,
+    reportLen: finalRow?.len,
+    hasMetricsJson: finalRow?.has_metrics === 1,
+    metricsLcp: finalRow?.metrics_lcp ?? null,
+    metricsLcpIsNumeric: typeof finalRow?.metrics_lcp === 'number',
+  }),
 )

@@ -35,6 +35,7 @@ function jobToSpawnParams(
   job: ScheduledJob,
   run: JobRun,
   previousReport: string | null,
+  previousMetrics: string | null,
 ): Omit<JobRunParams, 'ccSessionId'> {
   return {
     repoId: job.repoId,
@@ -50,6 +51,7 @@ function jobToSpawnParams(
     disallowedTools: job.disallowedTools,
     runId: run.id,
     previousReport,
+    previousMetrics,
   }
 }
 
@@ -106,12 +108,13 @@ export class JobScheduler {
       // Último run COM relatório (não o último absoluto: 'missed'/'failed' no meio
       // não devem suprimir o delta havendo um 'success' anterior). Alimenta o delta.
       const previousReport = jobStore.getLastReport(job.id)
+      const previousMetrics = jobStore.getLastMetrics(job.id)
       const run = jobStore.claimDueJob(job.id, now)
       if (!run) continue
       // claim avançou next_run_at/last_run_at → a UI precisa do job atualizado.
       this.broadcastJobUpdated(job.id)
       if (job.catchUp) {
-        this.spawnClaimedRun(job, run, previousReport, now)
+        this.spawnClaimedRun(job, run, previousReport, previousMetrics, now)
       } else {
         const missed = jobStore.updateRun({ id: run.id, status: 'missed', finishedAt: now })
         broadcast('jobRun:updated', missed)
@@ -136,11 +139,12 @@ export class JobScheduler {
       const now = this.deps.now()
       for (const job of jobStore.listDueJobs(now)) {
         const previousReport = jobStore.getLastReport(job.id)
+        const previousMetrics = jobStore.getLastMetrics(job.id)
         const run = jobStore.claimDueJob(job.id, now)
         if (!run) continue
         // claim avançou next_run_at → a UI precisa do job atualizado ao vivo.
         this.broadcastJobUpdated(job.id)
-        this.spawnClaimedRun(job, run, previousReport, now)
+        this.spawnClaimedRun(job, run, previousReport, previousMetrics, now)
       }
     } catch (err) {
       console.error('[job-scheduler] tick falhou (não-fatal):', err)
@@ -159,8 +163,9 @@ export class JobScheduler {
     if (!job) throw new Error(`scheduled job não encontrado: ${jobId}`)
     const now = this.deps.now()
     const previousReport = jobStore.getLastReport(jobId)
+    const previousMetrics = jobStore.getLastMetrics(jobId)
     const run = jobStore.createRun({ jobId, status: 'scheduled', model: job.model })
-    this.spawnClaimedRun(job, run, previousReport, now)
+    this.spawnClaimedRun(job, run, previousReport, previousMetrics, now)
     return jobStore.getRun(run.id) ?? run
   }
 
@@ -175,6 +180,7 @@ export class JobScheduler {
     job: ScheduledJob,
     run: JobRun,
     previousReport: string | null,
+    previousMetrics: string | null,
     now: number,
   ): void {
     try {
@@ -189,7 +195,10 @@ export class JobScheduler {
       // Transição scheduled→running fora de IPC → broadcast pra UI acompanhar ao vivo.
       broadcast('jobRun:updated', running)
       void Promise.resolve(
-        this.deps.run({ ...jobToSpawnParams(job, run, previousReport), ccSessionId }),
+        this.deps.run({
+          ...jobToSpawnParams(job, run, previousReport, previousMetrics),
+          ccSessionId,
+        }),
       ).catch((err) => {
         console.error(`[job-scheduler] runner do job ${job.id} rejeitou:`, err)
         const failed = jobStore.updateRun({

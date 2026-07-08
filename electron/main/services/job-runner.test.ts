@@ -247,6 +247,45 @@ describe('runJob (finalização async)', () => {
     expect(String(arg.error)).toContain('observe-only')
   })
 
+  it('web-audit → parseia o bloco de métricas e grava metrics_json', async () => {
+    const updateRun = vi.fn((input) => input as unknown as JobRun)
+    const report =
+      '## Desempenho\n\n```json\n{"lcp": 3200, "ttfb": 180, "consoleErrors": 2, "networkFailures": 0}\n```'
+    await runJob(baseParams({ kind: 'web-audit' }), {
+      runJson: stubJson({ result: report, is_error: false }),
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    const arg = updateRun.mock.calls[0]![0]
+    expect(arg.status).toBe('success')
+    expect(JSON.parse(arg.metricsJson as string)).toMatchObject({ lcp: 3200, ttfb: 180 })
+  })
+
+  it('critique → NÃO grava metrics_json (undefined = mantém null da row)', async () => {
+    const updateRun = vi.fn((input) => input as unknown as JobRun)
+    // Mesmo com um bloco json no texto, critique ignora — só web-audit tem métricas.
+    const report = '## Crítica\n\n```json\n{"lcp": 3200}\n```'
+    await runJob(baseParams({ kind: 'critique' }), {
+      runJson: stubJson({ result: report, is_error: false }),
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(updateRun.mock.calls[0]![0].metricsJson).toBeUndefined()
+  })
+
+  it('web-audit sem bloco de métricas → metrics_json undefined (best-effort, não quebra)', async () => {
+    const updateRun = vi.fn((input) => input as unknown as JobRun)
+    await runJob(baseParams({ kind: 'web-audit' }), {
+      runJson: stubJson({ result: '## Relatório\nsem bloco json', is_error: false }),
+      updateRun,
+      resolveCwd: () => '/tmp',
+      now: () => 1,
+    })
+    expect(updateRun.mock.calls[0]![0].metricsJson).toBeUndefined()
+  })
+
   it('sem runId → no-op (nada a finalizar)', async () => {
     const updateRun = vi.fn()
     await runJob(baseParams({ runId: null }), {

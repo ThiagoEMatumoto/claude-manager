@@ -201,4 +201,21 @@ describe('JobScheduler', () => {
     // o kickoff efetivo injeta o report do success anterior (pula o missed do meio).
     expect(composeJobKickoff(params)).toContain('gap na extração')
   })
+
+  it('(h) runJobNow injeta as métricas da run anterior no disparo (tendência web-audit)', () => {
+    const job = makeJob({ kind: 'web-audit', targetUrl: 'https://app.legalstaging.lexter.ai' })
+    const prev = store.createRun({ jobId: job.id, status: 'success' })
+    const metrics = '{"lcp":3200,"ttfb":180,"consoleErrors":2,"networkFailures":0}'
+    store.updateRun({ id: prev.id, metricsJson: metrics })
+
+    const run = vi.fn((_params: JobRunParams) => {})
+    const scheduler = new JobScheduler({ now: () => Date.now(), run, genId: () => 'cc4' })
+
+    scheduler.runJobNow(job.id)
+
+    const params = run.mock.calls[0]![0]
+    expect(params.previousMetrics).toBe(metrics)
+    // o kickoff efetivo injeta o bloco de tendência com o LCP anterior.
+    expect(composeJobKickoff(params)).toContain('LCP=3200ms')
+  })
 })

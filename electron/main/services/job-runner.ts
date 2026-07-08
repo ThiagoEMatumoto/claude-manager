@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { runClaudeJson, type RunOpts, type RunResult } from './claude-cli'
 import * as jobStore from './scheduled-job-store'
 import { composeJobKickoff } from './job-kickoff'
+import { parseMetricsBlock } from './web-audit-metrics'
 import { broadcast } from './notify'
 import { notify } from './notifications'
 import { getDb } from './db'
@@ -77,6 +78,9 @@ export interface JobRunParams {
   runId?: string | null
   // report_text da execução anterior — injeta o delta no kickoff quando presente.
   previousReport?: string | null
+  // metrics_json (string JSON) da execução anterior — injeta a tendência de
+  // métricas no kickoff do web-audit (só forwarded ao composeJobKickoff).
+  previousMetrics?: string | null
   // --session-id do `claude -p`; gravado como cc_session_id da run pelo scheduler.
   ccSessionId: string
 }
@@ -223,11 +227,18 @@ export async function runJob(params: JobRunParams, deps: JobRunnerDeps = {}): Pr
     const text = typeof data?.result === 'string' ? data.result : null
     const failed = result.code !== 0 || !data || data.is_error === true
 
+    // web-audit: parse best-effort do bloco ```json de métricas do relatório →
+    // metrics_json. NUNCA falha o run (parseMetricsBlock é tolerante); ausência/
+    // malformado só deixa metrics_json null. critique não tem métricas → undefined
+    // (= mantém o null da row; não sobrescreve). Não altera status nem capture.
+    const metrics = params.kind === 'web-audit' ? parseMetricsBlock(text) : null
+
     const run = updateRun({
       id: runId,
       status: failed ? 'failed' : 'success',
       reportText: text,
       captureQuality: classifyCapture(text),
+      metricsJson: metrics ? JSON.stringify(metrics) : undefined,
       tokens: tokensOf(data),
       finishedAt: now(),
       error: failed

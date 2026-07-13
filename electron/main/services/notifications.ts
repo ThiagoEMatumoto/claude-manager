@@ -47,7 +47,15 @@ export function emitToast(title: string, body: string): void {
   }
 }
 
-export function notify({ title, body }: { title: string; body: string }): void {
+export function notify({
+  title,
+  body,
+  ccSessionId,
+}: {
+  title: string
+  body: string
+  ccSessionId?: string
+}): void {
   const prefs = getNotifPrefs()
   if (!prefs.enabled) return
 
@@ -56,11 +64,17 @@ export function notify({ title, body }: { title: string; body: string }): void {
     native.on('click', () => {
       mainWindow?.show()
       mainWindow?.focus()
+      // Além de focar a janela, pede pro renderer abrir/focar a sessão do evento.
+      if (ccSessionId) {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send('notify:open-session', ccSessionId)
+        }
+      }
     })
     native.show()
   }
 
-  const event: NotificationEvent = { title, body, at: Date.now() }
+  const event: NotificationEvent = { title, body, at: Date.now(), ccSessionId }
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('notify:event', event)
   }

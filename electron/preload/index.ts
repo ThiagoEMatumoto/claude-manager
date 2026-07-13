@@ -345,6 +345,7 @@ const api: Api = {
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),
+    onOpenSession: (handler) => subscribe<string>('notify:open-session', handler),
   },
   mcp: {
     status: () => invoke('mcp:status'),

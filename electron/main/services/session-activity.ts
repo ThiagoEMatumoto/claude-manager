@@ -463,7 +463,7 @@ class SessionActivityService extends EventEmitter {
       // qualquer não-busy). Só notifica com o app fora de foco, pra não spammar
       // quem está olhando o terminal.
       if (prev === 'working' && current === 'waiting') {
-        this.notifySessionWaiting(entry)
+        this.notifySessionWaiting(sessionId, entry)
       }
       this.lastEffectiveStatus.set(sessionId, current)
     }
@@ -476,7 +476,7 @@ class SessionActivityService extends EventEmitter {
     if (consumed) notifyUsageConsumption()
   }
 
-  private notifySessionWaiting(entry: IndexEntry): void {
+  private notifySessionWaiting(ccSessionId: string, entry: IndexEntry): void {
     const prefs = getNotifPrefs()
     if (!prefs.enabled || !prefs.sessionWaiting) return
     if (getMainWindow()?.isFocused()) return
@@ -484,6 +484,7 @@ class SessionActivityService extends EventEmitter {
     notify({
       title: `${name} aguardando você`,
       body: 'A sessão terminou e espera sua resposta.',
+      ccSessionId,
     })
   }
 

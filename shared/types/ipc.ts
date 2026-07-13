@@ -1465,6 +1465,9 @@ export interface NotificationEvent {
   title: string
   body: string
   at: number
+  // Sessão associada ao evento (ex: "aguardando você"). Presente, o toast vira
+  // acionável: clicar navega/abre a sessão correspondente.
+  ccSessionId?: string
 }
 
 export interface PluginInfo {
@@ -2066,6 +2069,8 @@ export interface Api {
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void
+    /** Clique na notificação NATIVA: o main pede pro renderer abrir/focar a sessão. */
+    onOpenSession(handler: (ccSessionId: string) => void): () => void
   }
   mcp: {
     status(): Promise<McpStatus>

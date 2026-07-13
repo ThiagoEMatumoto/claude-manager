@@ -4,30 +4,21 @@ import { Icon } from '@/components/ui/Icon'
 import { Menu, type MenuSection } from '@/components/ui/Menu'
 import type { SessionActivity } from '../../../shared/types/ipc'
 import type { PendingSelection } from './model-queue'
+import {
+  MODEL_ALIASES,
+  MODEL_LABELS,
+  modelAliasFromId,
+  type ModelAlias,
+} from '../../../shared/models'
 
 // Whitelists literais — são a ÚNICA fonte do que pode ser injetado no PTY
-// (/model e /effort). Nunca interpolar texto livre nesses comandos.
-export const MODEL_ALIASES = ['opus', 'sonnet', 'haiku'] as const
-export type ModelAlias = (typeof MODEL_ALIASES)[number]
+// (/model e /effort). Nunca interpolar texto livre nesses comandos. Os aliases
+// de modelo derivam do registro canônico em shared/models.ts; re-exportados
+// aqui pra manter o ponto de import histórico dos consumidores do pill.
+export { MODEL_ALIASES, modelAliasFromId }
+export type { ModelAlias }
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type EffortLevel = (typeof EFFORT_LEVELS)[number]
-
-const MODEL_LABELS: Record<ModelAlias, string> = {
-  opus: 'Opus',
-  sonnet: 'Sonnet',
-  haiku: 'Haiku',
-}
-
-// Mapeia o model id completo do transcript (ex: 'claude-opus-4-5-...') pro
-// alias exibível, por substring. Ids desconhecidos (ou '<synthetic>') → null.
-export function modelAliasFromId(id: string | null | undefined): ModelAlias | null {
-  if (!id) return null
-  const lower = id.toLowerCase()
-  for (const alias of MODEL_ALIASES) {
-    if (lower.includes(alias)) return alias
-  }
-  return null
-}
 
 // Troca otimista: se o transcript não confirmar o modelo alvo em 20s, o pill
 // reverte pro detectado (a injeção pode ter sido ignorada pelo claude).
@@ -54,8 +45,16 @@ export function ModelPill({ activity, canSwitch, pending, onSelectModel, compact
   const detected = modelAliasFromId(activity?.model)
 
   // Confirmação: quando o transcript reporta o modelo alvo, a troca terminou.
+  // 'opusplan' nunca aparece em transcripts (a CLI reporta opus no plan mode e
+  // sonnet na execução) — qualquer um dos dois confirma a troca; sem isso o
+  // pill reverteria após SWITCH_TIMEOUT_MS mesmo com o /model aplicado.
   useEffect(() => {
-    if (switching && detected === switching) {
+    const confirmed =
+      switching != null &&
+      (switching === 'opusplan'
+        ? detected === 'opus' || detected === 'sonnet'
+        : detected === switching)
+    if (confirmed) {
       setSwitching(null)
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
       timeoutRef.current = null

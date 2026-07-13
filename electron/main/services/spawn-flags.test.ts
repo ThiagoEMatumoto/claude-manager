@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { resolveJobAllowedTools } from './spawn-flags'
+import { resolveJobAllowedTools, resolveModel } from './spawn-flags'
+
+// resolveModel: whitelist do --model derivada do registro canônico
+// (shared/models.ts). Fora da lista → null = sem flag (fail-closed).
+describe('resolveModel', () => {
+  it('aceita todos os aliases canônicos, incluindo fable e opusplan', () => {
+    for (const alias of ['fable', 'opus', 'sonnet', 'haiku', 'opusplan']) {
+      expect(resolveModel(alias)).toBe(alias)
+    }
+  })
+
+  it('rejeita valores fora da whitelist (texto livre nunca vira flag)', () => {
+    expect(resolveModel('claude-fable-5')).toBeNull()
+    expect(resolveModel('opus; rm -rf /')).toBeNull()
+    expect(resolveModel('')).toBeNull()
+    expect(resolveModel(null)).toBeNull()
+    expect(resolveModel(undefined)).toBeNull()
+  })
+})
 
 // resolveJobAllowedTools: allowlist ADITIVO por kind de job. web-audit precisa das
 // 10 browser tools do Playwright global (prefixo mcp__plugin_playwright_playwright__)

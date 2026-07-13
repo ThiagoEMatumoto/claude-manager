@@ -4,10 +4,13 @@
 // destrutivo (guard-rail de modo autônomo) NÃO drife entre os dois caminhos: um
 // job autônomo rodando sem supervisão é blast radius pior que a sessão interativa.
 
+import { SPAWNABLE_MODEL_ALIASES } from '../../../shared/models'
+
 // Whitelist do --model: o valor vem do renderer/preset, mas o main re-valida —
-// nada fora desta lista chega à linha de comando. 'opusplan' é o alias híbrido
-// nativo da CLI (Opus no plan mode, Sonnet na execução).
-export const SPAWN_MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku', 'opusplan'])
+// nada fora desta lista chega à linha de comando. Deriva do registro canônico
+// (shared/models.ts), que só contém aliases literais ('opusplan' é o alias
+// híbrido nativo da CLI: Opus no plan mode, Sonnet na execução).
+export const SPAWN_MODEL_WHITELIST = new Set<string>(SPAWNABLE_MODEL_ALIASES)
 
 // Whitelist do --effort: espelha a defesa-em-profundidade do --model.
 export const SPAWN_EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])

@@ -1,15 +1,12 @@
 import { fmtTokens } from '../overview/usage-format'
-import { modelAliasFromId, type ModelAlias } from './ModelPill'
+import { modelAliasFromId } from './ModelPill'
+import { MODEL_CONTEXT_LIMITS, MODEL_SUPPORTS_XHIGH } from '../../../shared/models'
 
-// Limite da janela de contexto (tokens de input) por modelo. opus/sonnet operam
-// na janela de 1M; haiku em 200k. Default conservador de 200k pra ids que não
-// casam com nenhum alias conhecido — subestimar o limite só deixa o % mais
-// alarmista, nunca esconde consumo real.
-export const MODEL_CONTEXT_LIMITS: Record<ModelAlias, number> = {
-  opus: 1_000_000,
-  sonnet: 1_000_000,
-  haiku: 200_000,
-}
+// Limite da janela de contexto por modelo: deriva do registro canônico em
+// shared/models.ts (fable/opus/sonnet/opusplan em 1M; haiku em 200k). Default
+// conservador de 200k pra ids que não casam com nenhum alias conhecido —
+// subestimar o limite só deixa o % mais alarmista, nunca esconde consumo real.
+export { MODEL_CONTEXT_LIMITS }
 
 const DEFAULT_LIMIT = 200_000
 
@@ -42,10 +39,10 @@ export function formatContextUsage(u: ContextUsage): string {
 }
 
 // Capacidade do nível xhigh (e do mecanismo nativo 'ultracode', que exige
-// xhigh) por modelo: opus e sonnet suportam; haiku não. Reusa o mesmo match de
-// alias do indicador de contexto. Modelo desconhecido (null) → false: sem
-// confirmar suporte, não habilitamos o nível.
+// xhigh) por modelo — deriva do registro canônico (haiku é o único sem suporte).
+// Reusa o mesmo match de alias do indicador de contexto. Modelo desconhecido
+// (null) → false: sem confirmar suporte, não habilitamos o nível.
 export function modelSupportsXhigh(model: string | null): boolean {
   const alias = modelAliasFromId(model)
-  return alias === 'opus' || alias === 'sonnet'
+  return alias != null && MODEL_SUPPORTS_XHIGH[alias]
 }

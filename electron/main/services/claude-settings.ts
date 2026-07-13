@@ -101,24 +101,34 @@ export function applySettingsPatch(
   return next
 }
 
-async function readRawSettings(): Promise<{ raw: unknown; exists: boolean }> {
+// Helpers de IO parametrizados por path — reutilizados pelo toggle de hooks
+// (mesmo arquivo, chave hooks) e pelo escopo de projeto.
+export async function readRawSettingsAt(path: string): Promise<{ raw: unknown; exists: boolean }> {
   try {
-    const text = await readFile(CLAUDE_SETTINGS_PATH, 'utf8')
+    const text = await readFile(path, 'utf8')
     return { raw: JSON.parse(text), exists: true }
   } catch {
     return { raw: {}, exists: false }
   }
 }
 
+export async function writeRawSettingsAt(
+  path: string,
+  next: Record<string, unknown>,
+): Promise<void> {
+  // backupOnce é no-op se o arquivo original não existe.
+  await backupOnce(path)
+  await writeFileAtomic(path, `${JSON.stringify(next, null, 2)}\n`)
+}
+
 export async function readClaudeSettings(): Promise<ClaudeCliSettings> {
-  const { raw, exists } = await readRawSettings()
+  const { raw, exists } = await readRawSettingsAt(CLAUDE_SETTINGS_PATH)
   return toCliSettingsView(raw, exists)
 }
 
 export async function writeClaudeSettings(rawPatch: unknown): Promise<void> {
   const patch = validateSettingsPatch(rawPatch)
-  const { raw, exists } = await readRawSettings()
-  if (exists) await backupOnce(CLAUDE_SETTINGS_PATH)
+  const { raw } = await readRawSettingsAt(CLAUDE_SETTINGS_PATH)
   const next = applySettingsPatch(raw, patch)
-  await writeFileAtomic(CLAUDE_SETTINGS_PATH, `${JSON.stringify(next, null, 2)}\n`)
+  await writeRawSettingsAt(CLAUDE_SETTINGS_PATH, next)
 }

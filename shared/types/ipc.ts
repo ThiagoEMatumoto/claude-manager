@@ -1634,6 +1634,17 @@ export interface RuleFileEntry {
   relPath: string
 }
 
+// Entry individual de hooks[event] do ~/.claude/settings.json, com toggle.
+// Para disabled=true, index é a posição no stash cc.disabledHooks (app_prefs),
+// não no settings.json — é o handle usado pra religar.
+export interface HookToggleEntry {
+  event: string
+  index: number
+  matcher: string | null
+  summary: string
+  disabled: boolean
+}
+
 // ---- MCP servers do CLI claude (user + projeto) ----
 
 // target = url (http/sse) ou command+args (stdio). Headers/env NUNCA saem do
@@ -1973,6 +1984,9 @@ export interface Api {
     writeClaudeMd(content: string): Promise<ClaudeWriteResult>
     listRules(): Promise<RuleFileEntry[]>
     readRule(relPath: string): Promise<ClaudeMdFile>
+    listHooks(): Promise<HookToggleEntry[]>
+    disableHook(event: string, index: number): Promise<ClaudeWriteResult>
+    enableHook(event: string, disabledIndex: number): Promise<ClaudeWriteResult>
   }
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void

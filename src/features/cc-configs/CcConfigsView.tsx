@@ -1,48 +1,44 @@
 import { useEffect, useRef } from 'react'
-import type {
-  AgentInfo,
-  ClaudeConfigs,
-  HookInfo,
-  McpInfo,
-  SkillInfo,
-} from '../../../shared/types/ipc'
+import type { AgentInfo, ClaudeConfigs, McpInfo, SkillInfo } from '../../../shared/types/ipc'
 import type { ComponentTab } from './CcConfigsSidebar'
 import type { FocusedItem } from './navigation'
 import { Badge, Card, CenterMessage } from './ui'
 
+// Abas de inventário simples (agents/skills/mcps). Hooks tem aba própria
+// (HooksTab) porque ganhou toggle por entry — os helpers de card/focus são
+// exportados daqui pra ela reutilizar.
+type ListTab = Exclude<ComponentTab, 'hooks'>
+
 interface Props {
-  tab: ComponentTab
+  tab: ListTab
   configs: ClaudeConfigs
   loading: boolean
   focus: FocusedItem | null
   onClearFocus: () => void
 }
 
-const EMPTY_LABEL: Record<ComponentTab, string> = {
+const EMPTY_LABEL: Record<ListTab, string> = {
   agents: 'Nenhum agent encontrado.',
   skills: 'Nenhuma skill encontrada.',
   mcps: 'Nenhum MCP server encontrado.',
-  hooks: 'Nenhum hook encontrado.',
 }
 
 function originLabel(origin: string): string {
   return origin === 'user' ? 'user' : origin
 }
 
-function isFocused(focus: FocusedItem | null, tab: ComponentTab, name: string, origin: string) {
+export function isFocused(
+  focus: FocusedItem | null,
+  tab: ComponentTab,
+  name: string,
+  origin: string,
+) {
   if (!focus || focus.tab !== tab || focus.name !== name) return false
   return focus.origin == null || focus.origin === origin
 }
 
 export function CcConfigsView({ tab, configs, loading, focus, onClearFocus }: Props) {
-  const items =
-    tab === 'agents'
-      ? configs.agents
-      : tab === 'skills'
-        ? configs.skills
-        : tab === 'mcps'
-          ? configs.mcps
-          : configs.hooks
+  const items = tab === 'agents' ? configs.agents : tab === 'skills' ? configs.skills : configs.mcps
 
   if (loading && items.length === 0) return <CenterMessage text="Carregando…" />
   if (items.length === 0) return <CenterMessage text={EMPTY_LABEL[tab]} />
@@ -78,21 +74,12 @@ export function CcConfigsView({ tab, configs, loading, focus, onClearFocus }: Pr
               onClearFocus={onClearFocus}
             />
           ))}
-        {tab === 'hooks' &&
-          configs.hooks.map((h, i) => (
-            <HookCard
-              key={`${h.origin}:${h.event}:${i}`}
-              hook={h}
-              focused={isFocused(focus, 'hooks', h.event, h.origin)}
-              onClearFocus={onClearFocus}
-            />
-          ))}
       </div>
     </div>
   )
 }
 
-function FocusableCard({
+export function FocusableCard({
   focused,
   onClearFocus,
   children,
@@ -124,7 +111,7 @@ function FocusableCard({
   )
 }
 
-function EntityCard({
+export function EntityCard({
   name,
   badge,
   origin,
@@ -210,27 +197,6 @@ function McpCard({
   return (
     <FocusableCard focused={focused} onClearFocus={onClearFocus}>
       <EntityCard name={mcp.name} badge={mcp.kind} origin={mcp.origin} />
-    </FocusableCard>
-  )
-}
-
-function HookCard({
-  hook,
-  focused,
-  onClearFocus,
-}: {
-  hook: HookInfo
-  focused: boolean
-  onClearFocus: () => void
-}) {
-  return (
-    <FocusableCard focused={focused} onClearFocus={onClearFocus}>
-      <EntityCard
-        name={hook.event}
-        badge="hook"
-        origin={hook.origin}
-        description={hook.summary || undefined}
-      />
     </FocusableCard>
   )
 }

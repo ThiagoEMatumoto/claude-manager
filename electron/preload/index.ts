@@ -208,6 +208,9 @@ const api: Api = {
     writeClaudeMd: (content: string) => invoke('cc:claude-md:write', { content }),
     listRules: () => invoke('cc:rules:list'),
     readRule: (relPath: string) => invoke('cc:rules:read', { relPath }),
+    listHooks: () => invoke('cc:hooks:list'),
+    disableHook: (event, index) => invoke('cc:hooks:disable', { event, index }),
+    enableHook: (event, disabledIndex) => invoke('cc:hooks:enable', { event, disabledIndex }),
   },
   updates: {
     onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),

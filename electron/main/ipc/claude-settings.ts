@@ -4,11 +4,17 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import { backupOnce, writeFileAtomic } from '../services/atomic-file'
+import {
+  disableHookEntry,
+  enableHookEntry,
+  listHookToggleEntries,
+} from '../services/claude-hooks'
 import { readClaudeSettings, writeClaudeSettings } from '../services/claude-settings'
 import type {
   ClaudeCliSettings,
   ClaudeMdFile,
   ClaudeWriteResult,
+  HookToggleEntry,
   RuleFileEntry,
 } from '../../../shared/types/ipc'
 
@@ -103,5 +109,28 @@ export function registerClaudeSettingsIpc(): void {
   ipcMain.handle('cc:rules:read', async (_e, payload: unknown): Promise<ClaudeMdFile> => {
     const { relPath } = readRuleSchema.parse(payload)
     return readTextFile(resolveRulePath(relPath))
+  })
+
+  // Toggle por entry de hook do settings.json — payloads validados no service.
+  ipcMain.handle('cc:hooks:list', async (): Promise<HookToggleEntry[]> => {
+    return listHookToggleEntries()
+  })
+
+  ipcMain.handle('cc:hooks:disable', async (_e, payload: unknown): Promise<ClaudeWriteResult> => {
+    try {
+      await disableHookEntry(payload)
+      return { ok: true, message: 'Hook desligado — original guardado pelo app' }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('cc:hooks:enable', async (_e, payload: unknown): Promise<ClaudeWriteResult> => {
+    try {
+      await enableHookEntry(payload)
+      return { ok: true, message: 'Hook religado no settings.json' }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
   })
 }

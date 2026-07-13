@@ -7,6 +7,7 @@ import type {
   ClaudeSettingsScopeInput,
   Repo,
 } from '../../../shared/types/ipc'
+import { StatuslineScriptEditor } from './StatuslineScriptEditor'
 import { CenterMessage } from './ui'
 
 // Editor validado das chaves de alto uso de ~/.claude/settings.json. Isto
@@ -100,6 +101,7 @@ export function CliSettingsTab() {
   const [scope, setScope] = useState<ClaudeSettingsScopeInput['scope']>('user')
   const [repoId, setRepoId] = useState('')
   const [repos, setRepos] = useState<Repo[]>([])
+  const [editingScript, setEditingScript] = useState(false)
 
   const scopeReady = scope === 'user' || repoId !== ''
 
@@ -247,14 +249,33 @@ export function CliSettingsTab() {
             label="Status line (comando)"
             hint="Campo command do statusLine; os demais campos são preservados."
           >
-            <input
-              type="text"
-              value={form.statusLineCommand}
-              onChange={(e) => set('statusLineCommand', e.target.value)}
-              placeholder="ex.: ~/.claude/statusline.sh"
-              className={inputClass}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={form.statusLineCommand}
+                onChange={(e) => set('statusLineCommand', e.target.value)}
+                placeholder="ex.: ~/.claude/statusline.sh"
+                className={inputClass}
+              />
+              {/* O main resolve o path pelo command SALVO no settings.json do
+                  user — por isso o editor só aparece no escopo user. */}
+              {scope === 'user' && (
+                <button
+                  type="button"
+                  onClick={() => setEditingScript((v) => !v)}
+                  className="shrink-0 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+                >
+                  {editingScript ? 'Fechar script' : 'Editar script'}
+                </button>
+              )}
+            </div>
           </Field>
+
+          {editingScript && scope === 'user' && (
+            <div className="border-t border-[var(--color-border)] py-3">
+              <StatuslineScriptEditor onClose={() => setEditingScript(false)} />
+            </div>
+          )}
 
           <Field label="Idioma (language)" hint="Ex.: Portuguese, English.">
             <input

@@ -9,18 +9,21 @@ import {
   enableHookEntry,
   listHookToggleEntries,
 } from '../services/claude-hooks'
+import { readKeybindings, writeKeybindings } from '../services/claude-keybindings'
 import {
   CLAUDE_SETTINGS_PATH,
   readClaudeSettingsAt,
   writeClaudeSettingsAt,
 } from '../services/claude-settings'
 import { resolveRepoPath } from '../services/mcp-servers'
+import { readStatuslineScript, writeStatuslineScript } from '../services/statusline-script'
 import type {
   ClaudeCliSettings,
   ClaudeMdFile,
   ClaudeWriteResult,
   HookToggleEntry,
   RuleFileEntry,
+  StatuslineScriptFile,
 } from '../../../shared/types/ipc'
 
 // Superfícies de configuração do CLI claude em ~/.claude: settings.json
@@ -166,4 +169,40 @@ export function registerClaudeSettingsIpc(): void {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  ipcMain.handle('cc:keybindings:read', async (): Promise<ClaudeMdFile> => {
+    return readKeybindings()
+  })
+
+  ipcMain.handle(
+    'cc:keybindings:write',
+    async (_e, payload: unknown): Promise<ClaudeWriteResult> => {
+      try {
+        const { content } = writeMdSchema.parse(payload)
+        await writeKeybindings(content)
+        return { ok: true, message: 'Salvo em ~/.claude/keybindings.json' }
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
+
+  // Script do statusLine: o main resolve o path a partir do settings.json do
+  // user (o renderer nunca manda path) e nega qualquer alvo fora do HOME.
+  ipcMain.handle('cc:statusline-script:read', async (): Promise<StatuslineScriptFile> => {
+    return readStatuslineScript()
+  })
+
+  ipcMain.handle(
+    'cc:statusline-script:write',
+    async (_e, payload: unknown): Promise<ClaudeWriteResult> => {
+      try {
+        const { content } = writeMdSchema.parse(payload)
+        const savedPath = await writeStatuslineScript(content)
+        return { ok: true, message: `Salvo em ${savedPath}` }
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
 }

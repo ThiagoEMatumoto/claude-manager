@@ -4,6 +4,7 @@ import { CcConfigsView } from './CcConfigsView'
 import { ClaudeMdTab } from './ClaudeMdTab'
 import { CliSettingsTab } from './CliSettingsTab'
 import { HooksTab } from './HooksTab'
+import { KeybindingsTab } from './KeybindingsTab'
 import { MarketplaceTab } from './MarketplaceTab'
 import { McpServersTab } from './McpServersTab'
 import type { FocusedItem } from './navigation'
@@ -14,7 +15,7 @@ import { usePlugins } from './usePlugins'
 
 // Abas do CLI claude (~/.claude): componentes autocontidos que carregam seus
 // próprios dados — o Atualizar da sidebar força remount via key.
-const CLI_TAB_IDS: CcTab[] = ['settings', 'mcp', 'claude-md', 'rules']
+const CLI_TAB_IDS: CcTab[] = ['settings', 'mcp', 'claude-md', 'rules', 'keybindings']
 
 export function CcConfigsArea() {
   const { configs, loading, reload } = useCcConfigs()
@@ -92,6 +93,8 @@ export function CcConfigsArea() {
           <ClaudeMdTab key={cliReloadKey} />
         ) : tab === 'rules' ? (
           <RulesTab key={cliReloadKey} />
+        ) : tab === 'keybindings' ? (
+          <KeybindingsTab key={cliReloadKey} />
         ) : tab === 'hooks' ? (
           <HooksTab
             hooks={configs.hooks}

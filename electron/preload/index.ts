@@ -210,6 +210,10 @@ const api: Api = {
     listHooks: () => invoke('cc:hooks:list'),
     disableHook: (event, index) => invoke('cc:hooks:disable', { event, index }),
     enableHook: (event, disabledIndex) => invoke('cc:hooks:enable', { event, disabledIndex }),
+    readKeybindings: () => invoke('cc:keybindings:read'),
+    writeKeybindings: (content: string) => invoke('cc:keybindings:write', { content }),
+    readStatuslineScript: () => invoke('cc:statusline-script:read'),
+    writeStatuslineScript: (content: string) => invoke('cc:statusline-script:write', { content }),
   },
   updates: {
     onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),

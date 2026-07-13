@@ -1646,6 +1646,15 @@ export interface RuleFileEntry {
   relPath: string
 }
 
+// Script apontado por statusLine.command do settings.json (user). Editável só
+// quando o path resolve pra dentro do HOME; senão ok=false com o motivo.
+export interface StatuslineScriptFile {
+  ok: boolean
+  path?: string
+  content?: string
+  message?: string
+}
+
 // Entry individual de hooks[event] do ~/.claude/settings.json, com toggle.
 // Para disabled=true, index é a posição no stash cc.disabledHooks (app_prefs),
 // não no settings.json — é o handle usado pra religar.
@@ -1999,6 +2008,10 @@ export interface Api {
     listHooks(): Promise<HookToggleEntry[]>
     disableHook(event: string, index: number): Promise<ClaudeWriteResult>
     enableHook(event: string, disabledIndex: number): Promise<ClaudeWriteResult>
+    readKeybindings(): Promise<ClaudeMdFile>
+    writeKeybindings(content: string): Promise<ClaudeWriteResult>
+    readStatuslineScript(): Promise<StatuslineScriptFile>
+    writeStatuslineScript(content: string): Promise<ClaudeWriteResult>
   }
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void

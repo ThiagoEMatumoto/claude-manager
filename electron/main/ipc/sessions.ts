@@ -805,6 +805,72 @@ export function registerSessionIpc(): void {
     return out
   })
 
+  // Histórico global de sessões ENCERRADAS (filtro "Encerradas" do switcher):
+  // linhas do DB sem PTY viva, dedup por cc_session_id (a mais recente vence) e
+  // só com transcript no disco — sem transcript não há o que retomar nem exibir
+  // (mesmo gate do sessions:list-by-repo). Todas as entradas são retomáveis.
+  ipcMain.handle('sessions:list-ended-global', (): LiveSessionInfo[] => {
+    const db = getDb()
+
+    // ccSessionIds com PTY viva neste app: uma sessão retomada deixa linhas
+    // antigas 'exited' no DB — não podem aparecer como encerradas de novo.
+    const liveCc = new Set<string>()
+    for (const sessionId of ptyManager.runningIds()) {
+      const row = db
+        .prepare('SELECT cc_session_id FROM sessions WHERE id = ?')
+        .get(sessionId) as { cc_session_id: string | null } | undefined
+      if (row?.cc_session_id) liveCc.add(row.cc_session_id)
+    }
+
+    const rows = db
+      .prepare(
+        `SELECT
+           s.id AS session_id,
+           s.cc_session_id AS cc_session_id,
+           s.title AS session_title,
+           s.title_source AS session_title_source,
+           s.ended_at AS ended_at,
+           r.id AS repo_id, r.project_id AS repo_project_id, r.label AS repo_label,
+           r.path AS repo_path, r.role AS repo_role, r.link_kind AS repo_link_kind,
+           r.source AS repo_source, r.position AS repo_position, r.created_at AS repo_created_at,
+           p.name AS project_name, p.icon AS project_icon, p.color AS project_color
+         FROM sessions s
+         LEFT JOIN repos r ON r.id = s.repo_id
+         LEFT JOIN projects p ON p.id = r.project_id
+         WHERE s.cc_session_id IS NOT NULL AND s.status != 'running'
+         ORDER BY s.ended_at DESC
+         LIMIT 200`,
+      )
+      .all() as (LiveSessionJoinRow & { session_id: string; ended_at: number | null })[]
+
+    const seen = new Set<string>()
+    const out: LiveSessionInfo[] = []
+    for (const row of rows) {
+      if (seen.has(row.cc_session_id) || liveCc.has(row.cc_session_id)) continue
+      seen.add(row.cc_session_id)
+      const transcript = findTranscriptPath(row.cc_session_id)
+      if (!transcript) continue // spawn que nunca conversou — descarta.
+      const { repo, projectName, projectIcon, projectColor } = mapLiveSessionRepo(row)
+      out.push({
+        id: row.session_id,
+        ccSessionId: row.cc_session_id,
+        name: readTranscriptTitle(transcript) ?? row.session_title,
+        title: row.session_title_source === 'manual' ? row.session_title : null,
+        status: 'ended',
+        repo,
+        projectName,
+        projectIcon,
+        projectColor,
+        lastActivityAt: row.ended_at,
+        lastText: null,
+        isResumable: true,
+        titleSource: row.session_title_source,
+      })
+      if (out.length >= 50) break
+    }
+    return out
+  })
+
   ipcMain.handle('sessions:get-backlog', (_e, sessionId: string) => {
     return ptyManager.getBacklog(sessionId)
   })

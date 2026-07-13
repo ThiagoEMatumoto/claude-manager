@@ -4,6 +4,7 @@ import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
+import { sessionsApi } from '@/lib/ipc'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
 import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
@@ -85,6 +86,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
   const panes = useAppStore((s) => s.panes)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const openSessionsInGrid = useAppStore((s) => s.openSessionsInGrid)
+  const resumeSession = useAppStore((s) => s.resumeSession)
   const handoffs = useHandoffsStore((s) => s.handoffs)
 
   // Filhas de handoffs ativos ficam no rollup do painel Handoffs, fora do seletor.
@@ -95,6 +97,10 @@ export function SessionSwitcher({ open, onClose }: Props) {
 
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // Aba: sessões vivas (default) ou histórico de encerradas (retomáveis).
+  const [tab, setTab] = useState<'active' | 'ended'>('active')
+  // null = ainda carregando (fetch sob demanda ao entrar na aba).
+  const [endedSessions, setEndedSessions] = useState<LiveSessionInfo[] | null>(null)
   // Tick pra reavaliar os tempos relativos sem novos broadcasts.
   const [, setNow] = useState(() => Date.now())
 
@@ -102,7 +108,14 @@ export function SessionSwitcher({ open, onClose }: Props) {
     if (!open) return
     setQuery('')
     setSelected(new Set())
+    setTab('active')
   }, [open])
+
+  useEffect(() => {
+    if (!open || tab !== 'ended') return
+    setEndedSessions(null)
+    void sessionsApi.listEndedGlobal().then(setEndedSessions)
+  }, [open, tab])
 
   useEffect(() => {
     if (!open) return
@@ -147,8 +160,24 @@ export function SessionSwitcher({ open, onClose }: Props) {
     })
   }
 
+  // Busca também na aba de encerradas (mesmos campos).
+  const filteredEnded = useMemo(
+    () =>
+      (endedSessions ?? []).filter((s) =>
+        matches(query, s.title, s.name, s.projectName, s.repo?.label),
+      ),
+    [endedSessions, query],
+  )
+
   function openOne(item: LiveSessionInfo) {
     void focusOrOpenSession(item)
+    onClose()
+  }
+
+  // Encerrada com transcript → retomar via fluxo de resume existente (todas as
+  // entradas de listEndedGlobal são retomáveis por construção).
+  function openEnded(item: LiveSessionInfo) {
+    void resumeSession(item.repo, item.projectName, item.projectIcon, item.projectColor, item.ccSessionId)
     onClose()
   }
 
@@ -161,7 +190,9 @@ export function SessionSwitcher({ open, onClose }: Props) {
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault()
-      if (selectedItems.length > 0) openGrid()
+      if (tab === 'ended') {
+        if (filteredEnded[0]) openEnded(filteredEnded[0])
+      } else if (selectedItems.length > 0) openGrid()
       else if (filtered[0]) openOne(filtered[0])
     } else if (e.key === 'Escape') {
       e.preventDefault()
@@ -190,7 +221,60 @@ export function SessionSwitcher({ open, onClose }: Props) {
           />
         </div>
 
+        <div className="flex items-center gap-1 border-b border-[var(--color-border)] px-3 py-2">
+          {(
+            [
+              { id: 'active', label: 'Ativas' },
+              { id: 'ended', label: 'Encerradas' },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`rounded-md px-2 py-1 text-xs transition ${
+                tab === t.id
+                  ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                  : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          {tab === 'ended' ? (
+            <>
+              {endedSessions === null && (
+                <div className="px-4 py-10 text-center text-xs text-[var(--color-text-dim)]">
+                  carregando…
+                </div>
+              )}
+              {endedSessions !== null && filteredEnded.length === 0 && (
+                <div className="px-4 py-10 text-center text-xs text-[var(--color-text-dim)]">
+                  {endedSessions.length === 0
+                    ? 'Nenhuma sessão encerrada com transcript.'
+                    : 'Nenhum resultado.'}
+                </div>
+              )}
+              <ul className="flex flex-col gap-px">
+                {filteredEnded.map((item) => (
+                  <SessionRow
+                    key={item.ccSessionId}
+                    item={item}
+                    accent={false}
+                    selected={false}
+                    selectable={false}
+                    onScreen={false}
+                    onToggle={() => {}}
+                    onOpen={() => openEnded(item)}
+                  />
+                ))}
+              </ul>
+            </>
+          ) : (
+            <>
           {grouped.length === 0 && (
             <div className="px-4 py-10 text-center text-xs text-[var(--color-text-dim)]">
               {liveSessions.length === 0 ? 'Nenhuma sessão viva.' : 'Nenhum resultado.'}
@@ -226,6 +310,8 @@ export function SessionSwitcher({ open, onClose }: Props) {
               </ul>
             </div>
           ))}
+            </>
+          )}
         </div>
 
         {selectedItems.length > 0 ? (
@@ -266,12 +352,22 @@ interface RowProps {
   item: LiveSessionInfo
   accent: boolean
   selected: boolean
+  // Encerradas não entram na multi-seleção de grade (o re-attach exige PTY viva).
+  selectable?: boolean
   onScreen: boolean
   onToggle: () => void
   onOpen: () => void
 }
 
-function SessionRow({ item, accent, selected, onScreen, onToggle, onOpen }: RowProps) {
+function SessionRow({
+  item,
+  accent,
+  selected,
+  selectable = true,
+  onScreen,
+  onToggle,
+  onOpen,
+}: RowProps) {
   const view = statusView(item.status)
   const name = item.title ?? item.name ?? item.repo?.label ?? 'Avulsa'
   const preview = item.lastText?.replace(/\s+/g, ' ').trim()
@@ -285,14 +381,16 @@ function SessionRow({ item, accent, selected, onScreen, onToggle, onOpen }: RowP
       }`}
       style={accent ? { borderLeftColor: 'var(--color-warning)' } : undefined}
     >
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggle}
-        onClick={(e) => e.stopPropagation()}
-        title="Selecionar para abrir em paralelo"
-        className="shrink-0 accent-[var(--color-accent)]"
-      />
+      {selectable && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
+          title="Selecionar para abrir em paralelo"
+          className="shrink-0 accent-[var(--color-accent)]"
+        />
+      )}
 
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
         <div className="flex min-w-0 items-center gap-2">

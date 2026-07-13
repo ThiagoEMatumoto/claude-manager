@@ -10,6 +10,7 @@ import { sessionsApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore, type PaneMode } from '@/store/appStore'
+import { showToast } from '@/features/notifications/toast-store'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
@@ -330,6 +331,21 @@ export function Terminal({
     !gotDataRef.current &&
     (exitAtRef.current ?? Date.now()) - session.startedAt < 3000
 
+  // Sessão encerrada não fica como pane morta: toast dismissível + auto-close
+  // (o histórico vive no filtro "Encerradas" do seletor de sessões). Exceção:
+  // claude não encontrado — mantém o banner com o CTA de Configurações.
+  const autoClosedRef = useRef(false)
+  useEffect(() => {
+    if (!exited || claudeNotFound || autoClosedRef.current) return
+    autoClosedRef.current = true
+    showToast({
+      title: 'Sessão encerrada',
+      body: `${displayTitle}${exitCode != null && exitCode !== 0 ? ` (código ${exitCode})` : ''} — retome pelo seletor de sessões, em Encerradas.`,
+    })
+    onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exited, claudeNotFound])
+
   function copySelection() {
     const sel = xtermRef.current?.getSelection()
     if (sel) void navigator.clipboard.writeText(sel)
@@ -625,23 +641,19 @@ export function Terminal({
         onEndSession={() => endSession(session.id)}
       />
 
-      {exited && (
+      {/* Banner só pro caso "claude não encontrado" (precisa do CTA de config);
+          exit normal fecha a pane sozinho com toast (effect acima). */}
+      {exited && claudeNotFound && (
         <div
           className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs"
           style={{ color: 'var(--color-text-dim)' }}
         >
-          {claudeNotFound ? (
-            <span className="text-[var(--color-text)]">
-              <span className="text-[var(--color-danger)]">claude não encontrado</span> — verifique a instalação
-              ou configure o comando em Configurações.
-            </span>
-          ) : (
-            <span>
-              A sessão foi encerrada{exitCode != null ? ` (código ${exitCode})` : ''}.
-            </span>
-          )}
+          <span className="text-[var(--color-text)]">
+            <span className="text-[var(--color-danger)]">claude não encontrado</span> — verifique a instalação
+            ou configure o comando em Configurações.
+          </span>
           <div className="flex shrink-0 items-center gap-2">
-            {claudeNotFound && onOpenSettings && (
+            {onOpenSettings && (
               <button
                 type="button"
                 onClick={onOpenSettings}

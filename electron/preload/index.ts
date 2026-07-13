@@ -111,6 +111,7 @@ const api: Api = {
     unwatchActivity: (ccSessionId) => invoke('session:activity:unwatch', ccSessionId),
     onActivity: (handler) => subscribe<SessionActivity>('session:activity', handler),
     listLiveGlobal: () => invoke('sessions:list-live-global'),
+    listEndedGlobal: () => invoke('sessions:list-ended-global'),
     watchGlobalActivity: () => {
       void invoke('session:activity:watch-global')
     },

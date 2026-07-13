@@ -1807,6 +1807,8 @@ export interface Api {
     unwatchActivity(ccSessionId: string): Promise<void>
     onActivity(handler: (event: SessionActivity) => void): () => void
     listLiveGlobal(): Promise<LiveSessionInfo[]>
+    /** Sessões encerradas com transcript no disco (todas retomáveis), globais. */
+    listEndedGlobal(): Promise<LiveSessionInfo[]>
     watchGlobalActivity(): void
     unwatchGlobalActivity(): void
     onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void

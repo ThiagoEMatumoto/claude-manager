@@ -299,6 +299,11 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
     setActive(0)
   }, [query])
 
+  // Sessões encerradas resolvem async e mudam a lista: mantém o índice dentro dos limites.
+  useEffect(() => {
+    setActive((i) => Math.min(i, Math.max(0, filtered.length - 1)))
+  }, [filtered.length])
+
   // Mantém o item ativo visível ao navegar por teclado.
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)

@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { backupOnce, writeFileAtomic } from './atomic-file'
 import type { ClaudeCliSettings, ClaudeCliSettingsPatch } from '../../../shared/types/ipc'
@@ -121,14 +121,26 @@ export async function writeRawSettingsAt(
   await writeFileAtomic(path, `${JSON.stringify(next, null, 2)}\n`)
 }
 
-export async function readClaudeSettings(): Promise<ClaudeCliSettings> {
-  const { raw, exists } = await readRawSettingsAt(CLAUDE_SETTINGS_PATH)
+// Variantes parametrizadas por path — mesmas chaves/validação para o escopo
+// user (~/.claude/settings.json) e projeto (<repo>/.claude/settings.json).
+export async function readClaudeSettingsAt(path: string): Promise<ClaudeCliSettings> {
+  const { raw, exists } = await readRawSettingsAt(path)
   return toCliSettingsView(raw, exists)
 }
 
-export async function writeClaudeSettings(rawPatch: unknown): Promise<void> {
+export async function writeClaudeSettingsAt(path: string, rawPatch: unknown): Promise<void> {
   const patch = validateSettingsPatch(rawPatch)
-  const { raw } = await readRawSettingsAt(CLAUDE_SETTINGS_PATH)
+  const { raw } = await readRawSettingsAt(path)
   const next = applySettingsPatch(raw, patch)
-  await writeRawSettingsAt(CLAUDE_SETTINGS_PATH, next)
+  // Repo pode não ter .claude/ ainda — o arquivo de projeto é criado ao salvar.
+  await mkdir(dirname(path), { recursive: true })
+  await writeRawSettingsAt(path, next)
+}
+
+export async function readClaudeSettings(): Promise<ClaudeCliSettings> {
+  return readClaudeSettingsAt(CLAUDE_SETTINGS_PATH)
+}
+
+export async function writeClaudeSettings(rawPatch: unknown): Promise<void> {
+  await writeClaudeSettingsAt(CLAUDE_SETTINGS_PATH, rawPatch)
 }

@@ -9,7 +9,12 @@ import {
   enableHookEntry,
   listHookToggleEntries,
 } from '../services/claude-hooks'
-import { readClaudeSettings, writeClaudeSettings } from '../services/claude-settings'
+import {
+  CLAUDE_SETTINGS_PATH,
+  readClaudeSettingsAt,
+  writeClaudeSettingsAt,
+} from '../services/claude-settings'
+import { resolveRepoPath } from '../services/mcp-servers'
 import type {
   ClaudeCliSettings,
   ClaudeMdFile,
@@ -30,6 +35,27 @@ const MAX_CLAUDE_MD_BYTES = 1024 * 1024 // 1MB
 
 const writeMdSchema = z.object({ content: z.string().max(MAX_CLAUDE_MD_BYTES) })
 const readRuleSchema = z.object({ relPath: z.string().min(1).max(512) })
+
+const settingsScopeSchema = z
+  .object({
+    scope: z.enum(['user', 'project']),
+    repoId: z.string().min(1).optional(),
+  })
+  .strict()
+const settingsWriteSchema = settingsScopeSchema.extend({ patch: z.unknown() })
+
+// Resolve o settings.json alvo pelo escopo. Projeto: path vem do DB via repoId
+// (renderer nunca manda path). Retorna também um label pro feedback de escrita.
+function resolveSettingsTarget(scope: 'user' | 'project', repoId?: string) {
+  if (scope === 'user') {
+    return { filePath: CLAUDE_SETTINGS_PATH, label: '~/.claude/settings.json' }
+  }
+  if (!repoId) throw new Error('repoId é obrigatório no escopo project')
+  return {
+    filePath: path.join(resolveRepoPath(repoId), '.claude', 'settings.json'),
+    label: '.claude/settings.json do repo',
+  }
+}
 
 async function readTextFile(filePath: string): Promise<ClaudeMdFile> {
   try {
@@ -74,14 +100,21 @@ function resolveRulePath(relPath: string): string {
 }
 
 export function registerClaudeSettingsIpc(): void {
-  ipcMain.handle('cc:settings:read', async (): Promise<ClaudeCliSettings> => {
-    return readClaudeSettings()
+  ipcMain.handle('cc:settings:read', async (_e, payload: unknown): Promise<ClaudeCliSettings> => {
+    // payload ausente = escopo user (compat com chamadas antigas).
+    const { scope, repoId } = payload == null
+      ? { scope: 'user' as const, repoId: undefined }
+      : settingsScopeSchema.parse(payload)
+    const { filePath } = resolveSettingsTarget(scope, repoId)
+    return readClaudeSettingsAt(filePath)
   })
 
   ipcMain.handle('cc:settings:write', async (_e, payload: unknown): Promise<ClaudeWriteResult> => {
     try {
-      await writeClaudeSettings(payload)
-      return { ok: true, message: 'Salvo em ~/.claude/settings.json' }
+      const { scope, repoId, patch } = settingsWriteSchema.parse(payload)
+      const { filePath, label } = resolveSettingsTarget(scope, repoId)
+      await writeClaudeSettingsAt(filePath, patch)
+      return { ok: true, message: `Salvo em ${label}` }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
     }

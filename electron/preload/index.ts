@@ -64,7 +64,6 @@ import type {
   SyncResolveConflictInput,
   SyncSetProjectsRootInput,
   ChatTranscriptUpdate,
-  ClaudeCliSettingsPatch,
   McpAddInput,
   McpRemoveInput,
 } from '../../shared/types/ipc'
@@ -202,8 +201,8 @@ const api: Api = {
     action: (action, name) => invoke('cc:plugins:action', { action, name }),
   },
   ccSettings: {
-    read: () => invoke('cc:settings:read'),
-    write: (patch: ClaudeCliSettingsPatch) => invoke('cc:settings:write', patch),
+    read: (scope) => invoke('cc:settings:read', scope),
+    write: (input) => invoke('cc:settings:write', input),
     readClaudeMd: () => invoke('cc:claude-md:read'),
     writeClaudeMd: (content: string) => invoke('cc:claude-md:write', { content }),
     listRules: () => invoke('cc:rules:list'),

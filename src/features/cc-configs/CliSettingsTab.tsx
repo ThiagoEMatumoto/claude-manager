@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { ccSettingsApi } from '@/lib/ipc'
-import type { ClaudeCliSettings, ClaudeCliSettingsPatch } from '../../../shared/types/ipc'
+import { ccSettingsApi, projectsApi } from '@/lib/ipc'
+import type {
+  ClaudeCliSettings,
+  ClaudeCliSettingsPatch,
+  ClaudeSettingsScopeInput,
+  Repo,
+} from '../../../shared/types/ipc'
 import { CenterMessage } from './ui'
 
 // Editor validado das chaves de alto uso de ~/.claude/settings.json. Isto
@@ -87,24 +92,39 @@ export function CliSettingsTab() {
   const [initial, setInitial] = useState<FormState | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
   const [envKeys, setEnvKeys] = useState<string[]>([])
+  const [fileExists, setFileExists] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  // Escopo: user (~/.claude/settings.json) ou projeto (.claude/settings.json
+  // de um repo cadastrado — o main resolve o path pelo repoId).
+  const [scope, setScope] = useState<ClaudeSettingsScopeInput['scope']>('user')
+  const [repoId, setRepoId] = useState('')
+  const [repos, setRepos] = useState<Repo[]>([])
 
-  async function load() {
-    const view = await ccSettingsApi.read()
+  const scopeReady = scope === 'user' || repoId !== ''
+
+  async function load(target: ClaudeSettingsScopeInput) {
+    const view = await ccSettingsApi.read(target)
     const f = toForm(view)
     setInitial(f)
     setForm(f)
     setEnvKeys(view.envKeys)
+    setFileExists(view.exists)
   }
 
   useEffect(() => {
-    void load()
+    void projectsApi.listAllRepos().then(setRepos)
   }, [])
 
-  if (!form || !initial) return <CenterMessage text="Carregando…" />
+  useEffect(() => {
+    setInitial(null)
+    setForm(null)
+    setMessage(null)
+    if (scope === 'user') void load({ scope: 'user' })
+    else if (repoId !== '') void load({ scope: 'project', repoId })
+  }, [scope, repoId])
 
-  const dirty = JSON.stringify(form) !== JSON.stringify(initial)
+  const dirty = form && initial ? JSON.stringify(form) !== JSON.stringify(initial) : false
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f))
@@ -112,25 +132,77 @@ export function CliSettingsTab() {
   }
 
   async function save() {
-    if (!form || !initial) return
+    if (!form || !initial || !scopeReady) return
     setSaving(true)
     try {
-      const result = await ccSettingsApi.write(buildPatch(initial, form))
+      const result = await ccSettingsApi.write({
+        scope,
+        ...(scope === 'project' ? { repoId } : {}),
+        patch: buildPatch(initial, form),
+      })
       setMessage({ ok: result.ok, text: result.message })
-      if (result.ok) await load()
+      if (result.ok) await load(scope === 'user' ? { scope } : { scope, repoId })
     } finally {
       setSaving(false)
     }
   }
 
+  const scopeSelector = (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <span className="text-xs text-[var(--color-text-dim)]">Escopo</span>
+      <select
+        value={scope}
+        onChange={(e) => setScope(e.target.value as ClaudeSettingsScopeInput['scope'])}
+        className={selectClass}
+      >
+        <option value="user">user (~/.claude/settings.json)</option>
+        <option value="project">projeto (.claude/settings.json)</option>
+      </select>
+      {scope === 'project' && (
+        <select value={repoId} onChange={(e) => setRepoId(e.target.value)} className={selectClass}>
+          <option value="">— escolha o repo —</option>
+          {repos.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {scopeReady && !fileExists && form && (
+        <span className="text-xs text-[var(--color-text-dim)]">
+          arquivo ainda não existe — será criado ao salvar
+        </span>
+      )}
+    </div>
+  )
+
+  if (!scopeReady) {
+    return (
+      <div className="h-full overflow-y-auto px-4 py-4">
+        <div className="mx-auto max-w-2xl space-y-4">
+          {scopeSelector}
+          <CenterMessage text="Escolha um repo pra editar o settings.json do projeto." />
+        </div>
+      </div>
+    )
+  }
+
+  if (!form || !initial) return <CenterMessage text="Carregando…" />
+
   return (
     <div className="h-full overflow-y-auto px-4 py-4">
       <div className="mx-auto max-w-2xl space-y-4">
+        {scopeSelector}
+
         <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-text)]">
-          Isto edita <code className="font-mono">~/.claude/settings.json</code> — a configuração
-          do <strong>CLI claude</strong>, usada por todas as sessões. Não confundir com as
-          preferências do app (Configurações). Um backup <code className="font-mono">.bak</code> é
-          criado na primeira escrita.
+          Isto edita{' '}
+          <code className="font-mono">
+            {scope === 'user' ? '~/.claude/settings.json' : '.claude/settings.json do repo'}
+          </code>{' '}
+          — a configuração do <strong>CLI claude</strong>
+          {scope === 'user' ? ', usada por todas as sessões' : ', usada nas sessões desse repo'}.
+          Não confundir com as preferências do app (Configurações). Um backup{' '}
+          <code className="font-mono">.bak</code> é criado na primeira escrita.
         </div>
 
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">

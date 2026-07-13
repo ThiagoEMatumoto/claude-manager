@@ -1608,6 +1608,18 @@ export interface ClaudeCliSettings {
   envKeys: string[]
 }
 
+// Escopo do editor de settings: user (~/.claude/settings.json) ou projeto
+// (.claude/settings.json de um repo cadastrado). O renderer manda só o repoId —
+// o main resolve o path pelo DB.
+export interface ClaudeSettingsScopeInput {
+  scope: 'user' | 'project'
+  repoId?: string
+}
+
+export interface ClaudeSettingsWriteInput extends ClaudeSettingsScopeInput {
+  patch: ClaudeCliSettingsPatch
+}
+
 // Patch parcial: chave ausente = não mexe; null = remove a chave do arquivo.
 export interface ClaudeCliSettingsPatch {
   model?: string | null
@@ -1978,8 +1990,8 @@ export interface Api {
     action(action: PluginAction, name: string): Promise<PluginActionResult>
   }
   ccSettings: {
-    read(): Promise<ClaudeCliSettings>
-    write(patch: ClaudeCliSettingsPatch): Promise<ClaudeWriteResult>
+    read(scope?: ClaudeSettingsScopeInput): Promise<ClaudeCliSettings>
+    write(input: ClaudeSettingsWriteInput): Promise<ClaudeWriteResult>
     readClaudeMd(): Promise<ClaudeMdFile>
     writeClaudeMd(content: string): Promise<ClaudeWriteResult>
     listRules(): Promise<RuleFileEntry[]>

@@ -106,6 +106,13 @@ const pendingEnds = new Map<
   { timer: ReturnType<typeof setTimeout>; pane: ActivePane | null; live: LiveSessionInfo | null }
 >()
 
+// Ids na janela de undo do Encerrar. O SessionStrip exclui esses do prune de
+// pins: a sessão já sumiu do snapshot (refresh filtra pendingEnds), mas pode
+// voltar via "Desfazer" — e deve voltar ainda fixada.
+export function pendingEndSessionIds(): ReadonlySet<string> {
+  return new Set(pendingEnds.keys())
+}
+
 // Guarda o auto-restore contra a dupla montagem do StrictMode (rodaria 2x).
 let restoreStarted = false
 // Reserva síncrona de ccSessionIds em resume — fecha a corrida entre o check de

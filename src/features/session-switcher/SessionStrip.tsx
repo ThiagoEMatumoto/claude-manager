@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
-import { useAppStore } from '@/store/appStore'
+import { pendingEndSessionIds, useAppStore } from '@/store/appStore'
 import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
 import { useWaitingCount } from './useWaitingCount'
 import { orderSessions } from './strip-pins'
@@ -85,10 +85,13 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
   // Higiene: descarta pins de sessões que não existem mais. Poda contra TODAS
   // as liveSessions (não só as visíveis) pra não perder pin de filha de handoff
   // temporariamente oculta. Lista vazia = provável boot antes do 1º broadcast —
-  // não podar, senão apagaríamos pins válidos.
+  // não podar, senão apagaríamos pins válidos. O store ainda aplica carência de
+  // 2 snapshots não-vazios antes de remover (snapshot parcial não apaga pin).
+  // Sessões na janela de undo do Encerrar ficam fora do prune: o snapshot as
+  // filtra de propósito, mas "Desfazer" as traz de volta — e ainda fixadas.
   useEffect(() => {
     if (!pinsLoaded || liveSessions.length === 0) return
-    void prunePins(new Set(liveSessions.map((item) => item.id)))
+    void prunePins(new Set(liveSessions.map((item) => item.id)), pendingEndSessionIds())
   }, [pinsLoaded, liveSessions, prunePins])
 
   // Filhas de handoffs ativos vivem no rollup do painel Handoffs, não na lista
@@ -138,7 +141,15 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
   useEffect(() => {
     checkOverflow()
     window.addEventListener('resize', checkOverflow)
-    return () => window.removeEventListener('resize', checkOverflow)
+    // Arrastar o split-pane muda a largura da barra sem window resize — o
+    // ResizeObserver no container cobre qualquer mudança de layout.
+    const el = scrollRef.current
+    const observer = el ? new ResizeObserver(checkOverflow) : null
+    if (el && observer) observer.observe(el)
+    return () => {
+      window.removeEventListener('resize', checkOverflow)
+      observer?.disconnect()
+    }
   }, [checkOverflow, orderedSessions])
 
   const scrollToWaiting = useCallback(() => {

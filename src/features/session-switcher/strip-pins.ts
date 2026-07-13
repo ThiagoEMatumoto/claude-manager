@@ -3,7 +3,7 @@
 
 // Sanitiza o JSON persistido em app_prefs: só strings, sem duplicatas. NÃO
 // filtra contra sessões vivas aqui — no boot a lista de sessões ainda pode
-// estar vazia e podaríamos pins válidos; a poda acontece em prunePinnedIds.
+// estar vazia e podaríamos pins válidos; a poda acontece no prune com carência.
 export function sanitizePinnedIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
@@ -16,11 +16,38 @@ export function sanitizePinnedIds(raw: unknown): string[] {
   return out
 }
 
-// Higiene: descarta pins de sessões que não existem mais. Retorna o MESMO array
-// quando nada muda, pra callers poderem pular persistência/re-render.
-export function prunePinnedIds(pinnedIds: string[], liveIds: ReadonlySet<string>): string[] {
-  const pruned = pinnedIds.filter((id) => liveIds.has(id))
-  return pruned.length === pinnedIds.length ? pinnedIds : pruned
+export interface PruneOutcome {
+  pinnedIds: string[]
+  // Ids fixados ausentes NESTE snapshot (candidatos a remoção na próxima rodada).
+  missing: ReadonlySet<string>
+}
+
+// Higiene com carência: só remove um pin quando o id falta em 2 snapshots
+// não-vazios CONSECUTIVOS. Um snapshot pode chegar parcial (boot, reconexão do
+// watch) e apagar o pin direto nas prefs seria destrutivo e permanente —
+// presença em qualquer snapshot zera a carência. `excludeIds` (janela de undo
+// do Encerrar) conta como presença: a sessão pode voltar via "Desfazer" e não
+// deve nem acumular carência enquanto o toast está de pé.
+// Retorna o MESMO array quando nada muda, pra callers pularem persistência.
+export function prunePinnedIdsWithGrace(
+  pinnedIds: string[],
+  liveIds: ReadonlySet<string>,
+  excludeIds: ReadonlySet<string>,
+  missingLastRound: ReadonlySet<string>,
+): PruneOutcome {
+  const absent = pinnedIds.filter((id) => !liveIds.has(id) && !excludeIds.has(id))
+  const removed = new Set(absent.filter((id) => missingLastRound.has(id)))
+  const missing = new Set(absent.filter((id) => !removed.has(id)))
+  const next = removed.size === 0 ? pinnedIds : pinnedIds.filter((id) => !removed.has(id))
+  return { pinnedIds: next, missing }
+}
+
+// Merge do load: persistidos primeiro (ordem original), toggles feitos em
+// memória antes do load resolver vão pro final. Retorna a MESMA referência de
+// `persisted` quando nada novo entra (skip de persistência).
+export function mergePinnedIds(persisted: string[], current: string[]): string[] {
+  const additions = current.filter((id) => !persisted.includes(id))
+  return additions.length === 0 ? persisted : [...persisted, ...additions]
 }
 
 export function togglePinnedId(pinnedIds: string[], id: string): string[] {

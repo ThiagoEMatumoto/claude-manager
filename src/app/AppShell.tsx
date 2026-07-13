@@ -28,6 +28,7 @@ import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
 import { SessionStrip } from '@/features/session-switcher/SessionStrip'
 import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
+import { NewSessionFlow } from '@/features/sessions/NewSessionFlow'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
@@ -144,6 +145,7 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
   const overrides = useKeybindingsStore((s) => s.overrides)
   const loadKeybindings = useKeybindingsStore((s) => s.load)
 
@@ -446,6 +448,14 @@ export function AppShell() {
       if (matchCombo(e, resolveCombo('switcher.open', overrides))) {
         e.preventDefault()
         setSwitcherOpen(true)
+        return
+      }
+      // Ctrl+N: fluxo global de nova sessão (escolher repo → diálogo de spawn).
+      // Funciona sem pane ativo; capture ganha a tecla antes do xterm/Electron
+      // (menu de aplicação é null, então não há accelerator competindo).
+      if (matchCombo(e, resolveCombo('session.new', overrides))) {
+        e.preventDefault()
+        setNewSessionOpen(true)
         return
       }
       // Ctrl+B: alterna o painel lateral de arquivos.
@@ -751,6 +761,7 @@ export function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <SessionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+      <NewSessionFlow open={newSessionOpen} onClose={() => setNewSessionOpen(false)} />
       <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
         <UpdateToast />
         <NotificationToast />

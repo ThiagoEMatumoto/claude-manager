@@ -8,9 +8,33 @@ import type { NotificationEvent } from '../../../shared/types/ipc'
 
 const AUTO_DISMISS_MS = 6000
 
+// Teto de cards de evento simultâneos: sem cap, várias transições
+// working→waiting ao mesmo tempo (ou uma sessão oscilando) cobrem a tela.
+const MAX_VISIBLE_EVENTS = 4
+
 interface QueuedEvent extends NotificationEvent {
   // Id local da fila (o `at` do evento pode colidir em eventos simultâneos).
   queueId: number
+}
+
+// Coalescing + cap da fila. Toasts de undo (LocalToast) vivem em outra fila e
+// nunca passam por aqui — logo nunca são descartados por esta política.
+function enqueueEvent(prev: QueuedEvent[], queued: QueuedEvent): QueuedEvent[] {
+  // Coalescing por sessão: evento novo da MESMA sessão substitui o card dela
+  // (queueId novo remonta o card e reinicia o auto-dismiss) em vez de empilhar
+  // duplicata — uma sessão oscilando gera 1 card, não N.
+  const withoutSame = queued.ccSessionId
+    ? prev.filter((e) => e.ccSessionId !== queued.ccSessionId)
+    : prev
+  const next = [...withoutSame, queued]
+  while (next.length > MAX_VISIBLE_EVENTS) {
+    // Excedente: descarta o mais antigo não-acionável (sem sessão pra abrir).
+    // Se todos forem acionáveis, cai no mais antigo mesmo — o teto vale mais
+    // que preservar um card que o usuário já deixou envelhecer.
+    const idx = next.findIndex((e) => !e.ccSessionId)
+    next.splice(idx === -1 ? 0 : idx, 1)
+  }
+  return next
 }
 
 // Abre/foca a sessão do evento via snapshot de sessões vivas. getState() em vez
@@ -27,11 +51,12 @@ export function NotificationToast() {
   const toasts = useToastStore((s) => s.toasts)
 
   useEffect(() => {
-    // Fila: eventos simultâneos empilham, cada card tem auto-dismiss próprio.
+    // Fila: eventos empilham com coalescing por sessão e teto de cards
+    // (ver enqueueEvent); cada card tem auto-dismiss próprio.
     return notificationsApi.onEvent((e) => {
       nextId.current += 1
       const queued: QueuedEvent = { ...e, queueId: nextId.current }
-      setEvents((prev) => [...prev, queued])
+      setEvents((prev) => enqueueEvent(prev, queued))
     })
   }, [])
 

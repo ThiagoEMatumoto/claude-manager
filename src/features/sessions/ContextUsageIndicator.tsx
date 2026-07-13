@@ -8,6 +8,8 @@ import { modelAliasFromId } from './ModelPill'
 
 interface Props {
   activity: SessionActivity | null
+  // Variante do hero de linha única: só "NN%" colorido, detalhe completo no tooltip.
+  compact?: boolean
 }
 
 // Cor por % do uso da janela (SPEC): <70% neutro (text-dim), 70-89% warning,
@@ -19,12 +21,20 @@ function colorForPct(pct: number): string {
   return 'var(--color-text-dim)'
 }
 
+// Thresholds mais sensíveis (60/85) que a variante completa (70/90) porque no
+// hero compacto a cor é o ÚNICO sinal — não há barra nem contagem absoluta.
+function compactColorForPct(pct: number): string {
+  if (pct > 85) return 'var(--color-danger)'
+  if (pct >= 60) return 'var(--color-warning)'
+  return 'var(--color-text-dim)'
+}
+
 // Monitor da janela de contexto no header da pane (ambos os modos): barra de
 // progresso colorida por estado + "95k / 1.0M · 10%". Lê tokens.context
 // (cache_read + input da última resposta) e o modelo do broadcast session:activity.
 // Não renderiza nada sem tokens+modelo (sessão sem 1ª resposta ainda).
 // Aviso proativo a partir de 80% (ícone + realce de fundo) e dica de /compact >=85%.
-export function ContextUsageIndicator({ activity }: Props) {
+export function ContextUsageIndicator({ activity, compact }: Props) {
   const model = activity?.model ?? null
   const usage = contextUsage({ tokens: activity?.tokens, model })
   if (!usage) return null
@@ -40,6 +50,24 @@ export function ContextUsageIndicator({ activity }: Props) {
   const tooltip = `Janela de contexto · ${modelLabel} · limite ${usage.limit.toLocaleString(
     'pt-BR',
   )} tokens · usados ${usage.used.toLocaleString('pt-BR')} (${usage.pct}%)`
+
+  if (compact) {
+    // Nada da variante completa se perde: barra/contagem viram tooltip, e a dica
+    // de /compact (>=85%) migra pro mesmo tooltip.
+    const compactTooltip = showCompact
+      ? `${tooltip} — contexto quase cheio, rode /compact na sessão para condensar o histórico`
+      : tooltip
+    return (
+      <span
+        className="whitespace-nowrap text-[10px] tabular-nums"
+        style={{ color: compactColorForPct(usage.pct) }}
+        title={compactTooltip}
+        aria-label={compactTooltip}
+      >
+        {usage.pct}%
+      </span>
+    )
+  }
 
   return (
     <span

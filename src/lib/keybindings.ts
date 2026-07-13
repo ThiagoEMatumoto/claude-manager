@@ -60,6 +60,13 @@ export const COMMANDS: Command[] = [
     editable: true,
   },
   {
+    id: 'session.new',
+    label: 'Nova sessão (escolher repo)',
+    context: 'Global',
+    defaultCombo: { mod: true, key: 'n' },
+    editable: true,
+  },
+  {
     id: 'files.togglePanel',
     label: 'Alternar painel de arquivos',
     context: 'Workspace',

@@ -20,6 +20,20 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
 
+// Sessão focada no renderer (pane ativo na área de projetos), reportada via
+// sessions:renderer-focus. Permite suprimir a notificação de "aguardando" só
+// quando o usuário JÁ está olhando aquela sessão — janela focada numa sessão
+// diferente continua notificando.
+let rendererFocusedSession: string | null = null
+
+export function setRendererFocusedSession(ccSessionId: string | null): void {
+  rendererFocusedSession = ccSessionId
+}
+
+export function getRendererFocusedSession(): string | null {
+  return rendererFocusedSession
+}
+
 export function getNotifPrefs(): NotificationPrefs {
   try {
     const row = getDb()
@@ -47,7 +61,15 @@ export function emitToast(title: string, body: string): void {
   }
 }
 
-export function notify({ title, body }: { title: string; body: string }): void {
+export function notify({
+  title,
+  body,
+  ccSessionId,
+}: {
+  title: string
+  body: string
+  ccSessionId?: string
+}): void {
   const prefs = getNotifPrefs()
   if (!prefs.enabled) return
 
@@ -56,11 +78,17 @@ export function notify({ title, body }: { title: string; body: string }): void {
     native.on('click', () => {
       mainWindow?.show()
       mainWindow?.focus()
+      // Além de focar a janela, pede pro renderer abrir/focar a sessão do evento.
+      if (ccSessionId) {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send('notify:open-session', ccSessionId)
+        }
+      }
     })
     native.show()
   }
 
-  const event: NotificationEvent = { title, body, at: Date.now() }
+  const event: NotificationEvent = { title, body, at: Date.now(), ccSessionId }
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('notify:event', event)
   }

@@ -24,6 +24,7 @@ import {
   isPidAlive,
   mapStatus,
 } from '../services/session-activity'
+import { setRendererFocusedSession } from '../services/notifications'
 import { getMcpRuntime } from '../services/mcp/server'
 import { mcpClientConfigPath } from '../services/mcp/config'
 import { chatTranscriptService } from '../services/chat-transcript-service'
@@ -709,7 +710,7 @@ export function registerSessionIpc(): void {
         status = 'ended'
       }
 
-      summaries.push({ ccSessionId, name, status, lastActivityAt, isLive })
+      summaries.push({ ccSessionId, name, title: row.title, status, lastActivityAt, isLive })
     }
 
     summaries.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
@@ -928,6 +929,12 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('session:activity:unwatch-global', () => {
     sessionActivityService.unwatchGlobal()
+  })
+
+  // Sinal leve renderer→main: qual sessão está no pane ativo/visível (null = nenhuma
+  // ou fora da área de projetos). Consumido pela supressão de notificação.
+  ipcMain.handle('sessions:renderer-focus', (_e, ccSessionId: string | null) => {
+    setRendererFocusedSession(typeof ccSessionId === 'string' ? ccSessionId : null)
   })
 
   // ===== Chat View (Fase 5a): leitura/observação do transcript JSONL =====

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 interface Props {
@@ -11,6 +11,19 @@ interface Props {
 }
 
 export function Dialog({ open, onClose, title, children, footer, widthClassName }: Props) {
+  // Fecha com Escape (keyboard-first). Listener em fase bubble na window:
+  // handlers internos que consomem Escape para outra função (ex.: captura de
+  // keybinding no SettingsDialog, que faz preventDefault/stopPropagation em
+  // capture) têm precedência — por isso ignoramos eventos já defaultPrevented.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!open) return null
 
   return createPortal(

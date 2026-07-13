@@ -28,10 +28,11 @@ import { SettingsDialog } from '@/features/settings/SettingsDialog'
 import { CommandPalette } from '@/features/command-palette/CommandPalette'
 import { SessionStrip } from '@/features/session-switcher/SessionStrip'
 import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
+import { NewSessionFlow } from '@/features/sessions/NewSessionFlow'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
 import { useAppStore, type ActivePane } from '@/store/appStore'
-import { meetingsApi, projectsApi, workspaceApi } from '@/lib/ipc'
+import { meetingsApi, projectsApi, sessionsApi, workspaceApi } from '@/lib/ipc'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
@@ -144,6 +145,7 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
   const overrides = useKeybindingsStore((s) => s.overrides)
   const loadKeybindings = useKeybindingsStore((s) => s.load)
 
@@ -153,6 +155,8 @@ export function AppShell() {
 
   const apiRef = useRef<DockviewApi | null>(null)
   const [ready, setReady] = useState(false)
+  // Pane ativo do dockview (espelho em state pra efeitos reagirem à troca).
+  const [activePanelId, setActivePanelId] = useState<string | null>(null)
   // paneIds que o store já removeu — usado pra suprimir o eco do onDidRemovePanel
   // (quando nós mesmos chamamos api.removePanel, ele dispara o evento de volta).
   const removingFromStore = useRef(new Set<string>())
@@ -193,7 +197,10 @@ export function AppShell() {
       apiRef.current = event.api
       // Default contextual: ao trocar o pane ativo, o seletor de arquivos segue
       // o repo daquele terminal (quando está entre os roots).
-      event.api.onDidActivePanelChange(() => syncFilesRepoToActivePane())
+      event.api.onDidActivePanelChange(() => {
+        syncFilesRepoToActivePane()
+        setActivePanelId(event.api.activePanel?.id ?? null)
+      })
       event.api.onDidRemovePanel((panel) => {
         // Loop guard: se a remoção partiu do store (api.removePanel nosso), ignora.
         if (removingFromStore.current.delete(panel.id)) return
@@ -443,6 +450,14 @@ export function AppShell() {
         setSwitcherOpen(true)
         return
       }
+      // Ctrl+N: fluxo global de nova sessão (escolher repo → diálogo de spawn).
+      // Funciona sem pane ativo; capture ganha a tecla antes do xterm/Electron
+      // (menu de aplicação é null, então não há accelerator competindo).
+      if (matchCombo(e, resolveCombo('session.new', overrides))) {
+        e.preventDefault()
+        setNewSessionOpen(true)
+        return
+      }
       // Ctrl+B: alterna o painel lateral de arquivos.
       if (matchCombo(e, resolveCombo('files.togglePanel', overrides))) {
         e.preventDefault()
@@ -460,6 +475,16 @@ export function AppShell() {
     window.addEventListener('cm:open-settings', onOpen)
     return () => window.removeEventListener('cm:open-settings', onOpen)
   }, [])
+
+  // Informa o main qual sessão está visível/focada no renderer. A supressão da
+  // notificação "aguardando" vale só pra ela (ver notifySessionWaiting) — janela
+  // focada em OUTRA sessão continua notificando. Fora da área de projetos nenhuma
+  // sessão está visível (null).
+  useEffect(() => {
+    const pane =
+      area === 'projects' ? panes.find((p) => p.paneId === activePanelId) : undefined
+    sessionsApi.setRendererFocus(pane?.session.ccSessionId ?? null)
+  }, [area, panes, activePanelId])
 
   // Dono único da assinatura de sessões vivas (strip + overlay só leem). Snapshot
   // + stream global no mount; cleanup no unmount (StrictMode-safe no store).
@@ -736,6 +761,7 @@ export function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <SessionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+      <NewSessionFlow open={newSessionOpen} onClose={() => setNewSessionOpen(false)} />
       <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
         <UpdateToast />
         <NotificationToast />

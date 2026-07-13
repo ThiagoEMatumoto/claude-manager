@@ -24,6 +24,7 @@ import { HandoffRow } from './HandoffRow'
 import { Menu } from '@/components/ui/Menu'
 import { Icon } from '@/components/ui/Icon'
 import { SessionsModal } from '@/features/sessions/SessionsModal'
+import { SpawnSessionDialog } from '@/features/sessions/SpawnSessionDialog'
 import { useAppStore } from '@/store/appStore'
 import { useHandoffsStore, ACTIVE_HANDOFF_STATUSES } from '@/store/handoffsStore'
 import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
@@ -164,6 +165,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [spawnOpen, setSpawnOpen] = useState(false)
   const openSession = useAppStore((s) => s.openSession)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: repo.id,
@@ -189,7 +191,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
 
         <button
           type="button"
-          onClick={() => void openSession(repo, project.name, project.icon, project.color)}
+          onClick={() => setSpawnOpen(true)}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
           title={`Nova sessão · ${repo.path}`}
         >
@@ -205,7 +207,7 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
           items={[
             {
               label: 'Nova sessão',
-              onClick: () => void openSession(repo, project.name, project.icon, project.color),
+              onClick: () => setSpawnOpen(true),
             },
             { label: 'Ver sessões…', onClick: () => setSessionsOpen(true) },
             { label: 'git pull', onClick: () => void repoApi.pullOne({ repoId: repo.id }) },
@@ -229,6 +231,32 @@ function RepoRow({ repo, project, onUpdate, onRemove }: RepoRowProps) {
           </button>
         </Menu>
       </div>
+
+      {/* Spawn com controles no caminho principal: o clique no repo abre o diálogo
+          pré-preenchido com os defaults — Enter no nome confirma rápido. */}
+      <SpawnSessionDialog
+        open={spawnOpen}
+        onClose={() => setSpawnOpen(false)}
+        repo={repo}
+        onConfirm={(name, featureId, model, effort, permission, advisorModel, initialCommand) => {
+          void openSession(
+            repo,
+            project.name,
+            project.icon,
+            project.color,
+            undefined,
+            featureId,
+            name,
+            initialCommand,
+            model,
+            effort,
+            undefined,
+            permission,
+            advisorModel,
+          )
+          setSpawnOpen(false)
+        }}
+      />
 
       <SessionsModal
         repo={repo}

@@ -123,6 +123,9 @@ const api: Api = {
     },
     onGlobalActivity: (handler) =>
       subscribe<GlobalActivityBatch>('session:activity:global', handler),
+    setRendererFocus: (ccSessionId) => {
+      void invoke('sessions:renderer-focus', ccSessionId)
+    },
   },
   chat: {
     getTranscript: (sessionId) => invoke('chat:get-transcript', sessionId),
@@ -356,6 +359,7 @@ const api: Api = {
   },
   notifications: {
     onEvent: (handler) => subscribe<NotificationEvent>('notify:event', handler),
+    onOpenSession: (handler) => subscribe<string>('notify:open-session', handler),
   },
   mcp: {
     status: () => invoke('mcp:status'),

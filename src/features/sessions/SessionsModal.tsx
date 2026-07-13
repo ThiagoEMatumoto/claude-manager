@@ -39,6 +39,20 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'ended', label: 'Encerradas' },
 ]
 
+// Substring match case/acento-insensível (mesmo helper do switcher/palette).
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+}
+
+function matchesQuery(query: string, ...fields: (string | null | undefined)[]): boolean {
+  if (!query) return true
+  const q = normalize(query)
+  return fields.some((f) => f && normalize(f).includes(q))
+}
+
 export function SessionsModal({
   repo,
   projectName,
@@ -64,14 +78,15 @@ export function SessionsModal({
 
   const filtered = useMemo(() => {
     if (!sessions) return null
-    const q = query.trim().toLowerCase()
+    const q = query.trim()
+    // Busca cobre name + título persistido + label do repo — muitas sessões
+    // antigas não têm name e ficavam inencontráveis.
     return sessions.filter((s) => {
       if (filter === 'live' && !s.isLive) return false
       if (filter === 'ended' && s.isLive) return false
-      if (q && !(s.name ?? '').toLowerCase().includes(q)) return false
-      return true
+      return matchesQuery(q, s.name, s.title, repo.label)
     })
-  }, [sessions, query, filter])
+  }, [sessions, query, filter, repo.label])
 
   return (
     <Dialog
@@ -160,7 +175,7 @@ export function SessionsModal({
                 />
                 <div className="min-w-0">
                   <div className="truncate text-sm text-[var(--color-text)]">
-                    {s.name || '(sem nome)'}
+                    {s.name || s.title || '(sem nome)'}
                   </div>
                   <div className="text-[10px] text-[var(--color-text-dim)]">
                     {s.isLive ? STATUS_LABEL[s.status] : 'encerrada'} ·{' '}

@@ -1341,6 +1341,9 @@ export interface ResumeSessionInput {
 export interface SessionSummary {
   ccSessionId: string
   name: string | null
+  // Título persistido no DB (rename manual/auto), distinto do name derivado do
+  // transcript — fallback de exibição/busca quando o name é nulo.
+  title: string | null
   status: 'working' | 'waiting' | 'idle' | 'ended'
   lastActivityAt: number | null
   isLive: boolean
@@ -1466,6 +1469,9 @@ export interface NotificationEvent {
   title: string
   body: string
   at: number
+  // Sessão associada ao evento (ex: "aguardando você"). Presente, o toast vira
+  // acionável: clicar navega/abre a sessão correspondente.
+  ccSessionId?: string
 }
 
 export interface PluginInfo {
@@ -1891,6 +1897,8 @@ export interface Api {
     watchGlobalActivity(): void
     unwatchGlobalActivity(): void
     onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void
+    /** Informa o main qual sessão está no pane ativo/visível (supressão de notificação). */
+    setRendererFocus(ccSessionId: string | null): void
   }
   chat: {
     /** Read inicial: resolve cc_session_id → transcript → lista ordenada de mensagens. */
@@ -2153,6 +2161,8 @@ export interface Api {
   }
   notifications: {
     onEvent(handler: (event: NotificationEvent) => void): () => void
+    /** Clique na notificação NATIVA: o main pede pro renderer abrir/focar a sessão. */
+    onOpenSession(handler: (ccSessionId: string) => void): () => void
   }
   mcp: {
     status(): Promise<McpStatus>

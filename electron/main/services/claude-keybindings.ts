@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { backupOnce, writeFileAtomic } from './atomic-file'
+import { withFileLock } from './file-lock'
 import type { ClaudeMdFile } from '../../../shared/types/ipc'
 
 // Editor de ~/.claude/keybindings.json (atalhos do CLI claude). Texto livre no
@@ -38,6 +39,10 @@ export async function readKeybindings(): Promise<ClaudeMdFile> {
 
 export async function writeKeybindings(content: string): Promise<void> {
   validateKeybindingsContent(content)
-  await backupOnce(KEYBINDINGS_PATH)
-  await writeFileAtomic(KEYBINDINGS_PATH, content)
+  // Serializa saves concorrentes: backup+write interleados poderiam gravar o
+  // .bak a partir de um estado intermediário.
+  await withFileLock(KEYBINDINGS_PATH, async () => {
+    await backupOnce(KEYBINDINGS_PATH)
+    await writeFileAtomic(KEYBINDINGS_PATH, content)
+  })
 }

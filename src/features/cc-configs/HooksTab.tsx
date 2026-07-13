@@ -32,7 +32,8 @@ function ToggleEntryCard({
     try {
       const result = entry.disabled
         ? await ccSettingsApi.enableHook(entry.event, entry.index)
-        : await ccSettingsApi.disableHook(entry.event, entry.index)
+        : // entry.entry vai junto: o main casa por conteúdo, o índice é só dica.
+          await ccSettingsApi.disableHook(entry.event, entry.index, entry.entry)
       onToggled(result)
     } finally {
       setBusy(false)

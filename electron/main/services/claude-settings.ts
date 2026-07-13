@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { backupOnce, writeFileAtomic } from './atomic-file'
+import { withFileLock } from './file-lock'
 import type { ClaudeCliSettings, ClaudeCliSettingsPatch } from '../../../shared/types/ipc'
 
 // Editor validado das chaves de alto uso de ~/.claude/settings.json. Postura
@@ -102,7 +103,9 @@ export function applySettingsPatch(
 }
 
 // Helpers de IO parametrizados por path — reutilizados pelo toggle de hooks
-// (mesmo arquivo, chave hooks) e pelo escopo de projeto.
+// (mesmo arquivo, chave hooks) e pelo escopo de projeto. Quem faz
+// read-modify-write com eles deve segurar withFileLock(path) por fora — os
+// helpers em si não serializam (e não podem chamar o lock: deadlock).
 export async function readRawSettingsAt(path: string): Promise<{ raw: unknown; exists: boolean }> {
   try {
     const text = await readFile(path, 'utf8')
@@ -130,11 +133,15 @@ export async function readClaudeSettingsAt(path: string): Promise<ClaudeCliSetti
 
 export async function writeClaudeSettingsAt(path: string, rawPatch: unknown): Promise<void> {
   const patch = validateSettingsPatch(rawPatch)
-  const { raw } = await readRawSettingsAt(path)
-  const next = applySettingsPatch(raw, patch)
-  // Repo pode não ter .claude/ ainda — o arquivo de projeto é criado ao salvar.
-  await mkdir(dirname(path), { recursive: true })
-  await writeRawSettingsAt(path, next)
+  // Mesma fila do toggle de hooks: o arquivo é compartilhado e read-modify-write
+  // concorrente perde updates.
+  await withFileLock(path, async () => {
+    const { raw } = await readRawSettingsAt(path)
+    const next = applySettingsPatch(raw, patch)
+    // Repo pode não ter .claude/ ainda — o arquivo de projeto é criado ao salvar.
+    await mkdir(dirname(path), { recursive: true })
+    await writeRawSettingsAt(path, next)
+  })
 }
 
 export async function readClaudeSettings(): Promise<ClaudeCliSettings> {

@@ -1657,13 +1657,16 @@ export interface StatuslineScriptFile {
 
 // Entry individual de hooks[event] do ~/.claude/settings.json, com toggle.
 // Para disabled=true, index é a posição no stash cc.disabledHooks (app_prefs),
-// não no settings.json — é o handle usado pra religar.
+// não no settings.json — é o handle usado pra religar. `entry` é o JSON cru da
+// entry: no disable ele volta ao main pra casar por conteúdo (o índice fica
+// stale se o arquivo mudou fora do app).
 export interface HookToggleEntry {
   event: string
   index: number
   matcher: string | null
   summary: string
   disabled: boolean
+  entry: unknown
 }
 
 // ---- MCP servers do CLI claude (user + projeto) ----
@@ -2006,7 +2009,7 @@ export interface Api {
     listRules(): Promise<RuleFileEntry[]>
     readRule(relPath: string): Promise<ClaudeMdFile>
     listHooks(): Promise<HookToggleEntry[]>
-    disableHook(event: string, index: number): Promise<ClaudeWriteResult>
+    disableHook(event: string, index: number, entry: unknown): Promise<ClaudeWriteResult>
     enableHook(event: string, disabledIndex: number): Promise<ClaudeWriteResult>
     readKeybindings(): Promise<ClaudeMdFile>
     writeKeybindings(content: string): Promise<ClaudeWriteResult>

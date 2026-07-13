@@ -5,7 +5,13 @@ import { Button } from '@/components/ui/Button'
 import { featuresApi } from '@/lib/ipc'
 import { suggestFeatures } from '@/features/features/fuzzy'
 import { STATUS_META } from '@/features/features/status'
-import { useSessionPrefsStore } from '@/lib/session-prefs-store'
+import {
+  clearRepoSessionDefaults,
+  loadRepoSessionDefaults,
+  saveRepoSessionDefaults,
+  useSessionPrefsStore,
+  type RepoSessionDefaults,
+} from '@/lib/session-prefs-store'
 import { PERMISSION_OPTIONS } from './permission-modes'
 import { MODEL_OPTIONS, EFFORT_OPTIONS, ADVISOR_OPTIONS } from './spawn-options'
 import { WORK_MODE_PRESETS } from './work-mode-presets'
@@ -55,13 +61,25 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const [selectedPreset, setSelectedPreset] = useState<string>('default')
   // bypassPermissions é destrutivo (pula TODAS as permissões): exige um 2º clique.
   const [confirmingBypass, setConfirmingBypass] = useState(false)
+  // Defaults efetivos no open: override do repo (se houver) sobre os globais.
+  // Guardados pra "Padrão" (preset) reverter pro mesmo estado do open.
+  const [effectiveDefaults, setEffectiveDefaults] = useState<RepoSessionDefaults | null>(null)
+  const [hasRepoDefaults, setHasRepoDefaults] = useState(false)
+  const [saveAsRepoDefault, setSaveAsRepoDefault] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
+
+  function applyDefaults(d: RepoSessionDefaults) {
+    setModel(d.model)
+    setEffort(d.effort)
+    setPermission(d.permission)
+    setAdvisorModel(d.advisor)
+  }
 
   // Aplica os overrides do preset aos controles — o usuário ainda pode ajustar
   // cada um manualmente depois (mesmo espírito do pré-preenchimento de defaults).
   // Campo ausente no preset = NÃO mexe no controle (contrato documentado em
   // work-mode-presets.ts); só "Padrão" é especial e reverte tudo pros defaults
-  // persistidos, já que é o único preset sem nenhum campo próprio.
+  // efetivos (override do repo > defaults globais persistidos).
   function applyPreset(id: string) {
     setSelectedPreset(id)
     const preset = WORK_MODE_PRESETS.find((p) => p.id === id)
@@ -69,10 +87,14 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     if (id === 'default') {
       const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
         useSessionPrefsStore.getState()
-      setModel(defaultModel)
-      setEffort(defaultEffort)
-      setPermission(defaultPermission)
-      setAdvisorModel(defaultAdvisor)
+      applyDefaults(
+        effectiveDefaults ?? {
+          model: defaultModel,
+          effort: defaultEffort,
+          permission: defaultPermission,
+          advisor: defaultAdvisor,
+        },
+      )
       setInitialCommand('')
       return
     }
@@ -91,25 +113,47 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     setConfirmingBypass(false)
     setInitialCommand('')
     setSelectedPreset('default')
-    // Pré-preenche modelo + effort + permissão + advisor com os defaults
-    // persistidos (Settings → Sessão/Chat).
-    void useSessionPrefsStore
-      .getState()
-      .load()
-      .then(() => {
-        const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
-          useSessionPrefsStore.getState()
-        setModel(defaultModel)
-        setEffort(defaultEffort)
-        setPermission(defaultPermission)
-        setAdvisorModel(defaultAdvisor)
-      })
+    setSaveAsRepoDefault(false)
+    // Pré-preenche modelo + effort + permissão + advisor: override do repo
+    // (app_prefs session.defaults.<repoId>) > defaults globais (Settings).
+    void Promise.all([
+      useSessionPrefsStore.getState().load(),
+      loadRepoSessionDefaults(repo.id),
+    ]).then(([, repoDefaults]) => {
+      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
+        useSessionPrefsStore.getState()
+      const effective = repoDefaults ?? {
+        model: defaultModel,
+        effort: defaultEffort,
+        permission: defaultPermission,
+        advisor: defaultAdvisor,
+      }
+      setEffectiveDefaults(effective)
+      setHasRepoDefaults(repoDefaults !== null)
+      applyDefaults(effective)
+    })
     // Features ligadas a este repo (linkagem (a) filtrada por repo).
     void featuresApi.list().then((all) => {
       setFeatures(all.filter((f) => f.repos.some((l) => l.repoId === repo.id)))
     })
     setTimeout(() => nameRef.current?.focus(), 0)
   }, [open, repo.id])
+
+  function clearRepoDefaults() {
+    void clearRepoSessionDefaults(repo.id).then(() => {
+      setHasRepoDefaults(false)
+      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
+        useSessionPrefsStore.getState()
+      const globals: RepoSessionDefaults = {
+        model: defaultModel,
+        effort: defaultEffort,
+        permission: defaultPermission,
+        advisor: defaultAdvisor,
+      }
+      setEffectiveDefaults(globals)
+      applyDefaults(globals)
+    })
+  }
 
   // Fuzzy-match (b): sugestões a partir do objetivo livre, client-side.
   const suggestions = useMemo(() => {
@@ -131,6 +175,14 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     if (permission === 'bypassPermissions' && !confirmingBypass) {
       setConfirmingBypass(true)
       return
+    }
+    if (saveAsRepoDefault) {
+      void saveRepoSessionDefaults(repo.id, {
+        model: model as RepoSessionDefaults['model'],
+        effort,
+        permission,
+        advisor: advisorModel,
+      })
     }
     onConfirm(
       name.trim() || undefined,
@@ -283,6 +335,28 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
               Bypass pula TODAS as permissões — o Claude executa qualquer ação sem
               perguntar. Clique em "Confirmar bypass" para prosseguir.
             </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-text-dim)]">
+            <input
+              type="checkbox"
+              checked={saveAsRepoDefault}
+              onChange={(e) => setSaveAsRepoDefault(e.target.checked)}
+              className="size-3.5 accent-[var(--color-accent)]"
+            />
+            Salvar como padrão deste repo (modelo/esforço/permissão/advisor)
+          </label>
+          {hasRepoDefaults && (
+            <button
+              type="button"
+              onClick={clearRepoDefaults}
+              className="text-[11px] text-[var(--color-text-dim)] underline decoration-dotted hover:text-[var(--color-text)]"
+              title="Remove o override deste repo e volta aos defaults globais"
+            >
+              Padrões deste repo aplicados — limpar
+            </button>
           )}
         </div>
 

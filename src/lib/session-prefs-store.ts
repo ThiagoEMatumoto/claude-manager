@@ -109,3 +109,61 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
     await prefsApi.set(KEYBOARD_MODE_KEY, k)
   },
 }))
+
+// ---- Defaults por repo (override dos defaults globais acima) ----
+// Persistidos em app_prefs sob `session.defaults.<repoId>`. SpawnSessionDialog
+// aplica: repo override > default global > default do claude.
+
+export interface RepoSessionDefaults {
+  model: ModelDefault
+  effort: EffortDefault
+  permission: PermissionMode
+  advisor: AdvisorDefault
+}
+
+const repoDefaultsKey = (repoId: string) => `session.defaults.${repoId}`
+
+// Sanitiza o JSON persistido com as MESMAS whitelists dos defaults globais.
+// null = nada salvo (ou lixo irreconhecível): o caller cai no default global.
+export function sanitizeRepoDefaults(raw: unknown): RepoSessionDefaults | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  return {
+    model:
+      typeof r.model === 'string' && MODEL_WHITELIST.has(r.model)
+        ? (r.model as ModelDefault)
+        : '',
+    effort:
+      typeof r.effort === 'string' && EFFORT_WHITELIST.has(r.effort)
+        ? (r.effort as EffortLevel)
+        : '',
+    permission:
+      typeof r.permission === 'string' && PERMISSION_WHITELIST.has(r.permission as PermissionMode)
+        ? (r.permission as PermissionMode)
+        : DEFAULT_PERMISSION,
+    advisor:
+      typeof r.advisor === 'string' && ADVISOR_WHITELIST.has(r.advisor)
+        ? (r.advisor as AdvisorDefault)
+        : '',
+  }
+}
+
+export async function loadRepoSessionDefaults(
+  repoId: string,
+): Promise<RepoSessionDefaults | null> {
+  const raw = await prefsApi.get<unknown>(repoDefaultsKey(repoId))
+  if (raw == null) return null
+  return sanitizeRepoDefaults(raw)
+}
+
+export async function saveRepoSessionDefaults(
+  repoId: string,
+  defaults: RepoSessionDefaults,
+): Promise<void> {
+  await prefsApi.set(repoDefaultsKey(repoId), defaults)
+}
+
+export async function clearRepoSessionDefaults(repoId: string): Promise<void> {
+  // prefs:set com null marca ausência — o load trata null como "sem override".
+  await prefsApi.set(repoDefaultsKey(repoId), null)
+}

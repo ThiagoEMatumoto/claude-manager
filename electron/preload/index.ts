@@ -64,6 +64,9 @@ import type {
   SyncResolveConflictInput,
   SyncSetProjectsRootInput,
   ChatTranscriptUpdate,
+  ClaudeCliSettingsPatch,
+  McpAddInput,
+  McpRemoveInput,
 } from '../../shared/types/ipc'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -194,6 +197,14 @@ const api: Api = {
     available: () => invoke('cc:plugins:available'),
     details: (name: string) => invoke('cc:plugins:details', { name }),
     action: (action, name) => invoke('cc:plugins:action', { action, name }),
+  },
+  ccSettings: {
+    read: () => invoke('cc:settings:read'),
+    write: (patch: ClaudeCliSettingsPatch) => invoke('cc:settings:write', patch),
+    readClaudeMd: () => invoke('cc:claude-md:read'),
+    writeClaudeMd: (content: string) => invoke('cc:claude-md:write', { content }),
+    listRules: () => invoke('cc:rules:list'),
+    readRule: (relPath: string) => invoke('cc:rules:read', { relPath }),
   },
   updates: {
     onStatus: (handler) => subscribe<UpdateStatus>('update:status', handler),
@@ -348,6 +359,9 @@ const api: Api = {
   },
   mcp: {
     status: () => invoke('mcp:status'),
+    listServers: () => invoke('cc:mcp:list'),
+    addServer: (input: McpAddInput) => invoke('cc:mcp:add', input),
+    removeServer: (input: McpRemoveInput) => invoke('cc:mcp:remove', input),
   },
   sync: {
     status: () => invoke('sync:status'),

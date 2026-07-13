@@ -1586,6 +1586,84 @@ export interface PluginActionResult {
   restartRequired: boolean
 }
 
+// ---- Configurações do CLI claude (~/.claude/settings.json) ----
+
+// Visão editável das chaves de alto uso. env expõe SÓ os nomes das chaves
+// (valores podem ser secrets e nunca atravessam o IPC). statusLineCommand é o
+// campo `command` do objeto statusLine (demais campos são preservados no write).
+export interface ClaudeCliSettings {
+  exists: boolean
+  model: string | null
+  effortLevel: string | null
+  autoMemoryEnabled: boolean | null
+  statusLineCommand: string | null
+  language: string | null
+  theme: string | null
+  envKeys: string[]
+}
+
+// Patch parcial: chave ausente = não mexe; null = remove a chave do arquivo.
+export interface ClaudeCliSettingsPatch {
+  model?: string | null
+  effortLevel?: string | null
+  autoMemoryEnabled?: boolean | null
+  statusLineCommand?: string | null
+  language?: string | null
+  theme?: string | null
+}
+
+export interface ClaudeWriteResult {
+  ok: boolean
+  message: string
+}
+
+export interface ClaudeMdFile {
+  exists: boolean
+  content: string
+}
+
+// Arquivo .md dentro de ~/.claude/rules (relPath relativo à pasta rules).
+export interface RuleFileEntry {
+  name: string
+  relPath: string
+}
+
+// ---- MCP servers do CLI claude (user + projeto) ----
+
+// target = url (http/sse) ou command+args (stdio). Headers/env NUNCA saem do
+// main (podem carregar tokens).
+export interface McpServerEntry {
+  name: string
+  scope: 'user' | 'project'
+  transport: string
+  target: string
+  // Origem legível: caminho do arquivo de config ou label do repo.
+  source: string
+  repoId?: string
+}
+
+export interface McpAddInput {
+  name: string
+  transport: 'stdio' | 'http' | 'sse'
+  target: string
+  // Só stdio: argumentos do comando (passados após `--`).
+  args?: string[]
+  scope: 'user' | 'project'
+  // Exigido quando scope=project; o main resolve o path pelo DB.
+  repoId?: string
+}
+
+export interface McpRemoveInput {
+  name: string
+  scope: 'user' | 'project'
+  repoId?: string
+}
+
+export interface McpActionResult {
+  ok: boolean
+  message: string
+}
+
 export type MetricsWindow = '7d' | '30d' | 'all'
 export type SessionType = 'quick_chat' | 'iteration' | 'deep_solo' | 'agent_orchestration'
 
@@ -1880,6 +1958,14 @@ export interface Api {
     details(name: string): Promise<PluginDetails>
     action(action: PluginAction, name: string): Promise<PluginActionResult>
   }
+  ccSettings: {
+    read(): Promise<ClaudeCliSettings>
+    write(patch: ClaudeCliSettingsPatch): Promise<ClaudeWriteResult>
+    readClaudeMd(): Promise<ClaudeMdFile>
+    writeClaudeMd(content: string): Promise<ClaudeWriteResult>
+    listRules(): Promise<RuleFileEntry[]>
+    readRule(relPath: string): Promise<ClaudeMdFile>
+  }
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void
     apply(): Promise<void>
@@ -2070,6 +2156,11 @@ export interface Api {
   }
   mcp: {
     status(): Promise<McpStatus>
+    // Gestão dos MCP servers do CLI claude (user + projeto). Listagem lê os
+    // arquivos de config; add/remove fazem shell-out validado a `claude mcp`.
+    listServers(): Promise<McpServerEntry[]>
+    addServer(input: McpAddInput): Promise<McpActionResult>
+    removeServer(input: McpRemoveInput): Promise<McpActionResult>
   }
   sync: {
     status(): Promise<SyncStatus>

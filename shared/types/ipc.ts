@@ -1340,6 +1340,9 @@ export interface ResumeSessionInput {
 export interface SessionSummary {
   ccSessionId: string
   name: string | null
+  // Título persistido no DB (rename manual/auto), distinto do name derivado do
+  // transcript — fallback de exibição/busca quando o name é nulo.
+  title: string | null
   status: 'working' | 'waiting' | 'idle' | 'ended'
   lastActivityAt: number | null
   isLive: boolean

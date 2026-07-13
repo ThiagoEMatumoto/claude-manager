@@ -710,7 +710,7 @@ export function registerSessionIpc(): void {
         status = 'ended'
       }
 
-      summaries.push({ ccSessionId, name, status, lastActivityAt, isLive })
+      summaries.push({ ccSessionId, name, title: row.title, status, lastActivityAt, isLive })
     }
 
     summaries.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))

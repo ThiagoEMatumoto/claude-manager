@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
 import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
+import { useWaitingCount } from './useWaitingCount'
 import type { LiveSessionInfo } from '../../../shared/types/ipc'
 
 type LiveStatus = LiveSessionInfo['status']
@@ -52,6 +53,7 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const endSession = useAppStore((s) => s.endSession)
   const handoffs = useHandoffsStore((s) => s.handoffs)
+  const waitingCount = useWaitingCount()
   // Tick pra reavaliar os tempos relativos no tooltip sem novos broadcasts.
   const [, setNow] = useState(() => Date.now())
 
@@ -110,10 +112,19 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
       <button
         type="button"
         onClick={onOpenSwitcher}
-        title="Abrir seletor de sessões"
-        className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+        title={
+          waitingCount > 0
+            ? `Abrir seletor de sessões · ${waitingCount} aguardando você`
+            : 'Abrir seletor de sessões'
+        }
+        className="relative ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
       >
         <Icon as={Maximize2} size={13} />
+        {waitingCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--color-warning)] px-0.5 text-[9px] font-semibold leading-none text-black">
+            {waitingCount}
+          </span>
+        )}
       </button>
     </div>
   )

@@ -120,6 +120,9 @@ const api: Api = {
     },
     onGlobalActivity: (handler) =>
       subscribe<GlobalActivityBatch>('session:activity:global', handler),
+    setRendererFocus: (ccSessionId) => {
+      void invoke('sessions:renderer-focus', ccSessionId)
+    },
   },
   chat: {
     getTranscript: (sessionId) => invoke('chat:get-transcript', sessionId),

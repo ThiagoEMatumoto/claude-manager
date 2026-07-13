@@ -1815,6 +1815,8 @@ export interface Api {
     watchGlobalActivity(): void
     unwatchGlobalActivity(): void
     onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void
+    /** Informa o main qual sessão está no pane ativo/visível (supressão de notificação). */
+    setRendererFocus(ccSessionId: string | null): void
   }
   chat: {
     /** Read inicial: resolve cc_session_id → transcript → lista ordenada de mensagens. */

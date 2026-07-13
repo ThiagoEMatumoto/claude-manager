@@ -20,6 +20,20 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
 
+// Sessão focada no renderer (pane ativo na área de projetos), reportada via
+// sessions:renderer-focus. Permite suprimir a notificação de "aguardando" só
+// quando o usuário JÁ está olhando aquela sessão — janela focada numa sessão
+// diferente continua notificando.
+let rendererFocusedSession: string | null = null
+
+export function setRendererFocusedSession(ccSessionId: string | null): void {
+  rendererFocusedSession = ccSessionId
+}
+
+export function getRendererFocusedSession(): string | null {
+  return rendererFocusedSession
+}
+
 export function getNotifPrefs(): NotificationPrefs {
   try {
     const row = getDb()

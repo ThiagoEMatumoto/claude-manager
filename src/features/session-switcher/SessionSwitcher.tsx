@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Clock, Loader, Moon, MonitorCheck, Square, Zap } from 'lucide-react'
-import type { LucideProps } from 'lucide-react'
-import type { ComponentType } from 'react'
+import { MonitorCheck } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
-import { sessionsApi } from '@/lib/ipc'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
-import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
+import { matchesSession } from './session-search'
+import { statusView, type LiveStatus } from './status-view'
+import { useEndedSessions, useVisibleLiveSessions } from './useGlobalSessions'
 import type { LiveSessionInfo } from '../../../shared/types/ipc'
-
-type LiveStatus = LiveSessionInfo['status']
 
 interface Props {
   open: boolean
@@ -39,68 +36,21 @@ const STANDALONE_GROUP: GroupDef = {
   accent: false,
 }
 
-interface StatusView {
-  label: string
-  icon: ComponentType<LucideProps>
-  className: string
-  spin?: boolean
-}
-
-function statusView(status: LiveStatus): StatusView {
-  switch (status) {
-    case 'working':
-      return { label: 'trabalhando', icon: Zap, className: 'text-[var(--color-accent)]' }
-    case 'waiting':
-      return { label: 'aguardando você', icon: Clock, className: 'text-[var(--color-warning)]' }
-    case 'idle':
-      return { label: 'ocioso', icon: Moon, className: 'text-[var(--color-text-dim)]' }
-    case 'starting':
-      return {
-        label: 'iniciando',
-        icon: Loader,
-        className: 'text-[var(--color-text-dim)]',
-        spin: true,
-      }
-    case 'ended':
-    default:
-      return { label: 'encerrada', icon: Square, className: 'text-[var(--color-text-dim)]' }
-  }
-}
-
-// Substring match case/acento-insensível (reuso do helper do CommandPalette).
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-}
-
-function matches(query: string, ...fields: (string | null | undefined)[]): boolean {
-  if (!query) return true
-  const q = normalize(query)
-  return fields.some((f) => f && normalize(f).includes(q))
-}
-
 export function SessionSwitcher({ open, onClose }: Props) {
-  const allLiveSessions = useAppStore((s) => s.liveSessions)
   const panes = useAppStore((s) => s.panes)
   const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
   const openSessionsInGrid = useAppStore((s) => s.openSessionsInGrid)
   const resumeSession = useAppStore((s) => s.resumeSession)
-  const handoffs = useHandoffsStore((s) => s.handoffs)
 
-  // Filhas de handoffs ativos ficam no rollup do painel Handoffs, fora do seletor.
-  const liveSessions = useMemo(() => {
-    const childIds = childSessionIds(handoffs)
-    return allLiveSessions.filter((s) => !childIds.has(s.id))
-  }, [allLiveSessions, handoffs])
+  // Filhas de handoffs ativos ficam fora do seletor (hook compartilhado com o palette).
+  const liveSessions = useVisibleLiveSessions()
 
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // Aba: sessões vivas (default) ou histórico de encerradas (retomáveis).
   const [tab, setTab] = useState<'active' | 'ended'>('active')
   // null = ainda carregando (fetch sob demanda ao entrar na aba).
-  const [endedSessions, setEndedSessions] = useState<LiveSessionInfo[] | null>(null)
+  const endedSessions = useEndedSessions(open && tab === 'ended')
   // Tick pra reavaliar os tempos relativos sem novos broadcasts.
   const [, setNow] = useState(() => Date.now())
   // Índice ativo da navegação por teclado (↑↓ + Enter), sobre a lista achatada
@@ -117,12 +67,6 @@ export function SessionSwitcher({ open, onClose }: Props) {
   }, [open])
 
   useEffect(() => {
-    if (!open || tab !== 'ended') return
-    setEndedSessions(null)
-    void sessionsApi.listEndedGlobal().then(setEndedSessions)
-  }, [open, tab])
-
-  useEffect(() => {
     if (!open) return
     const id = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(id)
@@ -135,7 +79,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
   )
 
   const filtered = useMemo(
-    () => liveSessions.filter((s) => matches(query, s.title, s.name, s.projectName, s.repo?.label)),
+    () => liveSessions.filter((s) => matchesSession(query, s)),
     [liveSessions, query],
   )
 
@@ -167,10 +111,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
 
   // Busca também na aba de encerradas (mesmos campos).
   const filteredEnded = useMemo(
-    () =>
-      (endedSessions ?? []).filter((s) =>
-        matches(query, s.title, s.name, s.projectName, s.repo?.label),
-      ),
+    () => (endedSessions ?? []).filter((s) => matchesSession(query, s)),
     [endedSessions, query],
   )
 

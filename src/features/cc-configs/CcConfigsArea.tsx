@@ -1,19 +1,28 @@
 import { useState } from 'react'
 import { CcConfigsSidebar, type CcTab, type ComponentTab } from './CcConfigsSidebar'
 import { CcConfigsView } from './CcConfigsView'
+import { ClaudeMdTab } from './ClaudeMdTab'
+import { CliSettingsTab } from './CliSettingsTab'
 import { MarketplaceTab } from './MarketplaceTab'
+import { McpServersTab } from './McpServersTab'
 import type { FocusedItem } from './navigation'
 import { PluginsTab } from './PluginsTab'
+import { RulesTab } from './RulesTab'
 import { useCcConfigs } from './useCcConfigs'
 import { usePlugins } from './usePlugins'
+
+// Abas do CLI claude (~/.claude): componentes autocontidos que carregam seus
+// próprios dados — o Atualizar da sidebar força remount via key.
+const CLI_TAB_IDS: CcTab[] = ['settings', 'mcp', 'claude-md', 'rules']
 
 export function CcConfigsArea() {
   const { configs, loading, reload } = useCcConfigs()
   const plugins = usePlugins()
   const [tab, setTab] = useState<CcTab>('plugins')
   const [focus, setFocus] = useState<FocusedItem | null>(null)
+  const [cliReloadKey, setCliReloadKey] = useState(0)
 
-  const counts: Record<CcTab, number> = {
+  const counts: Partial<Record<CcTab, number>> = {
     plugins: plugins.installed.length,
     marketplace: plugins.available.length,
     agents: configs.agents.length,
@@ -36,6 +45,7 @@ export function CcConfigsArea() {
   function handleReload() {
     if (tab === 'plugins') void plugins.loadInstalled()
     else if (tab === 'marketplace') void plugins.loadAvailable()
+    else if (CLI_TAB_IDS.includes(tab)) setCliReloadKey((k) => k + 1)
     else void reload()
   }
 
@@ -44,7 +54,9 @@ export function CcConfigsArea() {
       ? plugins.loadingInstalled
       : tab === 'marketplace'
         ? plugins.loadingAvailable
-        : loading
+        : CLI_TAB_IDS.includes(tab)
+          ? false
+          : loading
 
   return (
     <>
@@ -71,6 +83,14 @@ export function CcConfigsArea() {
             error={plugins.availableError}
             runInstall={(name) => plugins.runAction('install', name)}
           />
+        ) : tab === 'settings' ? (
+          <CliSettingsTab key={cliReloadKey} />
+        ) : tab === 'mcp' ? (
+          <McpServersTab key={cliReloadKey} />
+        ) : tab === 'claude-md' ? (
+          <ClaudeMdTab key={cliReloadKey} />
+        ) : tab === 'rules' ? (
+          <RulesTab key={cliReloadKey} />
         ) : (
           <CcConfigsView
             tab={tab as ComponentTab}

@@ -1,9 +1,31 @@
-import { Bot, Plug, Puzzle, RefreshCw, Sparkles, Store, Webhook } from 'lucide-react'
+import {
+  Bot,
+  FileText,
+  Plug,
+  Puzzle,
+  RefreshCw,
+  ScrollText,
+  Server,
+  SlidersHorizontal,
+  Sparkles,
+  Store,
+  Webhook,
+} from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Icon } from '@/components/ui/Icon'
 
-export type CcTab = 'plugins' | 'marketplace' | 'agents' | 'skills' | 'mcps' | 'hooks'
+export type CcTab =
+  | 'plugins'
+  | 'marketplace'
+  | 'agents'
+  | 'skills'
+  | 'mcps'
+  | 'hooks'
+  | 'settings'
+  | 'mcp'
+  | 'claude-md'
+  | 'rules'
 
 // Abas que renderizam componentes agregados de ccConfigs.read().
 export type ComponentTab = 'agents' | 'skills' | 'mcps' | 'hooks'
@@ -23,12 +45,53 @@ const TABS: TabDef[] = [
   { id: 'hooks', label: 'Hooks', icon: Webhook },
 ]
 
+// Superfícies de configuração do CLI claude (~/.claude) — separadas das abas
+// de inventário acima porque EDITAM arquivos do CLI, não do app.
+const CLI_TABS: TabDef[] = [
+  { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
+  { id: 'mcp', label: 'MCP Servers', icon: Server },
+  { id: 'claude-md', label: 'CLAUDE.md', icon: FileText },
+  { id: 'rules', label: 'Rules', icon: ScrollText },
+]
+
 interface Props {
   active: CcTab
-  counts: Record<CcTab, number>
+  counts: Partial<Record<CcTab, number>>
   onSelect: (tab: CcTab) => void
   onReload: () => void
   loading: boolean
+}
+
+function TabButton({
+  tab,
+  isActive,
+  count,
+  onSelect,
+}: {
+  tab: TabDef
+  isActive: boolean
+  count: number | undefined
+  onSelect: (tab: CcTab) => void
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onSelect(tab.id)}
+        className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
+          isActive
+            ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+            : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
+        }`}
+      >
+        <span className="flex items-center gap-2">
+          <Icon as={tab.icon} className={isActive ? undefined : 'text-[var(--color-text-dim)]'} />
+          {tab.label}
+        </span>
+        {count != null && <span className="text-xs text-[var(--color-text-dim)]">{count}</span>}
+      </button>
+    </li>
+  )
 }
 
 export function CcConfigsSidebar({ active, counts, onSelect, onReload, loading }: Props) {
@@ -49,28 +112,30 @@ export function CcConfigsSidebar({ active, counts, onSelect, onReload, loading }
       </div>
 
       <ul className="flex flex-col gap-px py-2">
-        {TABS.map((tab) => {
-          const isActive = tab.id === active
-          return (
-            <li key={tab.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(tab.id)}
-                className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
-                  isActive
-                    ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon as={tab.icon} className={isActive ? undefined : 'text-[var(--color-text-dim)]'} />
-                  {tab.label}
-                </span>
-                <span className="text-xs text-[var(--color-text-dim)]">{counts[tab.id]}</span>
-              </button>
-            </li>
-          )
-        })}
+        {TABS.map((tab) => (
+          <TabButton
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === active}
+            count={counts[tab.id]}
+            onSelect={onSelect}
+          />
+        ))}
+      </ul>
+
+      <div className="border-t border-[var(--color-border)] px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+        CLI claude (~/.claude)
+      </div>
+      <ul className="flex flex-col gap-px pb-2">
+        {CLI_TABS.map((tab) => (
+          <TabButton
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === active}
+            count={counts[tab.id]}
+            onSelect={onSelect}
+          />
+        ))}
       </ul>
     </aside>
   )

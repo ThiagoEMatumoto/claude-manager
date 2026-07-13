@@ -96,6 +96,11 @@ let savePanesTimer: ReturnType<typeof setTimeout> | null = null
 // processo só dispara quando o timer expira. "Desfazer" cancela o timer e
 // restaura pane/chip — nada foi morto ainda. Snapshot guardado pra restaurar.
 const END_UNDO_MS = 5000
+// Graça entre o toast sumir e o kill disparar. O timer do kill começa síncrono
+// no endSession, mas o auto-dismiss do toast só começa um render depois — sem
+// folga, o toast sobrevive ao kill por uma janela curta e "Desfazer" viraria
+// no-op com o PTY já morto. A graça garante: toast visível ⇒ undo ainda vale.
+const END_KILL_GRACE_MS = 750
 const pendingEnds = new Map<
   string,
   { timer: ReturnType<typeof setTimeout>; pane: ActivePane | null; live: LiveSessionInfo | null }
@@ -288,8 +293,10 @@ interface AppState {
   // Alterna/define o display da pane (terminal ⇄ chat) e lembra por sessão.
   setPaneMode: (paneId: string, mode: PaneMode) => void
   // Encerramento com undo: some da UI na hora, toast "Desfazer" por ~5s; o kill
-  // efetivo da PTY só dispara quando a janela expira.
-  endSession: (sessionId: string) => void
+  // efetivo da PTY só dispara quando a janela expira. `immediate: true` pula a
+  // janela de undo e mata na hora (ex.: Reabrir uma sessão já exited — não há
+  // o que desfazer e o toast só confundiria).
+  endSession: (sessionId: string, opts?: { immediate?: boolean }) => void
   // Desfazer dentro da janela: cancela o kill agendado e restaura pane/chip.
   undoEndSession: (sessionId: string) => void
   // Clique simples na lista: foca a pane se já exibida; senão resume/abre (sem
@@ -492,7 +499,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().refreshLiveSessions()
   },
 
-  endSession: (sessionId) => {
+  endSession: (sessionId, opts) => {
+    if (opts?.immediate) {
+      // Sem janela de undo: mata direto. Cancela um pending anterior se houver,
+      // pra não disparar um segundo kill quando o timer expirar.
+      const pending = pendingEnds.get(sessionId)
+      if (pending) {
+        clearTimeout(pending.timer)
+        pendingEnds.delete(sessionId)
+      }
+      set((s) => ({
+        panes: s.panes.filter((p) => p.session.id !== sessionId),
+        liveSessions: s.liveSessions.filter((x) => x.id !== sessionId),
+      }))
+      schedulePersist(get().panes)
+      void sessionsApi.kill(sessionId)
+      void get().refreshLiveSessions()
+      return
+    }
     if (pendingEnds.has(sessionId)) return
     const pane = get().panes.find((p) => p.session.id === sessionId) ?? null
     const live = get().liveSessions.find((x) => x.id === sessionId) ?? null
@@ -503,11 +527,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       liveSessions: s.liveSessions.filter((x) => x.id !== sessionId),
     }))
     schedulePersist(get().panes)
+    // Kill só depois do toast sumir (graça): ver comentário em END_KILL_GRACE_MS.
     const timer = setTimeout(() => {
       pendingEnds.delete(sessionId)
       void sessionsApi.kill(sessionId)
       void get().refreshLiveSessions()
-    }, END_UNDO_MS)
+    }, END_UNDO_MS + END_KILL_GRACE_MS)
     pendingEnds.set(sessionId, { timer, pane, live })
     const name = live?.title ?? live?.name ?? pane?.session.title ?? live?.repo?.label
     showToast({
@@ -521,7 +546,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   undoEndSession: (sessionId) => {
     const pending = pendingEnds.get(sessionId)
-    if (!pending) return
+    if (!pending) {
+      // Janela expirou (kill já disparou/em voo). Não fingir sucesso em
+      // silêncio — o usuário clicou "Desfazer" e precisa saber que não deu.
+      showToast({ title: 'Tarde demais para desfazer', body: 'A sessão já foi encerrada.' })
+      return
+    }
     clearTimeout(pending.timer)
     pendingEnds.delete(sessionId)
     set((s) => ({

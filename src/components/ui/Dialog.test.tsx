@@ -44,4 +44,52 @@ describe('Dialog', () => {
     fireEvent.mouseDown(overlay)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('Escape chama onClose', () => {
+    const onClose = vi.fn()
+    render(
+      <Dialog open onClose={onClose}>
+        conteúdo
+      </Dialog>,
+    )
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('outras teclas não chamam onClose', () => {
+    const onClose = vi.fn()
+    render(
+      <Dialog open onClose={onClose}>
+        conteúdo
+      </Dialog>,
+    )
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('Escape já consumido (defaultPrevented) não chama onClose', () => {
+    const onClose = vi.fn()
+    render(
+      <Dialog open onClose={onClose}>
+        conteúdo
+      </Dialog>,
+    )
+    // simula handler interno que consome Escape para outra função
+    const consume = (e: KeyboardEvent) => e.preventDefault()
+    window.addEventListener('keydown', consume, true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    window.removeEventListener('keydown', consume, true)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('não escuta keydown quando fechado', () => {
+    const onClose = vi.fn()
+    render(
+      <Dialog open={false} onClose={onClose}>
+        conteúdo
+      </Dialog>,
+    )
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })

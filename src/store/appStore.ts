@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { sessionsApi, workspaceApi } from '@/lib/ipc'
+import { showToast } from '@/features/notifications/toast-store'
 import type {
   AdvisorModel,
   EffortLevel,
@@ -91,6 +92,20 @@ function writePaneMode(ccSessionId: string | null, mode: PaneMode): void {
 
 let savePanesTimer: ReturnType<typeof setTimeout> | null = null
 
+// Encerramentos pendentes (janela de undo): a UI some na hora, mas o kill do
+// processo só dispara quando o timer expira. "Desfazer" cancela o timer e
+// restaura pane/chip — nada foi morto ainda. Snapshot guardado pra restaurar.
+const END_UNDO_MS = 5000
+// Graça entre o toast sumir e o kill disparar. O timer do kill começa síncrono
+// no endSession, mas o auto-dismiss do toast só começa um render depois — sem
+// folga, o toast sobrevive ao kill por uma janela curta e "Desfazer" viraria
+// no-op com o PTY já morto. A graça garante: toast visível ⇒ undo ainda vale.
+const END_KILL_GRACE_MS = 750
+const pendingEnds = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout>; pane: ActivePane | null; live: LiveSessionInfo | null }
+>()
+
 // Guarda o auto-restore contra a dupla montagem do StrictMode (rodaria 2x).
 let restoreStarted = false
 // Reserva síncrona de ccSessionIds em resume — fecha a corrida entre o check de
@@ -179,6 +194,7 @@ function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane 
       repoId: item.repo?.id ?? null,
       ccSessionId: item.ccSessionId,
       title: item.title ?? item.name,
+      titleSource: item.titleSource ?? null,
       paneId,
       status: 'running',
       startedAt: item.lastActivityAt ?? Date.now(),
@@ -276,8 +292,13 @@ interface AppState {
   closePane: (paneId: string) => void
   // Alterna/define o display da pane (terminal ⇄ chat) e lembra por sessão.
   setPaneMode: (paneId: string, mode: PaneMode) => void
-  // Kill EXPLÍCITO: mata a PTY e remove a pane correspondente da view (se houver).
-  endSession: (sessionId: string) => void
+  // Encerramento com undo: some da UI na hora, toast "Desfazer" por ~5s; o kill
+  // efetivo da PTY só dispara quando a janela expira. `immediate: true` pula a
+  // janela de undo e mata na hora (ex.: Reabrir uma sessão já exited — não há
+  // o que desfazer e o toast só confundiria).
+  endSession: (sessionId: string, opts?: { immediate?: boolean }) => void
+  // Desfazer dentro da janela: cancela o kill agendado e restaura pane/chip.
+  undoEndSession: (sessionId: string) => void
   // Clique simples na lista: foca a pane se já exibida; senão resume/abre (sem
   // destruir as panes existentes) e vai pra área de projetos.
   focusOrOpenSession: (item: LiveSessionInfo) => Promise<void>
@@ -478,15 +499,71 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().refreshLiveSessions()
   },
 
-  endSession: (sessionId) => {
-    void sessionsApi.kill(sessionId)
-    // Remoção otimista da sessão viva também: o kill é assíncrono, então o
-    // refreshLiveSessions abaixo pegaria a PTY ainda na corrida e a reintroduziria
-    // como 'ended'. Tirar de liveSessions aqui faz o chip do strip sumir junto com
-    // a pane — Encerrar fecha sessão e aba de uma vez.
+  endSession: (sessionId, opts) => {
+    if (opts?.immediate) {
+      // Sem janela de undo: mata direto. Cancela um pending anterior se houver,
+      // pra não disparar um segundo kill quando o timer expirar.
+      const pending = pendingEnds.get(sessionId)
+      if (pending) {
+        clearTimeout(pending.timer)
+        pendingEnds.delete(sessionId)
+      }
+      set((s) => ({
+        panes: s.panes.filter((p) => p.session.id !== sessionId),
+        liveSessions: s.liveSessions.filter((x) => x.id !== sessionId),
+      }))
+      schedulePersist(get().panes)
+      void sessionsApi.kill(sessionId)
+      void get().refreshLiveSessions()
+      return
+    }
+    if (pendingEnds.has(sessionId)) return
+    const pane = get().panes.find((p) => p.session.id === sessionId) ?? null
+    const live = get().liveSessions.find((x) => x.id === sessionId) ?? null
+    // Remoção otimista: pane e chip somem já; a PTY segue viva durante a janela
+    // de undo (o refresh filtra pendingEnds pra ela não reaparecer na corrida).
     set((s) => ({
       panes: s.panes.filter((p) => p.session.id !== sessionId),
       liveSessions: s.liveSessions.filter((x) => x.id !== sessionId),
+    }))
+    schedulePersist(get().panes)
+    // Kill só depois do toast sumir (graça): ver comentário em END_KILL_GRACE_MS.
+    const timer = setTimeout(() => {
+      pendingEnds.delete(sessionId)
+      void sessionsApi.kill(sessionId)
+      void get().refreshLiveSessions()
+    }, END_UNDO_MS + END_KILL_GRACE_MS)
+    pendingEnds.set(sessionId, { timer, pane, live })
+    const name = live?.title ?? live?.name ?? pane?.session.title ?? live?.repo?.label
+    showToast({
+      title: 'Sessão encerrada',
+      body: name ?? undefined,
+      actionLabel: 'Desfazer',
+      onAction: () => get().undoEndSession(sessionId),
+      durationMs: END_UNDO_MS,
+    })
+  },
+
+  undoEndSession: (sessionId) => {
+    const pending = pendingEnds.get(sessionId)
+    if (!pending) {
+      // Janela expirou (kill já disparou/em voo). Não fingir sucesso em
+      // silêncio — o usuário clicou "Desfazer" e precisa saber que não deu.
+      showToast({ title: 'Tarde demais para desfazer', body: 'A sessão já foi encerrada.' })
+      return
+    }
+    clearTimeout(pending.timer)
+    pendingEnds.delete(sessionId)
+    set((s) => ({
+      // Não duplica se algo (ex: focusOrOpenSession) já recriou a pane no meio.
+      panes:
+        pending.pane && !s.panes.some((p) => p.session.id === sessionId)
+          ? [...s.panes, pending.pane]
+          : s.panes,
+      liveSessions:
+        pending.live && !s.liveSessions.some((x) => x.id === sessionId)
+          ? [...s.liveSessions, pending.live]
+          : s.liveSessions,
     }))
     schedulePersist(get().panes)
     void get().refreshLiveSessions()
@@ -567,7 +644,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   refreshLiveSessions: async () => {
     // Só refetcha se o watch está ativo (evita popular fora do ciclo de vida).
     if (!liveWatchStarted) return
-    const list = await sessionsApi.listLiveGlobal()
+    const list = (await sessionsApi.listLiveGlobal()).filter(
+      // Sessões na janela de undo já sumiram da UI, mas a PTY ainda vive no main
+      // — sem o filtro o snapshot as reintroduziria antes do kill agendado.
+      (sess) => !pendingEnds.has(sess.id),
+    )
     // Preserva o status/atividade mais fresco do stream pras entradas que já
     // existiam — o snapshot pode estar atrás de um broadcast recente.
     const prev = new Map(get().liveSessions.map((s) => [s.ccSessionId, s]))

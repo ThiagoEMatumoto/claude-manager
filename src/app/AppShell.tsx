@@ -81,7 +81,10 @@ function TerminalPanel(props: IDockviewPanelProps<PaneParams>) {
       onTitleChange={(t) => props.api.setTitle(t)}
       onReopen={() => {
         // closePane não mata mais; kill explícito evita vazar a PTY antiga.
-        endSession(pane.session.id)
+        // immediate: a sessão já está exited — passar pelo fluxo de undo
+        // mostraria um toast espúrio cujo "Desfazer" restauraria a pane morta
+        // ao lado da recém-reaberta.
+        endSession(pane.session.id, { immediate: true })
         void openSession(pane.repo, pane.projectName, pane.projectIcon, pane.projectColor)
       }}
       onOpenSettings={requestOpenSettings}

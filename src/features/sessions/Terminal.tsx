@@ -10,6 +10,7 @@ import { sessionsApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore, type PaneMode } from '@/store/appStore'
+import { showToast } from '@/features/notifications/toast-store'
 import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
@@ -119,6 +120,9 @@ export function Terminal({
   const jumpTimerRef = useRef<number | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
+  // Origem do título: 'manual' (rename do usuário) nunca é sobrescrito pelo
+  // name automático do CC. Local pra refletir o rename na hora, sem refetch.
+  const [titleSource, setTitleSource] = useState<Session['titleSource']>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   // Modo de permissão ativo (lido do rodapé do xterm via detectFooterMode).
@@ -141,7 +145,8 @@ export function Terminal({
 
   useEffect(() => {
     setTitle(session.title ?? null)
-  }, [session.title])
+    setTitleSource(session.titleSource ?? null)
+  }, [session.title, session.titleSource])
 
   // O ccSessionId é o próprio session.id (ver sessions:spawn no main).
   const ccSessionId = session.ccSessionId ?? null
@@ -168,14 +173,18 @@ export function Terminal({
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
 
-  // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
-  const displayTitle = activity?.name ?? title ?? repoLabel
-  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
-  // título aparece após o '·' no breadcrumb — evita repetir a pasta (Projeto · Repo).
+  // Precedência do nome em destaque: rename MANUAL do usuário > name automático
+  // do CC (live) > rename salvo no DB > label do repo. Uma vez manual, o name do
+  // CC nunca mais reescreve o displayTitle.
+  const manualTitle = titleSource === 'manual' ? title : null
+  const displayTitle = manualTitle ?? activity?.name ?? title ?? repoLabel
   // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
   // título é exibido no header — a aba do dockview já mostra o nome da sessão, então
   // sem nome custom o header mostra só o projeto + path (evita o nome repetido).
-  const isNamed = (activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel
+  // Rename manual conta como nomeada mesmo que coincida com o label do repo.
+  const isNamed =
+    manualTitle != null ||
+    ((activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel)
 
   // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
   // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
@@ -322,6 +331,21 @@ export function Terminal({
     !gotDataRef.current &&
     (exitAtRef.current ?? Date.now()) - session.startedAt < 3000
 
+  // Sessão encerrada não fica como pane morta: toast dismissível + auto-close
+  // (o histórico vive no filtro "Encerradas" do seletor de sessões). Exceção:
+  // claude não encontrado — mantém o banner com o CTA de Configurações.
+  const autoClosedRef = useRef(false)
+  useEffect(() => {
+    if (!exited || claudeNotFound || autoClosedRef.current) return
+    autoClosedRef.current = true
+    showToast({
+      title: 'Sessão encerrada',
+      body: `${displayTitle}${exitCode != null && exitCode !== 0 ? ` (código ${exitCode})` : ''} — retome pelo seletor de sessões, em Encerradas.`,
+    })
+    onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exited, claudeNotFound])
+
   function copySelection() {
     const sel = xtermRef.current?.getSelection()
     if (sel) void navigator.clipboard.writeText(sel)
@@ -350,6 +374,10 @@ export function Terminal({
   // \x15 (Ctrl+U) limpa a linha atual do prompt pra não concatenar com algo que
   // o usuário digitou.
   function commitRename(next: string) {
+    // Otimista: reflete o novo título e a origem manual na hora (o DB é a fonte
+    // de verdade via sessions:rename, que também marca title_source='manual').
+    setTitle(next)
+    setTitleSource('manual')
     void sessionsApi.rename(session.id, next)
     if (canRename) write('\x15/rename ' + next + '\r')
   }
@@ -597,7 +625,7 @@ export function Terminal({
         repoLabel={repoLabel}
         repoPath={repoPath}
         displayTitle={displayTitle}
-        nameValue={activity?.name ?? title ?? ''}
+        nameValue={manualTitle ?? activity?.name ?? title ?? ''}
         isNamed={isNamed}
         canRename={canRename}
         onCommitRename={commitRename}
@@ -613,23 +641,19 @@ export function Terminal({
         onEndSession={() => endSession(session.id)}
       />
 
-      {exited && (
+      {/* Banner só pro caso "claude não encontrado" (precisa do CTA de config);
+          exit normal fecha a pane sozinho com toast (effect acima). */}
+      {exited && claudeNotFound && (
         <div
           className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-xs"
           style={{ color: 'var(--color-text-dim)' }}
         >
-          {claudeNotFound ? (
-            <span className="text-[var(--color-text)]">
-              <span className="text-[var(--color-danger)]">claude não encontrado</span> — verifique a instalação
-              ou configure o comando em Configurações.
-            </span>
-          ) : (
-            <span>
-              A sessão foi encerrada{exitCode != null ? ` (código ${exitCode})` : ''}.
-            </span>
-          )}
+          <span className="text-[var(--color-text)]">
+            <span className="text-[var(--color-danger)]">claude não encontrado</span> — verifique a instalação
+            ou configure o comando em Configurações.
+          </span>
           <div className="flex shrink-0 items-center gap-2">
-            {claudeNotFound && onOpenSettings && (
+            {onOpenSettings && (
               <button
                 type="button"
                 onClick={onOpenSettings}

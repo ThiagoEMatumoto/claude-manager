@@ -435,6 +435,9 @@ export interface Session {
   repoId: string | null
   ccSessionId: string | null
   title: string | null
+  // Origem do title: 'manual' (rename do usuário) tem precedência sobre o nome
+  // automático do Claude Code na exibição; null/'auto' segue a precedência antiga.
+  titleSource: 'manual' | 'auto' | null
   paneId: string | null
   status: 'running' | 'exited' | 'crashed' | 'closed_by_user'
   startedAt: number
@@ -1406,6 +1409,9 @@ export interface LiveSessionInfo {
   lastText: string | null
   tokens?: { output: number; context: number }
   isResumable?: boolean
+  // Espelho de sessions.title_source: 'manual' faz `title` carregar o rename do
+  // usuário (precedência sobre o nome automático) em chips/panes re-attachados.
+  titleSource?: 'manual' | 'auto' | null
 }
 
 // Batch de atualização de atividade de TODAS as sessões indexadas, emitido pelo
@@ -1802,6 +1808,8 @@ export interface Api {
     unwatchActivity(ccSessionId: string): Promise<void>
     onActivity(handler: (event: SessionActivity) => void): () => void
     listLiveGlobal(): Promise<LiveSessionInfo[]>
+    /** Sessões encerradas com transcript no disco (todas retomáveis), globais. */
+    listEndedGlobal(): Promise<LiveSessionInfo[]>
     watchGlobalActivity(): void
     unwatchGlobalActivity(): void
     onGlobalActivity(handler: (batch: GlobalActivityBatch) => void): () => void

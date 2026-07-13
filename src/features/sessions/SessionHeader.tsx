@@ -4,7 +4,7 @@ import {
   Circle,
   Clock,
   Loader,
-  Minimize2,
+  Minus,
   Moon,
   MoreHorizontal,
   MessageSquare,
@@ -247,8 +247,25 @@ export function SessionHeader({
               )
             ))}
         </div>
-        {tier !== 'narrow' && (
-          <span className="truncate text-[10px] text-[var(--color-text-dim)]">{repoPath}</span>
+        {tier !== 'narrow' && repoPath && (
+          // Basename em destaque, resto do path dim; clique copia o path completo.
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(repoPath)}
+            title={`${repoPath} — clique para copiar`}
+            className="max-w-full truncate text-left text-[10px] text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
+          >
+            {repoPath.includes('/') ? (
+              <>
+                {repoPath.slice(0, repoPath.lastIndexOf('/') + 1)}
+                <span className="text-[var(--color-text)]">
+                  {repoPath.slice(repoPath.lastIndexOf('/') + 1)}
+                </span>
+              </>
+            ) : (
+              repoPath
+            )}
+          </button>
         )}
       </div>
       <div className="flex items-center gap-3 text-[var(--color-text-dim)]">
@@ -397,16 +414,16 @@ export function SessionHeader({
           </Menu>
         ) : (
           <>
+            {/* Ícones consistentes com as tabs (lucide): Minus = minimizar, Power =
+                encerrar (hover danger). Tooltip/aria-label preservam o texto antigo. */}
             <button
               type="button"
               onClick={onMinimize}
               title="Minimizar — mantém a sessão rodando em background, acessível no strip de sessões"
               aria-label="Minimizar"
-              className={`rounded border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] ${
-                tier === 'wide' ? 'px-2 py-0.5' : 'p-1'
-              }`}
+              className="rounded border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-accent)]"
             >
-              {tier === 'wide' ? 'Minimizar' : <Icon as={Minimize2} size={13} />}
+              <Icon as={Minus} size={13} />
             </button>
             <button
               type="button"
@@ -414,11 +431,9 @@ export function SessionHeader({
               disabled={exited}
               title="Encerrar o processo claude e fechar a sessão (some do strip)"
               aria-label="Encerrar"
-              className={`rounded border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] disabled:opacity-40 ${
-                tier === 'wide' ? 'px-2 py-0.5' : 'p-1'
-              }`}
+              className="rounded border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-danger)] disabled:opacity-40"
             >
-              {tier === 'wide' ? 'Encerrar' : <Icon as={Power} size={13} />}
+              <Icon as={Power} size={13} />
             </button>
           </>
         )}

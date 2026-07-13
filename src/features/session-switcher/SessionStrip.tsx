@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import { Circle, Loader, Maximize2, Zap, type LucideProps } from 'lucide-react'
+import { Circle, Loader, Maximize2, Power, Zap, type LucideProps } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
@@ -162,9 +162,10 @@ function Chip({ item, isOpen, isFocused, onOpen, onEnd }: ChipProps) {
           onEnd()
         }}
         title="Encerrar o processo desta sessão"
-        className="shrink-0 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-danger)] group-hover:opacity-100"
+        aria-label="Encerrar o processo desta sessão"
+        className="shrink-0 leading-none text-[var(--color-text-dim)] opacity-0 transition hover:text-[var(--color-danger)] focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-danger)] group-hover:opacity-100"
       >
-        ×
+        <Icon as={Power} size={12} />
       </button>
     </div>
   )

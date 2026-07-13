@@ -1,6 +1,7 @@
 import {
   Bot,
   FileText,
+  Keyboard,
   Plug,
   Puzzle,
   RefreshCw,
@@ -26,6 +27,7 @@ export type CcTab =
   | 'mcp'
   | 'claude-md'
   | 'rules'
+  | 'keybindings'
 
 // Abas que renderizam componentes agregados de ccConfigs.read().
 export type ComponentTab = 'agents' | 'skills' | 'mcps' | 'hooks'
@@ -52,6 +54,7 @@ const CLI_TABS: TabDef[] = [
   { id: 'mcp', label: 'MCP Servers', icon: Server },
   { id: 'claude-md', label: 'CLAUDE.md', icon: FileText },
   { id: 'rules', label: 'Rules', icon: ScrollText },
+  { id: 'keybindings', label: 'Keybindings', icon: Keyboard },
 ]
 
 interface Props {

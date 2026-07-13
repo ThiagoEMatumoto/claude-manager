@@ -1608,6 +1608,18 @@ export interface ClaudeCliSettings {
   envKeys: string[]
 }
 
+// Escopo do editor de settings: user (~/.claude/settings.json) ou projeto
+// (.claude/settings.json de um repo cadastrado). O renderer manda só o repoId —
+// o main resolve o path pelo DB.
+export interface ClaudeSettingsScopeInput {
+  scope: 'user' | 'project'
+  repoId?: string
+}
+
+export interface ClaudeSettingsWriteInput extends ClaudeSettingsScopeInput {
+  patch: ClaudeCliSettingsPatch
+}
+
 // Patch parcial: chave ausente = não mexe; null = remove a chave do arquivo.
 export interface ClaudeCliSettingsPatch {
   model?: string | null
@@ -1632,6 +1644,29 @@ export interface ClaudeMdFile {
 export interface RuleFileEntry {
   name: string
   relPath: string
+}
+
+// Script apontado por statusLine.command do settings.json (user). Editável só
+// quando o path resolve pra dentro do HOME; senão ok=false com o motivo.
+export interface StatuslineScriptFile {
+  ok: boolean
+  path?: string
+  content?: string
+  message?: string
+}
+
+// Entry individual de hooks[event] do ~/.claude/settings.json, com toggle.
+// Para disabled=true, index é a posição no stash cc.disabledHooks (app_prefs),
+// não no settings.json — é o handle usado pra religar. `entry` é o JSON cru da
+// entry: no disable ele volta ao main pra casar por conteúdo (o índice fica
+// stale se o arquivo mudou fora do app).
+export interface HookToggleEntry {
+  event: string
+  index: number
+  matcher: string | null
+  summary: string
+  disabled: boolean
+  entry: unknown
 }
 
 // ---- MCP servers do CLI claude (user + projeto) ----
@@ -1967,12 +2002,19 @@ export interface Api {
     action(action: PluginAction, name: string): Promise<PluginActionResult>
   }
   ccSettings: {
-    read(): Promise<ClaudeCliSettings>
-    write(patch: ClaudeCliSettingsPatch): Promise<ClaudeWriteResult>
+    read(scope?: ClaudeSettingsScopeInput): Promise<ClaudeCliSettings>
+    write(input: ClaudeSettingsWriteInput): Promise<ClaudeWriteResult>
     readClaudeMd(): Promise<ClaudeMdFile>
     writeClaudeMd(content: string): Promise<ClaudeWriteResult>
     listRules(): Promise<RuleFileEntry[]>
     readRule(relPath: string): Promise<ClaudeMdFile>
+    listHooks(): Promise<HookToggleEntry[]>
+    disableHook(event: string, index: number, entry: unknown): Promise<ClaudeWriteResult>
+    enableHook(event: string, disabledIndex: number): Promise<ClaudeWriteResult>
+    readKeybindings(): Promise<ClaudeMdFile>
+    writeKeybindings(content: string): Promise<ClaudeWriteResult>
+    readStatuslineScript(): Promise<StatuslineScriptFile>
+    writeStatuslineScript(content: string): Promise<ClaudeWriteResult>
   }
   updates: {
     onStatus(handler: (status: UpdateStatus) => void): () => void

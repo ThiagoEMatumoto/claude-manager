@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile, access } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, it, expect } from 'vitest'
 import {
   applySettingsPatch,
+  readClaudeSettingsAt,
   toCliSettingsView,
   validateSettingsPatch,
+  writeClaudeSettingsAt,
 } from './claude-settings'
 
 describe('validateSettingsPatch', () => {
@@ -129,5 +134,57 @@ describe('applySettingsPatch', () => {
   it('cria statusLine quando ausente', () => {
     const next = applySettingsPatch({}, { statusLineCommand: 'x.sh' })
     expect(next.statusLine).toEqual({ type: 'command', command: 'x.sh' })
+  })
+})
+
+describe('escopo projeto (read/writeClaudeSettingsAt)', () => {
+  let dir = ''
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true })
+    dir = ''
+  })
+
+  it('arquivo inexistente: cria .claude/settings.json ao salvar (sem .bak)', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'cm-settings-'))
+    const file = join(dir, '.claude', 'settings.json')
+
+    const before = await readClaudeSettingsAt(file)
+    expect(before.exists).toBe(false)
+
+    await writeClaudeSettingsAt(file, { model: 'opus', effortLevel: 'high' })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      model: 'opus',
+      effortLevel: 'high',
+    })
+    const after = await readClaudeSettingsAt(file)
+    expect(after.exists).toBe(true)
+    expect(after.model).toBe('opus')
+    // Sem original pra preservar → sem .bak.
+    await expect(access(`${file}.bak`)).rejects.toThrow()
+  })
+
+  it('arquivo existente: preserva chaves desconhecidas e cria .bak', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'cm-settings-'))
+    const file = join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ hooks: { Stop: [1] }, model: 'opus' }), 'utf8')
+
+    await writeClaudeSettingsAt(file, { model: 'sonnet' })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      hooks: { Stop: [1] },
+      model: 'sonnet',
+    })
+    // .bak guarda o snapshot pré-app.
+    expect(JSON.parse(await readFile(`${file}.bak`, 'utf8'))).toEqual({
+      hooks: { Stop: [1] },
+      model: 'opus',
+    })
+  })
+
+  it('patch inválido não escreve nada', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'cm-settings-'))
+    const file = join(dir, 'settings.json')
+    await expect(writeClaudeSettingsAt(file, { effortLevel: 'turbo' })).rejects.toThrow()
+    await expect(access(file)).rejects.toThrow()
   })
 })

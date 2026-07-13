@@ -18,6 +18,7 @@ import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
+import { registerClaudeSettingsIpc } from './ipc/claude-settings'
 import { registerMetricsIpc } from './ipc/metrics'
 import { registerFeaturesIpc } from './ipc/features'
 import { registerRepoDependenciesIpc } from './ipc/repo-dependencies'
@@ -182,6 +183,7 @@ app.whenReady().then(async () => {
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()
+  registerClaudeSettingsIpc()
   registerMetricsIpc()
   registerFeaturesIpc()
   registerObjectivesIpc()

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { prefsApi } from '@/lib/ipc'
 import type { AdvisorModel, EffortLevel, PermissionMode } from '../../shared/types/ipc'
+import { SPAWNABLE_MODEL_ALIASES, type ModelAlias } from '../../shared/models'
 
 const DEFAULT_MODEL_KEY = 'session.defaultModel'
 const DEFAULT_EFFORT_KEY = 'session.defaultEffort'
@@ -14,7 +15,8 @@ const KEYBOARD_MODE_KEY = 'session.keyboardMode'
 export type KeyboardSendMode = 'enter-sends' | 'enter-newline'
 export const DEFAULT_KEYBOARD_MODE: KeyboardSendMode = 'enter-sends'
 
-const MODEL_WHITELIST = new Set(['opus', 'sonnet', 'haiku', 'opusplan'])
+// Deriva do registro canônico (shared/models.ts) — mesma fonte da whitelist do main.
+const MODEL_WHITELIST = new Set<string>(SPAWNABLE_MODEL_ALIASES)
 const EFFORT_WHITELIST = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const PERMISSION_WHITELIST = new Set<PermissionMode>([
   'default',
@@ -27,7 +29,7 @@ const PERMISSION_WHITELIST = new Set<PermissionMode>([
 const ADVISOR_WHITELIST = new Set(['opus', 'sonnet', 'fable'])
 
 // '' = sem default (spawn usa o default do claude, sem flag).
-type ModelDefault = '' | 'opus' | 'sonnet' | 'haiku' | 'opusplan'
+type ModelDefault = '' | ModelAlias
 type EffortDefault = '' | EffortLevel
 // '' = advisor desligado por default (sem --advisor no spawn).
 type AdvisorDefault = '' | AdvisorModel

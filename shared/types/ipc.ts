@@ -510,11 +510,12 @@ export interface SpawnSessionInput {
   // roda o 1º turno — caminho confiável pro handoff em background (a colagem no PTY
   // é descartada quando ninguém dá resize no TUI). Distinto de initialCommand.
   initialPrompt?: string
-  // Modelo inicial da sessão (alias: 'opus' | 'sonnet' | 'haiku' | 'opusplan').
-  // 'opusplan' é roteamento híbrido nativo da CLI: Opus no plan mode, troca pra
-  // Sonnet ao sair pra execução (sem variante própria de contexto 1M — segue a
-  // elegibilidade de conta, igual ao 'opus' hoje). Validado contra whitelist no
-  // main e anexado ao spawn como `--model <alias>`. Ausente = default do claude.
+  // Modelo inicial da sessão (alias do registro canônico em shared/models.ts:
+  // 'fable' | 'opus' | 'sonnet' | 'haiku' | 'opusplan'). 'opusplan' é roteamento
+  // híbrido nativo da CLI: Opus no plan mode, troca pra Sonnet ao sair pra
+  // execução — não é model id de API e nunca aparece em transcripts. Validado
+  // contra whitelist no main e anexado ao spawn como `--model <alias>`.
+  // Ausente = default do claude.
   model?: string
   // Nível de esforço inicial passado como `--effort <level>`. Validado contra
   // whitelist no main. Ausente = default do claude.

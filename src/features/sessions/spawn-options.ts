@@ -2,15 +2,14 @@
 // compartilhada por SpawnSessionDialog (segmented controls no "Nova sessão") e
 // SettingsDialog (defaults persistidos) — mesmo padrão que permission-modes.ts
 // já usa pro modo de permissão. '' = Padrão/Desligado (sem a flag no spawn).
+import { MODEL_REGISTRY } from '../../../shared/models'
 
-// 'opusplan' é o alias híbrido nativo da CLI: label "Opus Plan" é a MESMA string
-// que o próprio CLI usa internamente (bom pra consistência de vocabulário).
+// Modelos derivam do registro canônico (shared/models.ts) — 'opusplan' é o alias
+// híbrido nativo da CLI: label "Opus Plan" é a MESMA string que o próprio CLI
+// usa internamente (bom pra consistência de vocabulário).
 export const MODEL_OPTIONS = [
-  { value: '', label: 'Padrão' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' },
-  { value: 'opusplan', label: 'Opus Plan' },
+  { value: '' as const, label: 'Padrão' },
+  ...MODEL_REGISTRY.filter((m) => m.spawnable).map((m) => ({ value: m.alias, label: m.label })),
 ] as const
 
 export const EFFORT_OPTIONS = [

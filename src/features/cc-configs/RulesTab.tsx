@@ -21,11 +21,21 @@ export function RulesTab() {
 
   useEffect(() => {
     if (!selected) return
+    // Guarda contra resposta stale: trocando rápido de rule, a promise antiga
+    // pode resolver depois da nova e sobrescrever o conteúdo da seleção atual.
+    let cancelled = false
     setLoadingContent(true)
     void ccSettingsApi
       .readRule(selected)
-      .then((file) => setContent(file.exists ? file.content : 'Arquivo não encontrado.'))
-      .finally(() => setLoadingContent(false))
+      .then((file) => {
+        if (!cancelled) setContent(file.exists ? file.content : 'Arquivo não encontrado.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContent(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selected])
 
   if (rules === null) return <CenterMessage text="Carregando…" />

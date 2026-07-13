@@ -8,6 +8,7 @@ import type { LinkKind, Repo } from '../../../shared/types/ipc'
 export interface LiveSessionJoinRow {
   cc_session_id: string
   session_title: string | null
+  session_title_source: 'manual' | 'auto' | null
   repo_id: string | null
   repo_project_id: string | null
   repo_label: string | null

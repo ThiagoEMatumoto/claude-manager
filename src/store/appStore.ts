@@ -179,6 +179,7 @@ function paneFromLiveSession(item: LiveSessionInfo, paneId: string): ActivePane 
       repoId: item.repo?.id ?? null,
       ccSessionId: item.ccSessionId,
       title: item.title ?? item.name,
+      titleSource: item.titleSource ?? null,
       paneId,
       status: 'running',
       startedAt: item.lastActivityAt ?? Date.now(),

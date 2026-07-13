@@ -54,6 +54,7 @@ interface SessionRow {
   repo_id: string | null
   cc_session_id: string | null
   title: string | null
+  title_source: 'manual' | 'auto' | null
   pane_id: string | null
   status: 'running' | 'exited' | 'crashed' | 'closed_by_user'
   started_at: number
@@ -85,6 +86,7 @@ const toSession = (row: SessionRow): Session => ({
   repoId: row.repo_id,
   ccSessionId: row.cc_session_id,
   title: row.title,
+  titleSource: row.title_source,
   paneId: row.pane_id,
   status: row.status,
   startedAt: row.started_at,
@@ -330,6 +332,7 @@ function startSession(opts: {
     repo_id: opts.repoId,
     cc_session_id: opts.ccSessionId,
     title: null,
+    title_source: null,
     pane_id: null,
     status: 'running',
     started_at: Date.now(),
@@ -727,6 +730,7 @@ export function registerSessionIpc(): void {
           `SELECT
              s.cc_session_id AS cc_session_id,
              s.title AS session_title,
+             s.title_source AS session_title_source,
              r.id AS repo_id, r.project_id AS repo_project_id, r.label AS repo_label,
              r.path AS repo_path, r.role AS repo_role, r.link_kind AS repo_link_kind,
              r.source AS repo_source, r.position AS repo_position, r.created_at AS repo_created_at,
@@ -773,6 +777,12 @@ export function registerSessionIpc(): void {
         }
       }
 
+      // Rename manual do usuário vence o título derivado do transcript — chips
+      // e panes re-attachados exibem o nome escolhido, não o automático do CC.
+      if (row.session_title_source === 'manual' && row.session_title) {
+        title = row.session_title
+      }
+
       out.push({
         id: sessionId,
         ccSessionId,
@@ -787,6 +797,7 @@ export function registerSessionIpc(): void {
         lastText,
         tokens,
         isResumable: transcript !== null,
+        titleSource: row.session_title_source,
       })
     }
 
@@ -823,9 +834,11 @@ export function registerSessionIpc(): void {
 
   ipcMain.handle('sessions:rename', (_e, sessionId: string, title: string) => {
     const trimmed = title.trim()
+    // Rename via UI é sempre manual: marca a origem pra exibição nunca mais ser
+    // sobrescrita pelo nome automático do Claude Code. Limpar o título volta a auto.
     getDb()
-      .prepare('UPDATE sessions SET title = ? WHERE id = ?')
-      .run(trimmed.length > 0 ? trimmed : null, sessionId)
+      .prepare('UPDATE sessions SET title = ?, title_source = ? WHERE id = ?')
+      .run(trimmed.length > 0 ? trimmed : null, trimmed.length > 0 ? 'manual' : null, sessionId)
   })
 
   ipcMain.handle('sessions:list', () => {

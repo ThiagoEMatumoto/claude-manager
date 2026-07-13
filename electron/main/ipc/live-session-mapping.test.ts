@@ -5,6 +5,7 @@ function baseRow(overrides: Partial<LiveSessionJoinRow> = {}): LiveSessionJoinRo
   return {
     cc_session_id: 'cc-1',
     session_title: null,
+    session_title_source: null,
     repo_id: null,
     repo_project_id: null,
     repo_label: null,

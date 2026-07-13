@@ -28,6 +28,7 @@ import * as handoffInstrumentation from './026_handoff_instrumentation'
 import * as repoRemote from './027_repo_remote'
 import * as scheduledJobs from './028_scheduled_jobs'
 import * as webAudit from './029_web_audit'
+import * as sessionsTitleSource from './030_sessions_title_source'
 
 interface Migration {
   version: number
@@ -71,6 +72,7 @@ export const migrations: Migration[] = [
   repoRemote,
   scheduledJobs,
   webAudit,
+  sessionsTitleSource,
 ]
 
 export function runMigrations(db: Database.Database): void {

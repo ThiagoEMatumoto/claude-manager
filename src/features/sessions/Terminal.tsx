@@ -119,6 +119,9 @@ export function Terminal({
   const jumpTimerRef = useRef<number | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
+  // Origem do título: 'manual' (rename do usuário) nunca é sobrescrito pelo
+  // name automático do CC. Local pra refletir o rename na hora, sem refetch.
+  const [titleSource, setTitleSource] = useState<Session['titleSource']>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null)
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   // Modo de permissão ativo (lido do rodapé do xterm via detectFooterMode).
@@ -141,7 +144,8 @@ export function Terminal({
 
   useEffect(() => {
     setTitle(session.title ?? null)
-  }, [session.title])
+    setTitleSource(session.titleSource ?? null)
+  }, [session.title, session.titleSource])
 
   // O ccSessionId é o próprio session.id (ver sessions:spawn no main).
   const ccSessionId = session.ccSessionId ?? null
@@ -168,14 +172,18 @@ export function Terminal({
     return () => clearInterval(id)
   }, [activity?.lastActivityAt, exited])
 
-  // Precedência do nome em destaque: name do CC (live) > rename salvo no DB > label do repo.
-  const displayTitle = activity?.name ?? title ?? repoLabel
-  // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
-  // título aparece após o '·' no breadcrumb — evita repetir a pasta (Projeto · Repo).
+  // Precedência do nome em destaque: rename MANUAL do usuário > name automático
+  // do CC (live) > rename salvo no DB > label do repo. Uma vez manual, o name do
+  // CC nunca mais reescreve o displayTitle.
+  const manualTitle = titleSource === 'manual' ? title : null
+  const displayTitle = manualTitle ?? activity?.name ?? title ?? repoLabel
   // A sessão tem nome próprio (não é só o fallback pro label da pasta)? Só então o
   // título é exibido no header — a aba do dockview já mostra o nome da sessão, então
   // sem nome custom o header mostra só o projeto + path (evita o nome repetido).
-  const isNamed = (activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel
+  // Rename manual conta como nomeada mesmo que coincida com o label do repo.
+  const isNamed =
+    manualTitle != null ||
+    ((activity?.name ?? title) != null && (activity?.name ?? title) !== repoLabel)
 
   // Reflete o nome legível na aba do dockview. Ref pra callback evita re-disparar
   // quando o wrapper recria onTitleChange a cada render (dep só no displayTitle).
@@ -350,6 +358,10 @@ export function Terminal({
   // \x15 (Ctrl+U) limpa a linha atual do prompt pra não concatenar com algo que
   // o usuário digitou.
   function commitRename(next: string) {
+    // Otimista: reflete o novo título e a origem manual na hora (o DB é a fonte
+    // de verdade via sessions:rename, que também marca title_source='manual').
+    setTitle(next)
+    setTitleSource('manual')
     void sessionsApi.rename(session.id, next)
     if (canRename) write('\x15/rename ' + next + '\r')
   }
@@ -597,7 +609,7 @@ export function Terminal({
         repoLabel={repoLabel}
         repoPath={repoPath}
         displayTitle={displayTitle}
-        nameValue={activity?.name ?? title ?? ''}
+        nameValue={manualTitle ?? activity?.name ?? title ?? ''}
         isNamed={isNamed}
         canRename={canRename}
         onCommitRename={commitRename}

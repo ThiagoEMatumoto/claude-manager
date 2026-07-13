@@ -4,8 +4,18 @@ import { useAppStore } from '@/store/appStore'
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { projectsApi } from '@/lib/ipc'
+import { matchesQuery } from '@/lib/text-match'
+import { sessionSearchText, sortByUrgency } from '../session-switcher/session-search'
+import { statusView } from '../session-switcher/status-view'
+import { useEndedSessions, useVisibleLiveSessions } from '../session-switcher/useGlobalSessions'
 import { launcherCommandText, loadLauncherItems } from './launcher'
-import type { LauncherItem, Project, Repo } from '../../../shared/types/ipc'
+import {
+  capByGroup,
+  ENDED_SESSIONS_GROUP,
+  LIVE_SESSIONS_GROUP,
+  SESSION_GROUP_CAPS,
+} from './session-results'
+import type { LauncherItem, LiveSessionInfo, Project, Repo } from '../../../shared/types/ipc'
 
 interface Props {
   open: boolean
@@ -17,24 +27,44 @@ interface Command {
   id: string
   label: string
   icon: ReactNode
-  hint?: string
+  hint?: ReactNode
   group: string
   run: () => void
   // Quando true, executar NÃO fecha a palette (ex.: avançar de passo no launcher).
   keepOpen?: boolean
+  // Texto alternativo de busca (sessões casam por título/name/projeto/repo).
+  searchText?: string
 }
 
-// Substring match case/acento-insensível, simples e previsível.
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+// Ícone/cor do projeto na linha da sessão, coeso com o slot de ícone do palette.
+function sessionIcon(s: LiveSessionInfo): ReactNode {
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ background: s.projectColor ?? 'var(--color-border)' }}
+      />
+      {renderProjectIcon(s.projectIcon)}
+    </span>
+  )
 }
 
-function matches(query: string, label: string): boolean {
-  if (!query) return true
-  return normalize(label).includes(normalize(query))
+// Status colorido + projeto no slot de hint (direita da linha).
+function sessionHint(s: LiveSessionInfo): ReactNode {
+  const view = statusView(s.status)
+  return (
+    <span className="flex items-center gap-2">
+      {s.projectName && <span className="max-w-28 truncate">{s.projectName}</span>}
+      <span className={`flex items-center gap-1 ${view.className}`}>
+        <Icon as={view.icon} size={11} className={view.spin ? 'animate-spin' : undefined} />
+        {view.label}
+      </span>
+    </span>
+  )
+}
+
+function sessionLabel(s: LiveSessionInfo): string {
+  return s.title ?? s.name ?? s.repo?.label ?? 'Avulsa'
 }
 
 export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
@@ -42,6 +72,12 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
   const setActiveProject = useAppStore((s) => s.setActiveProject)
   const openSession = useAppStore((s) => s.openSession)
   const closePane = useAppStore((s) => s.closePane)
+  const focusOrOpenSession = useAppStore((s) => s.focusOrOpenSession)
+  const resumeSession = useAppStore((s) => s.resumeSession)
+
+  // Mesma fonte de dados do SessionSwitcher (hooks compartilhados).
+  const liveSessions = useVisibleLiveSessions()
+  const endedSessions = useEndedSessions(open)
 
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -164,6 +200,36 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
       },
     ]
 
+    // Sessões vivas — mesmo fluxo do SessionSwitcher: foca a pane se já exibida,
+    // senão abre. Ordenadas por urgência pro corte do cap manter as acionáveis.
+    for (const s of sortByUrgency(liveSessions)) {
+      list.push({
+        id: `live-session-${s.ccSessionId}`,
+        label: sessionLabel(s),
+        searchText: sessionSearchText(s),
+        icon: sessionIcon(s),
+        hint: sessionHint(s),
+        group: LIVE_SESSIONS_GROUP,
+        run: () => void focusOrOpenSession(s),
+      })
+    }
+
+    // Encerradas retomáveis (todas as entradas de listEndedGlobal são
+    // retomáveis por construção) — Enter dispara o fluxo de resume existente.
+    for (const s of endedSessions ?? []) {
+      list.push({
+        id: `ended-session-${s.ccSessionId}`,
+        label: sessionLabel(s),
+        searchText: sessionSearchText(s),
+        icon: sessionIcon(s),
+        // listEndedGlobal já entrega status 'ended' — o hint mostra "encerrada".
+        hint: sessionHint(s),
+        group: ENDED_SESSIONS_GROUP,
+        run: () =>
+          void resumeSession(s.repo, s.projectName, s.projectIcon, s.projectColor, s.ccSessionId),
+      })
+    }
+
     for (const p of projects) {
       list.push({
         id: `goto-${p.id}`,
@@ -184,7 +250,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
           label: `Nova sessão em: ${r.label}`,
           icon: <Icon as={TerminalSquare} />,
           hint: p.name,
-          group: 'Sessões',
+          group: 'Nova sessão',
           run: () => void openSession(r, p.name, p.icon, p.color),
         })
       }
@@ -209,15 +275,23 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
     chosenItem,
     projects,
     reposByProject,
+    liveSessions,
+    endedSessions,
     setArea,
     setActiveProject,
     openSession,
     closePane,
+    focusOrOpenSession,
+    resumeSession,
     onOpenSettings,
   ])
 
   const filtered = useMemo(
-    () => commands.filter((c) => matches(query, c.label)),
+    () =>
+      capByGroup(
+        commands.filter((c) => matchesQuery(query, c.searchText ?? c.label)),
+        SESSION_GROUP_CAPS,
+      ),
     [commands, query],
   )
 

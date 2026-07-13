@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Clock, Loader, Moon, MonitorCheck, Square, Zap } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
@@ -103,12 +103,17 @@ export function SessionSwitcher({ open, onClose }: Props) {
   const [endedSessions, setEndedSessions] = useState<LiveSessionInfo[] | null>(null)
   // Tick pra reavaliar os tempos relativos sem novos broadcasts.
   const [, setNow] = useState(() => Date.now())
+  // Índice ativo da navegação por teclado (↑↓ + Enter), sobre a lista achatada
+  // na ordem visual (mesmo padrão do CommandPalette).
+  const [activeIdx, setActiveIdx] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     setQuery('')
     setSelected(new Set())
     setTab('active')
+    setActiveIdx(0)
   }, [open])
 
   useEffect(() => {
@@ -169,6 +174,31 @@ export function SessionSwitcher({ open, onClose }: Props) {
     [endedSessions, query],
   )
 
+  // Lista achatada na ordem visual da aba corrente — alvo da navegação ↑↓.
+  const flatItems = useMemo(
+    () => (tab === 'ended' ? filteredEnded : grouped.flatMap((g) => g.items)),
+    [tab, filteredEnded, grouped],
+  )
+  const idxByCc = useMemo(
+    () => new Map(flatItems.map((it, i) => [it.ccSessionId, i])),
+    [flatItems],
+  )
+
+  useEffect(() => {
+    setActiveIdx(0)
+  }, [query, tab])
+
+  // Lista encolheu (broadcast ao vivo): mantém o índice dentro dos limites.
+  useEffect(() => {
+    setActiveIdx((i) => Math.min(i, Math.max(0, flatItems.length - 1)))
+  }, [flatItems.length])
+
+  // Mantém o item ativo visível ao navegar por teclado.
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${activeIdx}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeIdx])
+
   function openOne(item: LiveSessionInfo) {
     void focusOrOpenSession(item)
     onClose()
@@ -188,12 +218,19 @@ export function SessionSwitcher({ open, onClose }: Props) {
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
+      setActiveIdx((i) => Math.min(i + 1, flatItems.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIdx((i) => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const item = flatItems[activeIdx] ?? flatItems[0]
       if (tab === 'ended') {
-        if (filteredEnded[0]) openEnded(filteredEnded[0])
+        if (item) openEnded(item)
       } else if (selectedItems.length > 0) openGrid()
-      else if (filtered[0]) openOne(filtered[0])
+      else if (item) openOne(item)
     } else if (e.key === 'Escape') {
       e.preventDefault()
       onClose()
@@ -243,7 +280,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
           ))}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
           {tab === 'ended' ? (
             <>
               {endedSessions === null && (
@@ -267,6 +304,8 @@ export function SessionSwitcher({ open, onClose }: Props) {
                     selected={false}
                     selectable={false}
                     onScreen={false}
+                    dataIdx={idxByCc.get(item.ccSessionId) ?? -1}
+                    keyboardActive={idxByCc.get(item.ccSessionId) === activeIdx}
                     onToggle={() => {}}
                     onOpen={() => openEnded(item)}
                   />
@@ -303,6 +342,8 @@ export function SessionSwitcher({ open, onClose }: Props) {
                     accent={def.accent}
                     selected={selected.has(item.ccSessionId)}
                     onScreen={onScreen.has(item.ccSessionId)}
+                    dataIdx={idxByCc.get(item.ccSessionId) ?? -1}
+                    keyboardActive={idxByCc.get(item.ccSessionId) === activeIdx}
                     onToggle={() => toggleSelected(item.ccSessionId)}
                     onOpen={() => openOne(item)}
                   />
@@ -338,6 +379,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
           </div>
         ) : (
           <div className="flex items-center gap-3 border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-dim)]">
+            <span>↑↓ navegar</span>
             <span>↵ abrir</span>
             <span>☐ multi-seleção pra grade</span>
             <span>esc fechar</span>
@@ -355,6 +397,9 @@ interface RowProps {
   // Encerradas não entram na multi-seleção de grade (o re-attach exige PTY viva).
   selectable?: boolean
   onScreen: boolean
+  // Posição na lista achatada (âncora do scrollIntoView) + destaque do teclado.
+  dataIdx: number
+  keyboardActive: boolean
   onToggle: () => void
   onOpen: () => void
 }
@@ -365,6 +410,8 @@ function SessionRow({
   selected,
   selectable = true,
   onScreen,
+  dataIdx,
+  keyboardActive,
   onToggle,
   onOpen,
 }: RowProps) {
@@ -374,11 +421,12 @@ function SessionRow({
 
   return (
     <li
+      data-idx={dataIdx}
       className={`group flex items-center gap-3 rounded-md border-l-2 px-2 py-2 transition ${
         accent
           ? 'bg-[var(--color-warning)]/5 hover:bg-[var(--color-warning)]/10'
           : 'border-transparent hover:bg-[var(--color-surface-2)]/60'
-      }`}
+      } ${keyboardActive ? 'ring-1 ring-inset ring-[var(--color-accent)]' : ''}`}
       style={accent ? { borderLeftColor: 'var(--color-warning)' } : undefined}
     >
       {selectable && (

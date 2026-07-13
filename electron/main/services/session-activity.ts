@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import type { SessionActivity, GlobalActivityBatch } from '../../../shared/types/ipc'
 import { notifyUsageConsumption } from './usage-monitor'
-import { getNotifPrefs, getMainWindow, notify } from './notifications'
+import { getNotifPrefs, getMainWindow, getRendererFocusedSession, notify } from './notifications'
 
 export const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
@@ -463,7 +463,7 @@ class SessionActivityService extends EventEmitter {
       // qualquer não-busy). Só notifica com o app fora de foco, pra não spammar
       // quem está olhando o terminal.
       if (prev === 'working' && current === 'waiting') {
-        this.notifySessionWaiting(entry)
+        this.notifySessionWaiting(sessionId, entry)
       }
       this.lastEffectiveStatus.set(sessionId, current)
     }
@@ -476,14 +476,17 @@ class SessionActivityService extends EventEmitter {
     if (consumed) notifyUsageConsumption()
   }
 
-  private notifySessionWaiting(entry: IndexEntry): void {
+  private notifySessionWaiting(ccSessionId: string, entry: IndexEntry): void {
     const prefs = getNotifPrefs()
     if (!prefs.enabled || !prefs.sessionWaiting) return
-    if (getMainWindow()?.isFocused()) return
+    // Suprime só quando o usuário já está olhando ESTA sessão (janela focada +
+    // pane ativo nela). Janela focada em outra sessão continua notificando.
+    if (getMainWindow()?.isFocused() && getRendererFocusedSession() === ccSessionId) return
     const name = entry.name ?? 'Sessão'
     notify({
       title: `${name} aguardando você`,
       body: 'A sessão terminou e espera sua resposta.',
+      ccSessionId,
     })
   }
 

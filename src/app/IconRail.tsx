@@ -18,6 +18,7 @@ import type { ComponentType } from 'react'
 import type { Area } from '@/store/appStore'
 import { useAppStore } from '@/store/appStore'
 import { Icon, ICON_SIZE_HEADER } from '@/components/ui/Icon'
+import { useWaitingCount } from '@/features/session-switcher/useWaitingCount'
 
 interface AreaDef {
   id: Area
@@ -48,6 +49,7 @@ interface Props {
 export function IconRail({ onOpenSettings }: Props) {
   const area = useAppStore((s) => s.area)
   const setArea = useAppStore((s) => s.setArea)
+  const waitingCount = useWaitingCount()
 
   return (
     <nav className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-[var(--color-border)] bg-[var(--color-bg)] py-3">
@@ -59,14 +61,23 @@ export function IconRail({ onOpenSettings }: Props) {
               <button
                 type="button"
                 onClick={() => setArea(a.id)}
-                title={a.label}
-                className={`flex h-10 w-10 items-center justify-center rounded-md transition ${
+                title={
+                  a.id === 'projects' && waitingCount > 0
+                    ? `${a.label} · ${waitingCount} aguardando você`
+                    : a.label
+                }
+                className={`relative flex h-10 w-10 items-center justify-center rounded-md transition ${
                   active
                     ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
                     : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                 }`}
               >
                 <Icon as={a.icon} size={ICON_SIZE_HEADER} />
+                {a.id === 'projects' && waitingCount > 0 && (
+                  <span className="absolute right-0.5 top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--color-warning)] px-0.5 text-[9px] font-semibold leading-none text-black">
+                    {waitingCount}
+                  </span>
+                )}
               </button>
             </li>
           )

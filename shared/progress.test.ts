@@ -134,10 +134,19 @@ describe('computeProgress — auto_rollup', () => {
     ).toBeNull()
   })
 
-  it('counts a child with null progress as 0', () => {
+  it('excludes an unmeasured child (null progress) from numerator AND denominator', () => {
+    // Regra única de null (Onda 0): antes um child null contava como 0 falso
+    // e ainda ocupava o denominador (75/(1+1)=37.5 seria o resultado antigo).
+    // Agora ele sai do rollup — só o child medido conta.
     expect(
       computeProgress(input({ progressMode: 'auto_rollup' }), [child(null, 1), child(100, 1)]),
-    ).toBe(50)
+    ).toBe(100)
+  })
+
+  it('returns null when every child is unmeasured', () => {
+    expect(
+      computeProgress(input({ progressMode: 'auto_rollup' }), [child(null, 1), child(null, 2)]),
+    ).toBeNull()
   })
 
   it('defaults weight to 1 when null', () => {
@@ -189,17 +198,21 @@ describe('computeFeatureProgress', () => {
     expect(computeFeatureProgress('done', ['todo', 'todo'])).toBe(0)
   })
 
-  it('without tasks: done → 100, any other status → null', () => {
+  it('without tasks: done → 100, pending (never started) → null, started statuses → 0', () => {
+    // Regra única de null (Onda 0): 'pending' nunca começou → indeterminado,
+    // fora do rollup do pai. in-progress/blocked/paused já começaram → 0
+    // explícito em vez de sumir do denominador.
     expect(computeFeatureProgress('done', [])).toBe(100)
     expect(computeFeatureProgress('pending', [])).toBeNull()
-    expect(computeFeatureProgress('in-progress', [])).toBeNull()
-    expect(computeFeatureProgress('blocked', [])).toBeNull()
-    expect(computeFeatureProgress('paused', [])).toBeNull()
+    expect(computeFeatureProgress('in-progress', [])).toBe(0)
+    expect(computeFeatureProgress('blocked', [])).toBe(0)
+    expect(computeFeatureProgress('paused', [])).toBe(0)
   })
 
   it('all-cancelled tasks fall back to the status rule', () => {
     expect(computeFeatureProgress('done', ['cancelled'])).toBe(100)
-    expect(computeFeatureProgress('in-progress', ['cancelled'])).toBeNull()
+    expect(computeFeatureProgress('in-progress', ['cancelled'])).toBe(0)
+    expect(computeFeatureProgress('pending', ['cancelled'])).toBeNull()
   })
 })
 
@@ -218,9 +231,20 @@ describe('featureProgressChild', () => {
     expect(featureProgressChild(feature('done'), [])?.progress).toBe(100)
   })
 
-  it('returns null (out of the rollup) when progress is indeterminate', () => {
+  it('returns null (out of the rollup) only for a never-started feature (pending, no tasks)', () => {
     expect(featureProgressChild(feature('pending'), [])).toBeNull()
-    expect(featureProgressChild(feature('in-progress'), ['cancelled'])).toBeNull()
+  })
+
+  it('counts a started feature without measurable tasks as 0, still in the rollup', () => {
+    // in-progress/blocked/paused já começaram: sem tasks (ou só cancelled)
+    // conta como 0 em vez de sumir do denominador (regra única de null).
+    expect(featureProgressChild(feature('in-progress'), ['cancelled'])).toEqual({
+      status: 'active',
+      weight: null,
+      progress: 0,
+    })
+    expect(featureProgressChild(feature('blocked'), [])?.progress).toBe(0)
+    expect(featureProgressChild(feature('paused'), [])?.progress).toBe(0)
   })
 
   it('returns null for an archived feature even with done tasks', () => {
@@ -247,5 +271,22 @@ describe('auto_rollup mixing tasks and features', () => {
       featureProgressChild({ status: 'done', archivedAt: 1 }, ['done']), // arquivada → fora
     ].filter((c): c is ProgressChild => c !== null)
     expect(computeProgress(input({ progressMode: 'auto_rollup' }), children)).toBe(100)
+  })
+
+  it('unified null rule: an unmeasured KR-like child and a never-started feature both leave the rollup, a started-empty feature counts as 0', () => {
+    // Simula o mix real de um objetivo: um KR sem measurement (progress null,
+    // vindo direto de keyResultProgress), uma feature nunca iniciada (fora) e
+    // uma feature já iniciada sem tasks (conta 0) ao lado de um KR medido.
+    const unmeasuredKr: ProgressChild = { status: 'active', weight: 1, progress: null }
+    const measuredKr: ProgressChild = { status: 'active', weight: 1, progress: 80 }
+    const children: ProgressChild[] = [
+      unmeasuredKr,
+      measuredKr,
+      featureProgressChild({ status: 'pending', archivedAt: null }, []), // nunca iniciada → fora
+      featureProgressChild({ status: 'in-progress', archivedAt: null }, []), // iniciada, sem tasks → 0
+    ].filter((c): c is ProgressChild => c !== null)
+    // Fora do rollup: unmeasuredKr (null) e a feature pending (null). Contam:
+    // measuredKr (80) e a feature in-progress vazia (0) → média 40.
+    expect(computeProgress(input({ progressMode: 'auto_rollup' }), children)).toBe(40)
   })
 })

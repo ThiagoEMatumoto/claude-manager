@@ -31,7 +31,7 @@ export function Dialog({ open, onClose, title, children, footer, widthClassName 
       // z-[1000] keeps the dialog above dockview layers (.dv-sash z-index 99,
       // --dv-overlay-z-index 999); the portal escapes any stacking context
       // created by ancestors of the dialog's render site.
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

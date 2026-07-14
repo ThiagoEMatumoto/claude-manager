@@ -61,12 +61,18 @@ export function KeyResultRow({ kr, linkedFeatures, onEdit, onDelete }: Props) {
           {linkedFeatures.map((f) => (
             <li
               key={f.id}
-              className="inline-flex max-w-48 items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]"
-              title={`feature: ${f.title}`}
+              className={`inline-flex max-w-48 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] ${
+                f.archived ? 'border-dashed border-[var(--color-border)] opacity-60' : 'border-[var(--color-border)]'
+              }`}
+              title={f.archived ? `feature arquivada (órfã de contexto): ${f.title}` : `feature: ${f.title}`}
             >
               <span className="shrink-0 font-medium text-[var(--color-accent)]">feature</span>
               <span className="truncate">{f.title}</span>
-              <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+              {f.archived ? (
+                <span className="shrink-0">órfã</span>
+              ) : (
+                <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+              )}
             </li>
           ))}
         </ul>

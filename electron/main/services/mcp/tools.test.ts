@@ -425,6 +425,33 @@ describe('mcp tools — features', () => {
     const { feature: linked } = call<{ feature: Feature }>('feature_get', { id: feature.id })
     expect(linked.objectiveLinkCount).toBe(1)
   })
+
+  it('objective_get expõe feature arquivada depois de vinculada como órfã em vez de sumir (Onda 1), e a exclui do rollup', () => {
+    seedProject('proj-mcp')
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo com feature órfã',
+      kind: 'okr',
+    })
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Vai ser arquivada',
+    })
+    call('feature_update', { id: feature.id, status: 'in-progress' })
+    call('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: objective.id }],
+    })
+    call('feature_archive', { id: feature.id })
+
+    const { objective: detail } = call<{ objective: ObjectiveDetail }>('objective_get', {
+      id: objective.id,
+    })
+    expect(detail.linkedFeatures).toHaveLength(1)
+    expect(detail.linkedFeatures[0]).toMatchObject({ id: feature.id, archived: true })
+    // Arquivada sai do rollup (sem outro filho elegível) — progresso fica indeterminado,
+    // não 0: a feature não conta contra o objetivo, só sai da conta.
+    expect(detail.progress).toBeNull()
+  })
 })
 
 describe('mcp tools — overview', () => {

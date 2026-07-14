@@ -671,6 +671,10 @@ export interface LinkedFeatureSummary {
   title: string
   status: FeatureStatus
   progress: number | null
+  // Feature arquivada depois de vinculada (Onda 1): sai do rollup (já era o
+  // caso), mas continua aparecendo aqui sinalizada como "órfã de contexto" em
+  // vez de sumir em silêncio da lista.
+  archived: boolean
 }
 
 // ---- Objetivos / Key Results (camada genérica de OKRs, Fase 1) ----

@@ -94,7 +94,7 @@ function ProgressBreakdown({ detail }: { detail: ObjectiveDetailType }) {
     eligibleKrs.length > 0
       ? eligibleKrs.map((kr) => ({ id: kr.id, label: kr.title, progress: kr.progress as number }))
       : detail.linkedFeatures
-          .filter((f) => f.progress !== null)
+          .filter((f) => !f.archived && f.progress !== null)
           .map((f) => ({ id: f.id, label: f.title, progress: f.progress as number }))
 
   if (contributors.length === 0) return null
@@ -296,15 +296,28 @@ export function ObjectiveDetail({
               {detail.linkedFeatures.map((f) => (
                 <li
                   key={f.id}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+                  className={`rounded-lg border bg-[var(--color-surface)] px-4 py-3 ${
+                    f.archived
+                      ? 'border-dashed border-[var(--color-border)] opacity-60'
+                      : 'border-[var(--color-border)]'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">
                       {f.title}
                     </span>
-                    <FeatureStatusBadge status={f.status} />
+                    {f.archived ? (
+                      <span
+                        className="shrink-0 rounded-full border border-[var(--color-text-dim)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-dim)]"
+                        title="Feature arquivada depois de vinculada — fora do rollup"
+                      >
+                        órfã de contexto
+                      </span>
+                    ) : (
+                      <FeatureStatusBadge status={f.status} />
+                    )}
                   </div>
-                  <ProgressBar value={f.progress} className="mt-2" />
+                  {!f.archived && <ProgressBar value={f.progress} className="mt-2" />}
                 </li>
               ))}
             </ul>

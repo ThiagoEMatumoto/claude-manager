@@ -156,11 +156,34 @@ function taskToRowParams(task: Task): Record<string, unknown> {
   }
 }
 
+// Tabela dona de cada TaskParentType — usada pra validar existência do alvo
+// antes de gravar o link (task_links é polimórfico, sem FK em parent_id).
+const PARENT_TABLE: Record<TaskParentType, string> = {
+  objective: 'objectives',
+  key_result: 'key_results',
+  feature: 'features',
+}
+
+// Valida que o alvo existe antes de gravar (mata órfãos por id alucinado —
+// ex.: MCP chamado com um parentId que a LLM inventou). 1 SELECT por link,
+// dentro da mesma transação de quem chama (create/setLinks) — erro joga a
+// transação inteira fora.
 function insertLinks(taskId: string, links: TaskLink[]): void {
-  const stmt = getDb().prepare(
+  const db = getDb()
+  const stmt = db.prepare(
     'INSERT OR IGNORE INTO task_links (task_id, parent_type, parent_id) VALUES (?, ?, ?)',
   )
-  for (const link of links) stmt.run(taskId, link.parentType, link.parentId)
+  for (const link of links) {
+    const target = db
+      .prepare(`SELECT 1 FROM ${PARENT_TABLE[link.parentType]} WHERE id = ?`)
+      .get(link.parentId)
+    if (!target) {
+      throw new Error(
+        `cannot link task to ${link.parentType} ${link.parentId}: target not found`,
+      )
+    }
+    stmt.run(taskId, link.parentType, link.parentId)
+  }
 }
 
 function nextPosition(): number {

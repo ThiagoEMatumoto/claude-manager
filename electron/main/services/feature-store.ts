@@ -634,9 +634,17 @@ export function listObjectiveLinks(featureId: string): FeatureObjectiveLink[] {
   }))
 }
 
+// Tabela dona de cada FeatureLinkTargetType — usada pra validar existência do
+// alvo antes de gravar (feature_links é polimórfico, sem FK em target_id).
+const LINK_TARGET_TABLE: Record<FeatureLinkTargetType, string> = {
+  objective: 'objectives',
+  key_result: 'key_results',
+}
+
 // Substitui o conjunto de vínculos (replace-all em transação); retorna os
 // links anteriores pra que o IPC notifique também os objetivos que perderam
-// a feature. Bumpa updated_at (espelha setLinks de task-store).
+// a feature. Bumpa updated_at (espelha setLinks de task-store). Valida que
+// cada alvo existe antes de gravar — mata órfãos por id alucinado.
 export function setObjectiveLinks(
   featureId: string,
   links: FeatureObjectiveLink[],
@@ -648,7 +656,17 @@ export function setObjectiveLinks(
     const ins = db.prepare(
       'INSERT OR IGNORE INTO feature_links (feature_id, target_type, target_id) VALUES (?, ?, ?)',
     )
-    for (const link of links) ins.run(featureId, link.targetType, link.targetId)
+    for (const link of links) {
+      const target = db
+        .prepare(`SELECT 1 FROM ${LINK_TARGET_TABLE[link.targetType]} WHERE id = ?`)
+        .get(link.targetId)
+      if (!target) {
+        throw new Error(
+          `cannot link feature ${featureId} to ${link.targetType} ${link.targetId}: target not found`,
+        )
+      }
+      ins.run(featureId, link.targetType, link.targetId)
+    }
     db.prepare('UPDATE features SET updated_at = ? WHERE id = ?').run(Date.now(), featureId)
   })
   tx()

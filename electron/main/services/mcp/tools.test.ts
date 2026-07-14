@@ -286,6 +286,18 @@ describe('mcp tools — tasks', () => {
     const { task } = call<{ task: Task }>('task_create', { title: 'Criada pela sessão' })
     expect(task.origin).toBe('auto')
   })
+
+  it('task_create com link pra um alvo inexistente falha (mata órfão por id alucinado)', () => {
+    expect(() =>
+      tool('task_create').handler({
+        title: 'Link fantasma',
+        links: [{ parentType: 'objective', parentId: 'nao-existe' }],
+      }),
+    ).toThrow(/target not found/)
+    // Nada foi persistido: a transação de create+links foi revertida.
+    const { items } = call<{ items: Task[] }>('task_list', { search: 'Link fantasma' })
+    expect(items).toHaveLength(0)
+  })
 })
 
 describe('mcp tools — features', () => {
@@ -377,6 +389,20 @@ describe('mcp tools — features', () => {
       { targetType: 'objective', targetId: a.id },
       { targetType: 'objective', targetId: b.id },
     ])
+  })
+
+  it('feature_set_objective_links com alvo inexistente falha (mata órfão por id alucinado)', () => {
+    seedProject('proj-mcp')
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Sem alvo válido',
+    })
+    expect(() =>
+      tool('feature_set_objective_links').handler({
+        featureId: feature.id,
+        links: [{ targetType: 'objective', targetId: 'nao-existe' }],
+      }),
+    ).toThrow(/target not found/)
   })
 
   it('feature_list/feature_get expõem objectiveLinkCount (Onda 0)', () => {

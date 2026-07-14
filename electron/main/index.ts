@@ -10,10 +10,11 @@ import { registerProjectIpc } from './ipc/projects'
 import { registerSessionIpc, sweepOrphanImageTemps } from './ipc/sessions'
 import { registerShellIpc } from './ipc/shell'
 import { registerDialogIpc } from './ipc/dialog'
-import { registerGitIpc, cloneMissingWithToasts, pullAllWithToasts } from './ipc/git'
+import { registerGitIpc, cloneMissingWithToasts } from './ipc/git'
 import { backfillRepoRemotes } from './services/git-remote'
 import { listMissingRepos } from './services/repo-clone'
 import { getPref } from './services/prefs-store'
+import { rescheduleAutoPull, runAutoPullNow, stopAutoPull } from './services/repo-pull-scheduler'
 import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
@@ -121,30 +122,6 @@ async function autoCloneMissingOnBoot(): Promise<void> {
   }
 }
 
-// Pull ff-only best-effort de todos os repos locais, gated pela pref
-// autoPullEnabled. Best-effort: qualquer falha é logada e o boot/tick segue.
-async function autoPullReposBestEffort(): Promise<void> {
-  if (!getPref('autoPullEnabled', false)) return
-  try {
-    await pullAllWithToasts()
-  } catch (err) {
-    console.error('[repo-sync] auto-pull falhou:', err)
-  }
-}
-
-// (Re)agenda o cron de auto-pull conforme as prefs. Chamado no boot; o intervalo
-// (autoPullIntervalMinutes, default 30) é lido a cada agendamento. Guardamos a
-// ref pra limpar no shutdown. Não roda o tick imediato — o boot faz isso à parte.
-function scheduleAutoPull(): void {
-  if (autoPullTimer) {
-    clearInterval(autoPullTimer)
-    autoPullTimer = null
-  }
-  if (!getPref('autoPullEnabled', false)) return
-  const minutes = Math.max(1, getPref('autoPullIntervalMinutes', 30))
-  autoPullTimer = setInterval(() => void autoPullReposBestEffort(), minutes * 60 * 1000)
-}
-
 app.whenReady().then(async () => {
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
@@ -226,8 +203,8 @@ app.whenReady().then(async () => {
 
   // Cron opt-in de auto-pull (pref autoPullEnabled/autoPullIntervalMinutes) +
   // um tick único poucos segundos após o boot, quando ligado. Best-effort.
-  scheduleAutoPull()
-  autoPullBootTimer = setTimeout(() => void autoPullReposBestEffort(), AUTO_PULL_BOOT_DELAY_MS)
+  rescheduleAutoPull()
+  autoPullBootTimer = setTimeout(() => void runAutoPullNow(), AUTO_PULL_BOOT_DELAY_MS)
 
   // Pull-no-boot CONSERVADOR em BACKGROUND: importa só fast-forward limpo (sem
   // trabalho local não-empurrado), bounded por timeout e NÃO-fatal (offline/erro
@@ -255,9 +232,10 @@ app.whenReady().then(async () => {
 const HANDOFF_RECONCILE_INTERVAL_MS = 5 * 60 * 1000
 let handoffReconcileTimer: ReturnType<typeof setInterval> | null = null
 
-// Cron opt-in de auto-pull dos repos de projeto (ver app.whenReady).
+// Cron opt-in de auto-pull dos repos de projeto (ver app.whenReady). O
+// agendamento em si vive em services/repo-pull-scheduler.ts; aqui só fica o tick
+// único de boot, que é lógica de boot e não de agendamento.
 const AUTO_PULL_BOOT_DELAY_MS = 5000
-let autoPullTimer: ReturnType<typeof setInterval> | null = null
 let autoPullBootTimer: ReturnType<typeof setTimeout> | null = null
 
 // Shutdown síncrono final: roda DEPOIS do flush de sync (que lê o DB), porque a
@@ -275,10 +253,7 @@ function runFinalShutdown(): void {
     clearInterval(handoffReconcileTimer)
     handoffReconcileTimer = null
   }
-  if (autoPullTimer) {
-    clearInterval(autoPullTimer)
-    autoPullTimer = null
-  }
+  stopAutoPull()
   if (autoPullBootTimer) {
     clearTimeout(autoPullBootTimer)
     autoPullBootTimer = null

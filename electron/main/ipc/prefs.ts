@@ -5,6 +5,12 @@ import {
   calendarWatcher,
   MEETING_CALENDAR_ICS_URL_KEY,
 } from '../services/calendar/calendar-watcher'
+import {
+  AUTO_PULL_ENABLED_KEY,
+  AUTO_PULL_INTERVAL_MINUTES_KEY,
+  rescheduleAutoPull,
+  runAutoPullNow,
+} from '../services/repo-pull-scheduler'
 
 const getSchema = z.object({ key: z.string().min(1) })
 const setSchema = z.object({ key: z.string().min(1), value: z.unknown() })
@@ -22,5 +28,11 @@ export function registerPrefsIpc(): void {
     // Mudar a URL secreta do calendário liga/desliga/reaponta o watcher na hora,
     // sem exigir restart do app (restart limpa o dedupe da URL anterior).
     if (key === MEETING_CALENDAR_ICS_URL_KEY) calendarWatcher.restart()
+    // Ligar/desligar o toggle de auto-pull ou mudar o intervalo reagenda o cron na
+    // hora. Ligar o toggle reflete a intenção na hora: puxa já (best-effort, gated).
+    if (key === AUTO_PULL_ENABLED_KEY || key === AUTO_PULL_INTERVAL_MINUTES_KEY) {
+      rescheduleAutoPull()
+      if (key === AUTO_PULL_ENABLED_KEY && value === true) void runAutoPullNow()
+    }
   })
 }

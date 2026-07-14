@@ -148,6 +148,14 @@ export function FeatureCard({
               parada há {stalled}d
             </span>
           )}
+          {feature.objectiveLinkCount === 0 && (sessions > 0 || recordCount > 0) && (
+            <span
+              className="inline-flex items-center rounded-full border border-[var(--color-info)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-info)]"
+              title="Feature com atividade real mas sem vínculo a nenhum objetivo/OKR"
+            >
+              sem OKR
+            </span>
+          )}
         </div>
 
         <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--color-text-dim)]">

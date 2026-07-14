@@ -2,15 +2,18 @@ import { useState } from 'react'
 import { relativeTime } from '@/lib/time'
 import { useAppStore } from '@/store/appStore'
 import { STATUS_META as FEATURE_STATUS_META } from '@/features/features/status'
-import { isStalledFeature } from '../../../shared/home-selectors'
+import { isStalledFeature, selectFeaturesWithoutObjective } from '../../../shared/home-selectors'
 import type { OverviewFeatureActivity } from '../../../shared/types/ipc'
 import { CardEmpty, HomeCard } from './HomeGrid'
 
 // Card "Features em andamento": atividade real de sessões por feature
-// (data.features do agregado), com destaque "parada >3d" via isStalledFeature.
+// (data.features do agregado), com destaque "parada >3d" via isStalledFeature
+// e um resumo "sem OKR" (achado-raiz #2 da curadoria: o dado existia — Onda 0
+// — mas não era exposto em lugar nenhum).
 export function FeaturesCard({ features }: { features: OverviewFeatureActivity[] }) {
   const setArea = useAppStore((s) => s.setArea)
   const [now] = useState(() => Date.now())
+  const withoutObjective = selectFeaturesWithoutObjective(features)
 
   return (
     <HomeCard
@@ -26,6 +29,17 @@ export function FeaturesCard({ features }: { features: OverviewFeatureActivity[]
         </button>
       }
     >
+      {withoutObjective.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setArea('features')}
+          title="Features de trabalho sem vínculo a nenhum objetivo/OKR"
+          className="mb-2 flex w-full items-center gap-1.5 rounded-md border border-[var(--color-info)]/40 bg-[var(--color-info)]/10 px-2.5 py-1.5 text-left text-[11px] text-[var(--color-info)] transition hover:bg-[var(--color-info)]/20"
+        >
+          <span className="font-semibold tabular-nums">{withoutObjective.length}</span>
+          feature{withoutObjective.length === 1 ? '' : 's'} de trabalho sem OKR
+        </button>
+      )}
       {features.length === 0 ? (
         <CardEmpty>Nenhuma feature em andamento.</CardEmpty>
       ) : (

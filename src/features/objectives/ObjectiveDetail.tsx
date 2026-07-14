@@ -83,6 +83,36 @@ function rollupLegend(detail: ObjectiveDetailType): string {
   return 'Sem key results — progresso indeterminado.'
 }
 
+// Breakdown inline dos filhos que efetivamente contribuem pro rollup — espelha
+// a mesma condição de objectiveProgress no main (KRs elegíveis > 0 → só eles
+// contam; senão, features linkadas). Render puro no call site: não reestrutura
+// o retorno de computeProgress, só re-lê os dados que ObjectiveDetail já tem.
+function ProgressBreakdown({ detail }: { detail: ObjectiveDetailType }) {
+  const eligibleKrs = detail.keyResults.filter((kr) => kr.status !== 'cancelled' && kr.progress !== null)
+  const contributors =
+    eligibleKrs.length > 0
+      ? eligibleKrs.map((kr) => ({ id: kr.id, label: kr.title, progress: kr.progress as number }))
+      : detail.linkedFeatures
+          .filter((f) => f.progress !== null)
+          .map((f) => ({ id: f.id, label: f.title, progress: f.progress as number }))
+
+  if (contributors.length === 0) return null
+
+  return (
+    <ul className="mt-2 flex flex-col gap-0.5">
+      {contributors.map((c) => (
+        <li
+          key={c.id}
+          className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-text-dim)]"
+        >
+          <span className="min-w-0 truncate">{c.label}</span>
+          <span className="shrink-0 tabular-nums">{Math.round(c.progress)}%</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function MetricField({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-[var(--color-bg)] px-3 py-2">
@@ -213,7 +243,10 @@ export function ObjectiveDetail({
           )}
 
           {detail.progressMode === 'auto_rollup' && (
-            <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">{rollupLegend(detail)}</p>
+            <>
+              <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">{rollupLegend(detail)}</p>
+              <ProgressBreakdown detail={detail} />
+            </>
           )}
         </section>
 

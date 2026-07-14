@@ -175,7 +175,9 @@ export function FeatureObjectiveLinksSection({
   }
 
   return (
-    <section className="mt-8">
+    // mt-3: mesmo ritmo de espaçamento do resto do header do FeatureDoc (Onda
+    // 2 subiu esta seção pra junto do StatusBadge — único call site hoje).
+    <section className="mt-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[var(--color-text)]">Objetivos</h2>
         <button

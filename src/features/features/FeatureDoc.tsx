@@ -88,8 +88,13 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
           </button>
         </div>
 
+        {/* "Resumo" = texto livre opcional (feature.objective no banco) — nome
+            trocado só na UI pra não colidir com o vínculo real de OKR abaixo. */}
         {feature.objective && (
-          <p className="mt-2 text-sm text-[var(--color-text-dim)]">{feature.objective}</p>
+          <p className="mt-2 text-sm text-[var(--color-text-dim)]">
+            <span className="font-medium text-[var(--color-text)]">Resumo: </span>
+            {feature.objective}
+          </p>
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -114,6 +119,15 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
           <span>synth: {feature.synthMode}</span>
           {feature.model && <span>modelo: {feature.model}</span>}
         </div>
+
+        {/* Vínculo real de OKR sobe pro header (Onda 2) — era o último bloco
+            do doc, fora de vista; agora fica junto do StatusBadge. */}
+        <FeatureObjectiveLinksSection
+          featureId={feature.id}
+          objectives={objectives}
+          krTitles={krTitles}
+          krToObjectiveId={krObjectiveId}
+        />
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -145,12 +159,6 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
         )}
 
         <FeatureTasksSection featureId={feature.id} objectives={objectives} krTitles={krTitles} />
-        <FeatureObjectiveLinksSection
-          featureId={feature.id}
-          objectives={objectives}
-          krTitles={krTitles}
-          krToObjectiveId={krObjectiveId}
-        />
       </div>
     </div>
   )

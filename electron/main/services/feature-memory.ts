@@ -20,6 +20,7 @@ import {
   getProjectIdForRepo,
   getRepoPath,
   saveSessionRecord,
+  sessionRecordCount,
   listSessionRecords,
   setObjectiveLinks,
   setAppDev,
@@ -282,10 +283,14 @@ class FeatureMemoryService {
     const result = await runClaude(args, { timeoutMs: SYNTH_TIMEOUT_MS })
     if (result.code !== 0) {
       emitSynthError(featureId, `registro de sessão falhou (exit ${result.code}): ${result.stderr.slice(0, 300)}`)
+      this.stubDraftFeature(info, feature)
       return false
     }
     const summary = stripCodeFence(result.stdout).trim()
-    if (!summary) return false
+    if (!summary) {
+      this.stubDraftFeature(info, feature)
+      return false
+    }
 
     saveSessionRecord({
       sessionId: info.sessionId,
@@ -299,6 +304,28 @@ class FeatureMemoryService {
     const updated = getFeature(featureId)
     if (updated && isVisibleFeature(updated)) broadcast('feature:updated', updated)
     return true
+  }
+
+  // Feature fantasma (Onda 3): quando a síntese LLM falha (timeout/erro/output
+  // vazio) pra uma feature auto que AINDA não tem nenhum registro, ela fica
+  // presa invisível pra sempre — isVisibleFeature deriva de recordCount>0, e
+  // sem isto a sessão "desaparece" pro usuário sem deixar rastro nenhum. Grava
+  // um registro título-only (o título já foi derivado via humanizeBranch/
+  // deriveTitle na criação, em decideRegistration) em vez de tentar
+  // re-sintetizar — a feature vira visível com o mínimo de conteúdo, e a
+  // próxima sessão bem-sucedida complementa via síntese holística normal. Só
+  // se aplica a rascunhos (feature já visível não precisa disto).
+  private stubDraftFeature(info: SessionExitInfo, feature: Feature): void {
+    if (feature.origin !== 'auto' || sessionRecordCount(feature.id) > 0) return
+    saveSessionRecord({
+      sessionId: info.sessionId,
+      featureId: feature.id,
+      ccSessionId: info.ccSessionId,
+      summary: feature.title,
+      model: null,
+    })
+    const updated = getFeature(feature.id)
+    if (updated && isVisibleFeature(updated)) broadcast('feature:updated', updated)
   }
 
   private scheduleHolistic(featureId: string): void {

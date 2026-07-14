@@ -20,14 +20,21 @@ vi.mock('electron', async () => {
 })
 
 vi.mock('./session-activity', () => ({ findTranscriptPath: vi.fn() }))
+vi.mock('./claude-cli', () => ({ runClaude: vi.fn() }))
 
 import { app } from 'electron'
 import { closeDb, getDb } from './db'
-import { create as createFeature, get as getFeature, listObjectiveLinks } from './feature-store'
+import {
+  create as createFeature,
+  get as getFeature,
+  listObjectiveLinks,
+  sessionRecordCount,
+} from './feature-store'
 import { create as createObjective, createKeyResult } from './objective-store'
 import { list as listTasks } from './task-store'
 import { maybeSuggestObjectiveLink, isSelfRepoPath, featureMemory } from './feature-memory'
 import { findTranscriptPath } from './session-activity'
+import { runClaude } from './claude-cli'
 
 afterAll(() => {
   closeDb()
@@ -218,5 +225,87 @@ describe('resolveFeature — auto-tag app-dev', () => {
     expect(result).not.toBeNull()
     const feature = getFeature(result!.featureId)
     expect(feature?.isAppDev).toBe(false)
+  })
+})
+
+// ---- Feature fantasma: stub title-only quando a síntese LLM falha (Onda 3) ----
+
+function seedSession(id: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO sessions (id, repo_id, status, started_at) VALUES (?, NULL, 'ended', ?)`,
+    )
+    .run(id, Date.now())
+}
+
+describe('generateSessionRecord — feature fantasma', () => {
+  it('síntese com exit != 0 grava um registro título-only e torna o rascunho visível', async () => {
+    const draft = createFeature({ projectId: 'proj-1', title: 'Rascunho parado', origin: 'auto' })
+    expect(sessionRecordCount(draft.id)).toBe(0)
+    seedSession('sess-stub-fail')
+
+    const transcriptDir = mkdtempSync(join(tmpdir(), 'stub-fail-transcript-'))
+    const transcriptPath = makeSelfSessionTranscript(transcriptDir, 'feat/stub-fail')
+    vi.mocked(findTranscriptPath).mockReturnValue(transcriptPath)
+    vi.mocked(runClaude).mockResolvedValue({ code: 1, stdout: '', stderr: 'boom' })
+
+    featureMemory.onSessionExit({
+      sessionId: 'sess-stub-fail',
+      ccSessionId: 'cc-stub-fail',
+      repoId: 'repo-none',
+      featureId: draft.id,
+    })
+
+    await vi.waitFor(() => expect(sessionRecordCount(draft.id)).toBe(1))
+    // Rascunho ganhou o 1º registro: isVisibleFeature (origin='auto' && recordCount===0)
+    // deixa de valer — a feature "aparece" com o título como conteúdo do registro.
+  })
+
+  it('síntese com output vazio (summary vazio) também gera o stub', async () => {
+    const draft = createFeature({ projectId: 'proj-1', title: 'Outro rascunho parado', origin: 'auto' })
+    seedSession('sess-stub-empty')
+
+    const transcriptDir = mkdtempSync(join(tmpdir(), 'stub-empty-transcript-'))
+    const transcriptPath = makeSelfSessionTranscript(transcriptDir, 'feat/stub-empty')
+    vi.mocked(findTranscriptPath).mockReturnValue(transcriptPath)
+    vi.mocked(runClaude).mockResolvedValue({ code: 0, stdout: '   ', stderr: '' })
+
+    featureMemory.onSessionExit({
+      sessionId: 'sess-stub-empty',
+      ccSessionId: 'cc-stub-empty',
+      repoId: 'repo-none',
+      featureId: draft.id,
+    })
+
+    await vi.waitFor(() => expect(sessionRecordCount(draft.id)).toBe(1))
+  })
+
+  it('feature JÁ visível (com registro) não ganha stub extra numa falha nova', async () => {
+    const feature = createFeature({ projectId: 'proj-1', title: 'Feature com histórico', origin: 'auto' })
+    seedSession('sess-seed')
+    getDb()
+      .prepare(
+        `INSERT INTO feature_session_records (session_id, feature_id, cc_session_id, summary, model, session_at, created_at)
+         VALUES (?, ?, NULL, 'registro real anterior', NULL, ?, ?)`,
+      )
+      .run('sess-seed', feature.id, Date.now(), Date.now())
+    expect(sessionRecordCount(feature.id)).toBe(1)
+
+    seedSession('sess-stub-existing')
+    const transcriptDir = mkdtempSync(join(tmpdir(), 'stub-existing-transcript-'))
+    const transcriptPath = makeSelfSessionTranscript(transcriptDir, 'feat/stub-existing')
+    vi.mocked(findTranscriptPath).mockReturnValue(transcriptPath)
+    vi.mocked(runClaude).mockResolvedValue({ code: 1, stdout: '', stderr: 'boom' })
+
+    featureMemory.onSessionExit({
+      sessionId: 'sess-stub-existing',
+      ccSessionId: 'cc-stub-existing',
+      repoId: 'repo-none',
+      featureId: feature.id,
+    })
+
+    // Dá tempo pro drain assíncrono rodar; sem 2º registro, a contagem some presa em 1.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sessionRecordCount(feature.id)).toBe(1)
   })
 })

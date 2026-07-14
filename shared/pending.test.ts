@@ -3,9 +3,12 @@ import {
   classifyDue,
   comparePendingTasks,
   isPendingStatus,
+  selectStoppedAutoTasks,
   sortPendingTasks,
   startOfLocalDay,
+  STOPPED_AUTO_TASK_MS,
   type PendingOrderInput,
+  type StoppedAutoTaskInput,
 } from './pending'
 import type { TaskStatus } from './types/ipc'
 
@@ -106,5 +109,35 @@ describe('TaskStatus coverage', () => {
   it('every known status is classified', () => {
     const all: TaskStatus[] = ['todo', 'in_progress', 'blocked', 'done', 'cancelled']
     for (const s of all) expect(typeof isPendingStatus(s)).toBe('boolean')
+  })
+})
+
+describe('selectStoppedAutoTasks', () => {
+  const now = new Date(2026, 5, 9, 12, 0, 0).getTime()
+
+  function autoTask(overrides: Partial<StoppedAutoTaskInput>): StoppedAutoTaskInput {
+    return { origin: 'auto', status: 'todo', updatedAt: now, ...overrides }
+  }
+
+  it('picks auto tasks pending and untouched for more than the threshold', () => {
+    const stale = autoTask({ updatedAt: now - STOPPED_AUTO_TASK_MS - 1 })
+    const result = selectStoppedAutoTasks([stale], now)
+    expect(result).toEqual([stale])
+  })
+
+  it('ignores manual tasks even if stale', () => {
+    const stale = autoTask({ origin: 'manual', updatedAt: now - STOPPED_AUTO_TASK_MS - 1 })
+    expect(selectStoppedAutoTasks([stale], now)).toEqual([])
+  })
+
+  it('ignores auto tasks already done/cancelled', () => {
+    const done = autoTask({ status: 'done', updatedAt: now - STOPPED_AUTO_TASK_MS - 1 })
+    const cancelled = autoTask({ status: 'cancelled', updatedAt: now - STOPPED_AUTO_TASK_MS - 1 })
+    expect(selectStoppedAutoTasks([done, cancelled], now)).toEqual([])
+  })
+
+  it('ignores auto tasks touched recently', () => {
+    const fresh = autoTask({ updatedAt: now - 1000 })
+    expect(selectStoppedAutoTasks([fresh], now)).toEqual([])
   })
 })

@@ -13,7 +13,7 @@ import type {
 import { TaskBoard } from './TaskBoard'
 import { TaskDialog } from './TaskDialog'
 import { TaskList } from './TaskList'
-import { TasksSidebar, type PriorityFilter, type StatusFilter } from './TasksSidebar'
+import { TasksSidebar, type OriginFilter, type PriorityFilter, type StatusFilter } from './TasksSidebar'
 import { PendingView } from './PendingView'
 import { PARENT_TYPE_META } from './status'
 import { useTasks } from './useTasks'
@@ -46,6 +46,8 @@ export function TasksArea() {
   // (mesmo padrão de ObjectivesArea).
   const [query, setQuery] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  // Filtro auto/manual (Onda 3 — higiene): 'all' por default.
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all')
   // Filtro por objetivo/feature (Onda 2 — fecha a sub-linkagem): '' = todos.
   // Casa por parentId direto (não distingue objective/feature — ids não colidem).
   const [linkFilter, setLinkFilter] = useState('')
@@ -137,9 +139,12 @@ export function TasksArea() {
       if (linkFilter && !t.links.some((l) => l.parentId === linkFilter)) {
         return false
       }
+      if (originFilter !== 'all' && t.origin !== originFilter) {
+        return false
+      }
       return true
     })
-  }, [tasks, q, selectedTags, linkFilter])
+  }, [tasks, q, selectedTags, linkFilter, originFilter])
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -174,6 +179,15 @@ export function TasksArea() {
     await deleteTask(task.id)
   }
 
+  // Nudge "N auto paradas → arquivar" (Onda 3): bulk-cancel manual, sem decay
+  // automático (Onda 4, deferida). Reusa o update singular já existente — sem
+  // endpoint novo pra um caso que é só "N updates em sequência".
+  async function handleArchiveStopped(stopped: Task[]) {
+    for (const task of stopped) {
+      await updateTask({ id: task.id, status: 'cancelled' })
+    }
+  }
+
   return (
     <>
       <TasksSidebar
@@ -182,6 +196,7 @@ export function TasksArea() {
         query={query}
         statusFilter={statusFilter}
         priorityFilter={priorityFilter}
+        originFilter={originFilter}
         selectedTags={selectedTags}
         objectives={objectives}
         features={features}
@@ -191,6 +206,7 @@ export function TasksArea() {
         onPriorityFilter={(p) =>
           void setFilter({ ...filter, priority: p === 'all' ? undefined : p })
         }
+        onOriginFilter={setOriginFilter}
         onLinkFilter={setLinkFilter}
         onToggleTag={toggleTag}
         onReload={() => void refresh()}
@@ -218,6 +234,7 @@ export function TasksArea() {
               onEdit={openEdit}
               onDelete={(t) => void handleDelete(t)}
               onNavigateLink={navigateLink}
+              onArchiveStopped={handleArchiveStopped}
             />
           </div>
         ) : (

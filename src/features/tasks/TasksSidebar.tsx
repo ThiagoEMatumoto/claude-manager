@@ -6,6 +6,7 @@ import type {
   Feature,
   ObjectiveWithProgress,
   Task,
+  TaskOrigin,
   TaskPriority,
   TaskStatus,
 } from '../../../shared/types/ipc'
@@ -13,6 +14,9 @@ import { PRIORITY_META, PRIORITY_ORDER, TASK_STATUS_META, TASK_STATUS_ORDER } fr
 
 export type StatusFilter = 'all' | TaskStatus
 export type PriorityFilter = 'all' | TaskPriority
+export type OriginFilter = 'all' | TaskOrigin
+
+const ORIGIN_META: Record<TaskOrigin, string> = { manual: 'manual', auto: 'automática' }
 
 interface Props {
   // Já filtradas por status/prioridade (filtro do store); query/tags são
@@ -22,6 +26,9 @@ interface Props {
   query: string
   statusFilter: StatusFilter
   priorityFilter: PriorityFilter
+  // Auto/manual (Onda 3 — higiene): 'all' por default, sem esconder nada
+  // sozinho; só dá o controle de foco.
+  originFilter: OriginFilter
   selectedTags: string[]
   // Objetivo/feature pra popular o select de vínculo; '' = todos (Onda 2).
   objectives: ObjectiveWithProgress[]
@@ -30,6 +37,7 @@ interface Props {
   onQuery: (q: string) => void
   onStatusFilter: (s: StatusFilter) => void
   onPriorityFilter: (p: PriorityFilter) => void
+  onOriginFilter: (o: OriginFilter) => void
   onLinkFilter: (id: string) => void
   onToggleTag: (tag: string) => void
   onReload: () => void
@@ -66,6 +74,7 @@ export function TasksSidebar({
   query,
   statusFilter,
   priorityFilter,
+  originFilter,
   selectedTags,
   objectives,
   features,
@@ -73,6 +82,7 @@ export function TasksSidebar({
   onQuery,
   onStatusFilter,
   onPriorityFilter,
+  onOriginFilter,
   onLinkFilter,
   onToggleTag,
   onReload,
@@ -146,6 +156,19 @@ export function TasksSidebar({
               onClick={() => onPriorityFilter(p)}
             />
           ))}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          <Pill active={originFilter === 'all'} label="Origem — todas" onClick={() => onOriginFilter('all')} />
+          <Pill
+            active={originFilter === 'manual'}
+            label={ORIGIN_META.manual}
+            onClick={() => onOriginFilter('manual')}
+          />
+          <Pill
+            active={originFilter === 'auto'}
+            label={ORIGIN_META.auto}
+            onClick={() => onOriginFilter('auto')}
+          />
         </div>
         {(objectives.length > 0 || features.length > 0) && (
           <select

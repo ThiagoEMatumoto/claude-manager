@@ -4,6 +4,7 @@ import {
   computeProgress,
   computeTaskRollup,
   featureProgressChild,
+  objectiveProgressTone,
   taskProgressChild,
   type FeatureRollupSource,
   type ProgressChild,
@@ -288,5 +289,38 @@ describe('auto_rollup mixing tasks and features', () => {
     // Fora do rollup: unmeasuredKr (null) e a feature pending (null). Contam:
     // measuredKr (80) e a feature in-progress vazia (0) → média 40.
     expect(computeProgress(input({ progressMode: 'auto_rollup' }), children)).toBe(40)
+  })
+})
+
+describe('objectiveProgressTone', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const start = 0
+  const end = 100 * DAY
+  const now = 50 * DAY // 50% do prazo decorrido
+
+  it('returns accent without endDate or startDate', () => {
+    expect(objectiveProgressTone({ progress: 10, startDate: null, endDate: end }, now)).toBe('accent')
+    expect(objectiveProgressTone({ progress: 10, startDate: start, endDate: null }, now)).toBe('accent')
+  })
+
+  it('returns accent when progress is indeterminate', () => {
+    expect(objectiveProgressTone({ progress: null, startDate: start, endDate: end }, now)).toBe('accent')
+  })
+
+  it('returns accent when on schedule or ahead', () => {
+    expect(objectiveProgressTone({ progress: 50, startDate: start, endDate: end }, now)).toBe('accent')
+    expect(objectiveProgressTone({ progress: 90, startDate: start, endDate: end }, now)).toBe('accent')
+  })
+
+  it('returns warning when more than 15 points behind schedule', () => {
+    expect(objectiveProgressTone({ progress: 34, startDate: start, endDate: end }, now)).toBe('warning')
+  })
+
+  it('returns danger when more than 30 points behind schedule', () => {
+    expect(objectiveProgressTone({ progress: 19, startDate: start, endDate: end }, now)).toBe('danger')
+  })
+
+  it('returns accent for an invalid interval (endDate <= startDate)', () => {
+    expect(objectiveProgressTone({ progress: 0, startDate: end, endDate: start }, now)).toBe('accent')
   })
 })

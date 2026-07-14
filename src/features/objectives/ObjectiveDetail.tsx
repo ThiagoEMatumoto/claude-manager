@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArrowLeft, Pencil, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { objectiveProgressTone } from '../../../shared/progress'
 import type { KeyResult, ObjectiveDetail as ObjectiveDetailType } from '../../../shared/types/ipc'
 import { DIRECTION_LABEL, PRIORITY_LABEL, PROGRESS_MODE_LABEL } from './status'
 import { KindBadge, StatusBadge } from './ObjectiveList'
@@ -222,7 +223,14 @@ export function ObjectiveDetail({
             </span>
           </div>
 
-          <ProgressBar value={detail.progress} />
+          <ProgressBar
+            value={detail.progress}
+            tone={objectiveProgressTone({
+              progress: detail.progress,
+              startDate: detail.startDate,
+              endDate: detail.endDate,
+            })}
+          />
 
           {detail.progressMode === 'metric' && (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">

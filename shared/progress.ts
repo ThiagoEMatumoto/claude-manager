@@ -122,6 +122,32 @@ export function computeFeatureProgress(
   return status === 'pending' ? null : 0
 }
 
+// ---- Tom semântico da ProgressBar (Onda 1) ----
+
+export type ProgressTone = 'accent' | 'warning' | 'danger'
+
+export interface ScheduleToneInput {
+  progress: number | null
+  startDate: number | null
+  endDate: number | null
+}
+
+// Compara progresso% vs % do prazo já decorrido (startDate→endDate). Sem
+// prazo definido (falta start ou end, ou intervalo inválido) ou progresso
+// indeterminado, não dá pra avaliar atraso — mantém o accent neutro. Atraso
+// (tempo decorrido à frente do progresso) > 15 pontos = warning, > 30 = danger.
+export function objectiveProgressTone(input: ScheduleToneInput, now: number = Date.now()): ProgressTone {
+  const { progress, startDate, endDate } = input
+  if (progress === null || startDate === null || endDate === null || endDate <= startDate) {
+    return 'accent'
+  }
+  const elapsedPct = clamp(((now - startDate) / (endDate - startDate)) * 100)
+  const gap = elapsedPct - progress
+  if (gap > 30) return 'danger'
+  if (gap > 15) return 'warning'
+  return 'accent'
+}
+
 // Feature como filho de rollup (peso 1). Retorna null quando a feature deve
 // ficar FORA do denominador (arquivada, ou 'pending' sem tasks — indeterminado)
 // — rollupProgress também filtra progress null, mas resolver aqui evita

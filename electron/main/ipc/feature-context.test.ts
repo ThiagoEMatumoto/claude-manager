@@ -30,6 +30,8 @@ function makeFeature(overrides: Partial<Feature> = {}): Feature {
     model: null,
     repos: [],
     origin: 'manual',
+    objectiveLinkCount: 0,
+    isAppDev: false,
     createdAt: 0,
     updatedAt: 0,
     completedAt: null,
@@ -67,5 +69,21 @@ describe('buildFeatureContextContent', () => {
     const sectionIdx = content.indexOf('Detalhe importante da feature.')
     expect(trackingIdx).toBeGreaterThan(-1)
     expect(sectionIdx).toBeGreaterThan(trackingIdx)
+  })
+
+  it('sem OKR linkado (default []): avisa e sugere feature_set_objective_links', () => {
+    const content = buildFeatureContextContent(makeFeature())
+    expect(content).toContain('ainda não está sob nenhum OKR')
+    expect(content).toContain('feature_set_objective_links')
+  })
+
+  it('com 1 OKR linkado: menciona o título no singular', () => {
+    const content = buildFeatureContextContent(makeFeature(), ['Lançar o MCP'])
+    expect(content).toContain('Esta feature serve o OKR «Lançar o MCP».')
+  })
+
+  it('com 2+ OKRs linkados: menciona todos no plural', () => {
+    const content = buildFeatureContextContent(makeFeature(), ['OKR A', 'OKR B'])
+    expect(content).toContain('Esta feature serve os OKRs: «OKR A», «OKR B».')
   })
 })

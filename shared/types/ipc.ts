@@ -569,6 +569,12 @@ export interface Feature {
   repos: FeatureRepoLink[]
   // Vive só no SQLite (como archivedAt) — não vai pro frontmatter do `.md`.
   origin: FeatureOrigin
+  // COUNT de feature_links da feature (0 = "sem OKR"). Onda 0: dado que não
+  // existia em nenhuma projeção — causa raiz da sub-linkagem.
+  objectiveLinkCount: number
+  // Estampada quando o repo da sessão é o próprio claude-manager (Onda 3 —
+  // separação app-dev). Vive só no SQLite, mesmo padrão de origin.
+  isAppDev: boolean
   createdAt: number
   updatedAt: number
   completedAt: number | null
@@ -604,6 +610,9 @@ export interface CreateFeatureInput {
   // Default 'manual'. A resolução automática de sessões passa 'auto' (rascunho
   // oculto até a feature ganhar o 1º session record).
   origin?: FeatureOrigin
+  // Default false. resolveFeature passa true quando a sessão roda no repo do
+  // próprio claude-manager (Onda 3 — separação app-dev).
+  isAppDev?: boolean
   // Seções iniciais do corpo (preenchem o esqueleto de headings).
   overview?: string
   businessRules?: string
@@ -668,6 +677,10 @@ export interface LinkedFeatureSummary {
   title: string
   status: FeatureStatus
   progress: number | null
+  // Feature arquivada depois de vinculada (Onda 1): sai do rollup (já era o
+  // caso), mas continua aparecendo aqui sinalizada como "órfã de contexto" em
+  // vez de sumir em silêncio da lista.
+  archived: boolean
 }
 
 // ---- Objetivos / Key Results (camada genérica de OKRs, Fase 1) ----
@@ -824,6 +837,9 @@ export interface ObjectiveListFilter {
 export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
 export type TaskPriority = 'low' | 'medium' | 'high'
 export type TaskParentType = 'objective' | 'key_result' | 'feature'
+// 'manual' = criada pelo usuário (IPC); 'auto' = criada via MCP tool task_create
+// (chamada por uma sessão Claude Code). Mesmo padrão de FeatureOrigin.
+export type TaskOrigin = 'manual' | 'auto'
 
 // Vínculo polimórfico tarefa → parent (sem FK real em parentId; tarefa
 // standalone = sem vínculos). Alimenta o rollup de KRs/objetivos auto_rollup.
@@ -847,6 +863,11 @@ export interface Task {
   notes: string | null
   position: number
   links: TaskLink[]
+  origin: TaskOrigin
+  // Sessão MCP que criou a task (quando conhecida). O server MCP hoje é
+  // stateless/compartilhado (electron/main/services/mcp/server.ts) — sem
+  // identificação de sessão por request — então fica null por enquanto.
+  sourceSessionId: string | null
   createdAt: number
   updatedAt: number
 }
@@ -861,6 +882,9 @@ export interface CreateTaskInput {
   notes?: string | null
   position?: number
   links?: TaskLink[]
+  // Default 'manual'. O handler MCP de task_create passa 'auto'.
+  origin?: TaskOrigin
+  sourceSessionId?: string | null
 }
 
 export interface UpdateTaskInput {
@@ -1314,6 +1338,8 @@ export interface OverviewFeatureActivity {
   projectId: string
   lastSessionAt: number | null
   sessionCount: number
+  // COUNT de feature_links (0 = "sem OKR") — mesma projeção de Feature.objectiveLinkCount.
+  objectiveLinkCount: number
 }
 
 // Payload agregado do dashboard: a árvore inteira numa chamada IPC (evita N+1

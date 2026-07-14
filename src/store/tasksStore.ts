@@ -19,6 +19,9 @@ interface TasksState {
   filter: TaskListFilter
   loading: boolean
   error: string | null
+  // Tarefa alvo de navigateToTask (nav.ts): TasksArea observa e abre o dialog
+  // de edição dela assim que aparecer em `tasks`, depois limpa.
+  focusTaskId: string | null
 
   load: () => Promise<void>
   refresh: () => Promise<void>
@@ -29,6 +32,9 @@ interface TasksState {
   deleteTask: (id: string) => Promise<void>
   setLinks: (taskId: string, links: TaskLink[]) => Promise<Task>
 
+  focusTask: (id: string) => void
+  clearFocusTask: () => void
+
   startUpdatedWatch: () => void
   stopUpdatedWatch: () => void
 }
@@ -38,6 +44,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   filter: {},
   loading: false,
   error: null,
+  focusTaskId: null,
 
   load: async () => {
     set({ loading: true, error: null })
@@ -80,6 +87,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     await get().refresh()
     return updated
   },
+
+  focusTask: (id) => set({ focusTaskId: id }),
+  clearFocusTask: () => set({ focusTaskId: null }),
 
   startUpdatedWatch: () => {
     // StrictMode monta o effect 2x; só uma assinatura real.

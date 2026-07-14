@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArrowLeft, Pencil, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { navigateToFeature } from '@/lib/nav'
+import { objectiveProgressTone } from '../../../shared/progress'
 import type { KeyResult, ObjectiveDetail as ObjectiveDetailType } from '../../../shared/types/ipc'
 import { DIRECTION_LABEL, PRIORITY_LABEL, PROGRESS_MODE_LABEL } from './status'
 import { KindBadge, StatusBadge } from './ObjectiveList'
@@ -65,9 +67,15 @@ function ManualProgress({
   )
 }
 
-// Legenda do rollup automático: com KRs o progresso vem deles; sem KRs, das
-// features vinculadas + tarefas diretas (espelha objectiveProgress no main).
+// Legenda do rollup automático: com KRs o progresso vem SÓ deles — features
+// linkadas direto ficam fora do número mesmo existindo (achado-raiz da
+// curadoria: linkar features a um objetivo com KRs não move o %). Sem KRs, o
+// progresso vem das features vinculadas + tarefas diretas (espelha
+// objectiveProgress no main).
 function rollupLegend(detail: ObjectiveDetailType): string {
+  if (detail.keyResults.length > 0 && detail.linkedFeatures.length > 0) {
+    return `Progresso vem só dos ${detail.keyResults.length} key result(s) — as ${detail.linkedFeatures.length} feature(s) abaixo não entram neste número.`
+  }
   if (detail.keyResults.length > 0) {
     return `Média ponderada de ${detail.keyResults.length} key result(s).`
   }
@@ -75,6 +83,36 @@ function rollupLegend(detail: ObjectiveDetailType): string {
     return `Rollup de ${detail.linkedFeatures.length} feature(s) vinculada(s) e tarefas diretas.`
   }
   return 'Sem key results — progresso indeterminado.'
+}
+
+// Breakdown inline dos filhos que efetivamente contribuem pro rollup — espelha
+// a mesma condição de objectiveProgress no main (KRs elegíveis > 0 → só eles
+// contam; senão, features linkadas). Render puro no call site: não reestrutura
+// o retorno de computeProgress, só re-lê os dados que ObjectiveDetail já tem.
+function ProgressBreakdown({ detail }: { detail: ObjectiveDetailType }) {
+  const eligibleKrs = detail.keyResults.filter((kr) => kr.status !== 'cancelled' && kr.progress !== null)
+  const contributors =
+    eligibleKrs.length > 0
+      ? eligibleKrs.map((kr) => ({ id: kr.id, label: kr.title, progress: kr.progress as number }))
+      : detail.linkedFeatures
+          .filter((f) => !f.archived && f.progress !== null)
+          .map((f) => ({ id: f.id, label: f.title, progress: f.progress as number }))
+
+  if (contributors.length === 0) return null
+
+  return (
+    <ul className="mt-2 flex flex-col gap-0.5">
+      {contributors.map((c) => (
+        <li
+          key={c.id}
+          className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-text-dim)]"
+        >
+          <span className="min-w-0 truncate">{c.label}</span>
+          <span className="shrink-0 tabular-nums">{Math.round(c.progress)}%</span>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 function MetricField({ label, value }: { label: string; value: string }) {
@@ -186,7 +224,14 @@ export function ObjectiveDetail({
             </span>
           </div>
 
-          <ProgressBar value={detail.progress} />
+          <ProgressBar
+            value={detail.progress}
+            tone={objectiveProgressTone({
+              progress: detail.progress,
+              startDate: detail.startDate,
+              endDate: detail.endDate,
+            })}
+          />
 
           {detail.progressMode === 'metric' && (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -207,7 +252,10 @@ export function ObjectiveDetail({
           )}
 
           {detail.progressMode === 'auto_rollup' && (
-            <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">{rollupLegend(detail)}</p>
+            <>
+              <p className="mt-2 text-[10px] text-[var(--color-text-dim)]">{rollupLegend(detail)}</p>
+              <ProgressBreakdown detail={detail} />
+            </>
           )}
         </section>
 
@@ -242,20 +290,40 @@ export function ObjectiveDetail({
 
         {detail.linkedFeatures.length > 0 && (
           <section className="mt-6">
-            <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Features</h2>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+              Features{detail.keyResults.length > 0 ? ' (fora do rollup)' : ''}
+            </h2>
             <ul className="flex flex-col gap-2">
               {detail.linkedFeatures.map((f) => (
                 <li
                   key={f.id}
-                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+                  className={`rounded-lg border bg-[var(--color-surface)] px-4 py-3 ${
+                    f.archived
+                      ? 'border-dashed border-[var(--color-border)] opacity-60'
+                      : 'border-[var(--color-border)]'
+                  }`}
                 >
-                  <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => navigateToFeature(f.id)}
+                    title="Abrir em Features"
+                    className="flex w-full items-center justify-between gap-3 rounded text-left transition hover:opacity-80"
+                  >
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">
                       {f.title}
                     </span>
-                    <FeatureStatusBadge status={f.status} />
-                  </div>
-                  <ProgressBar value={f.progress} className="mt-2" />
+                    {f.archived ? (
+                      <span
+                        className="shrink-0 rounded-full border border-[var(--color-text-dim)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-dim)]"
+                        title="Feature arquivada depois de vinculada — fora do rollup"
+                      >
+                        órfã de contexto
+                      </span>
+                    ) : (
+                      <FeatureStatusBadge status={f.status} />
+                    )}
+                  </button>
+                  {!f.archived && <ProgressBar value={f.progress} className="mt-2" />}
                 </li>
               ))}
             </ul>

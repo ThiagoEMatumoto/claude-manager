@@ -60,29 +60,53 @@ export function DueDateBadge({ task }: { task: Task }) {
   )
 }
 
-// Chips dos vínculos da tarefa (pai: objetivo/KR/feature).
+// Chips dos vínculos da tarefa (pai: objetivo/KR/feature). onNavigate é
+// opcional: quando ausente (ex. dentro de um dialog de edição), o chip fica
+// só informativo — evita navegar pra longe no meio de um fluxo de edição.
 export function LinkChips({
   links,
   resolveLinkLabel,
+  onNavigate,
 }: {
   links: TaskLink[]
   resolveLinkLabel: (link: TaskLink) => string
+  onNavigate?: (link: TaskLink) => void
 }) {
   if (links.length === 0) return null
   return (
     <>
-      {links.map((link) => (
-        <span
-          key={`${link.parentType}:${link.parentId}`}
-          className="inline-flex max-w-48 items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]"
-          title={`${PARENT_TYPE_META[link.parentType].label}: ${resolveLinkLabel(link)}`}
-        >
-          <span className="shrink-0 font-medium text-[var(--color-accent)]">
-            {PARENT_TYPE_META[link.parentType].label}
-          </span>
-          <span className="truncate">{resolveLinkLabel(link)}</span>
-        </span>
-      ))}
+      {links.map((link) => {
+        const label = `${PARENT_TYPE_META[link.parentType].label}: ${resolveLinkLabel(link)}`
+        const chipClass =
+          'inline-flex max-w-48 items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]'
+        if (!onNavigate) {
+          return (
+            <span key={`${link.parentType}:${link.parentId}`} className={chipClass} title={label}>
+              <span className="shrink-0 font-medium text-[var(--color-accent)]">
+                {PARENT_TYPE_META[link.parentType].label}
+              </span>
+              <span className="truncate">{resolveLinkLabel(link)}</span>
+            </span>
+          )
+        }
+        return (
+          <button
+            key={`${link.parentType}:${link.parentId}`}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onNavigate(link)
+            }}
+            className={`${chipClass} transition hover:text-[var(--color-text)]`}
+            title={label}
+          >
+            <span className="shrink-0 font-medium text-[var(--color-accent)]">
+              {PARENT_TYPE_META[link.parentType].label}
+            </span>
+            <span className="truncate">{resolveLinkLabel(link)}</span>
+          </button>
+        )
+      })}
     </>
   )
 }
@@ -92,11 +116,19 @@ interface RowProps {
   resolveLinkLabel: (link: TaskLink) => string
   onEdit: (task: Task) => void
   onDelete: (task: Task) => void
+  onNavigateLink?: (link: TaskLink) => void
   // Pendências mostra o status como badge na linha; a lista padrão também.
   showStatus?: boolean
 }
 
-export function TaskRow({ task, resolveLinkLabel, onEdit, onDelete, showStatus = true }: RowProps) {
+export function TaskRow({
+  task,
+  resolveLinkLabel,
+  onEdit,
+  onDelete,
+  onNavigateLink,
+  showStatus = true,
+}: RowProps) {
   return (
     <li>
       <div
@@ -157,7 +189,7 @@ export function TaskRow({ task, resolveLinkLabel, onEdit, onDelete, showStatus =
               #{tag}
             </span>
           ))}
-          <LinkChips links={task.links} resolveLinkLabel={resolveLinkLabel} />
+          <LinkChips links={task.links} resolveLinkLabel={resolveLinkLabel} onNavigate={onNavigateLink} />
         </div>
       </div>
     </li>
@@ -169,9 +201,10 @@ interface Props {
   resolveLinkLabel: (link: TaskLink) => string
   onEdit: (task: Task) => void
   onDelete: (task: Task) => void
+  onNavigateLink?: (link: TaskLink) => void
 }
 
-export function TaskList({ tasks, resolveLinkLabel, onEdit, onDelete }: Props) {
+export function TaskList({ tasks, resolveLinkLabel, onEdit, onDelete, onNavigateLink }: Props) {
   if (tasks.length === 0) {
     return (
       <div className="py-12 text-center text-sm text-[var(--color-text-dim)]">
@@ -189,6 +222,7 @@ export function TaskList({ tasks, resolveLinkLabel, onEdit, onDelete }: Props) {
           resolveLinkLabel={resolveLinkLabel}
           onEdit={onEdit}
           onDelete={onDelete}
+          onNavigateLink={onNavigateLink}
         />
       ))}
     </ul>

@@ -5,6 +5,7 @@ import type {
   Task,
   TaskLink,
   TaskListFilter,
+  TaskOrigin,
   TaskParentType,
   TaskPriority,
   TaskStatus,
@@ -31,6 +32,8 @@ interface TaskRow {
   tags: string
   notes: string | null
   position: number
+  origin: string
+  source_session_id: string | null
   created_at: number
   updated_at: number
 }
@@ -64,6 +67,8 @@ function rowToTask(row: TaskRow, links: TaskLink[]): Task {
     notes: row.notes,
     position: row.position,
     links,
+    origin: row.origin as TaskOrigin,
+    sourceSessionId: row.source_session_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -144,16 +149,41 @@ function taskToRowParams(task: Task): Record<string, unknown> {
     tags: JSON.stringify(task.tags),
     notes: task.notes,
     position: task.position,
+    origin: task.origin,
+    source_session_id: task.sourceSessionId,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
   }
 }
 
+// Tabela dona de cada TaskParentType — usada pra validar existência do alvo
+// antes de gravar o link (task_links é polimórfico, sem FK em parent_id).
+const PARENT_TABLE: Record<TaskParentType, string> = {
+  objective: 'objectives',
+  key_result: 'key_results',
+  feature: 'features',
+}
+
+// Valida que o alvo existe antes de gravar (mata órfãos por id alucinado —
+// ex.: MCP chamado com um parentId que a LLM inventou). 1 SELECT por link,
+// dentro da mesma transação de quem chama (create/setLinks) — erro joga a
+// transação inteira fora.
 function insertLinks(taskId: string, links: TaskLink[]): void {
-  const stmt = getDb().prepare(
+  const db = getDb()
+  const stmt = db.prepare(
     'INSERT OR IGNORE INTO task_links (task_id, parent_type, parent_id) VALUES (?, ?, ?)',
   )
-  for (const link of links) stmt.run(taskId, link.parentType, link.parentId)
+  for (const link of links) {
+    const target = db
+      .prepare(`SELECT 1 FROM ${PARENT_TABLE[link.parentType]} WHERE id = ?`)
+      .get(link.parentId)
+    if (!target) {
+      throw new Error(
+        `cannot link task to ${link.parentType} ${link.parentId}: target not found`,
+      )
+    }
+    stmt.run(taskId, link.parentType, link.parentId)
+  }
 }
 
 function nextPosition(): number {
@@ -163,7 +193,47 @@ function nextPosition(): number {
   return (row.max ?? 0) + 1
 }
 
+const AUTO_DEDUP_WINDOW_MS = 72 * 60 * 60 * 1000
+
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function linksKey(links: TaskLink[]): string {
+  return links
+    .map((l) => `${l.parentType}:${l.parentId}`)
+    .sort()
+    .join(',')
+}
+
+// Dedup de auto-tasks no chokepoint do store (Onda 3), não só no handler MCP:
+// sessões repetidas tendem a recriar a "mesma" tarefa auto (mesmo título
+// normalizado, mesmo parent) dentro de uma janela curta. Enquanto a tarefa
+// existente não estiver 'done' e tiver sido criada nas últimas 72h, reusa o id
+// em vez de duplicar — silencioso, sem custo pra quem chama.
+function findRecentAutoDuplicate(title: string, links: TaskLink[]): Task | null {
+  const db = getDb()
+  const normalized = normalizeTitle(title)
+  const wantedKey = linksKey(links)
+  const since = Date.now() - AUTO_DEDUP_WINDOW_MS
+  const rows = db
+    .prepare(`SELECT id FROM tasks WHERE origin = 'auto' AND status != 'done' AND created_at >= ?`)
+    .all(since) as Array<{ id: string }>
+  for (const row of rows) {
+    const candidate = loadTask(row.id)
+    if (!candidate) continue
+    if (normalizeTitle(candidate.title) === normalized && linksKey(candidate.links) === wantedKey) {
+      return candidate
+    }
+  }
+  return null
+}
+
 export function create(input: CreateTaskInput): Task {
+  if ((input.origin ?? 'manual') === 'auto') {
+    const dup = findRecentAutoDuplicate(input.title.trim(), input.links ?? [])
+    if (dup) return dup
+  }
   const now = Date.now()
   const status = input.status ?? 'todo'
   const task: Task = {
@@ -179,6 +249,8 @@ export function create(input: CreateTaskInput): Task {
     notes: input.notes ?? null,
     position: input.position ?? nextPosition(),
     links: input.links ?? [],
+    origin: input.origin ?? 'manual',
+    sourceSessionId: input.sourceSessionId ?? null,
     createdAt: now,
     updatedAt: now,
   }
@@ -187,9 +259,9 @@ export function create(input: CreateTaskInput): Task {
     db.prepare(
       `INSERT INTO tasks
          (id, title, description, status, priority, due_date, started_at, completed_at,
-          tags, notes, position, created_at, updated_at)
+          tags, notes, position, origin, source_session_id, created_at, updated_at)
        VALUES (@id, @title, @description, @status, @priority, @due_date, @started_at, @completed_at,
-               @tags, @notes, @position, @created_at, @updated_at)`,
+               @tags, @notes, @position, @origin, @source_session_id, @created_at, @updated_at)`,
     ).run(taskToRowParams(task))
     insertLinks(task.id, task.links)
   })

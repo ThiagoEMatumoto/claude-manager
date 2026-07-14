@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { navigateToFeature } from '@/lib/nav'
 import type { KeyResult, LinkedFeatureSummary } from '../../../shared/types/ipc'
 import { KR_STATUS_META } from './status'
 import { ProgressBar } from './ProgressBar'
@@ -59,14 +60,23 @@ export function KeyResultRow({ kr, linkedFeatures, onEdit, onDelete }: Props) {
       {linkedFeatures && linkedFeatures.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-1.5">
           {linkedFeatures.map((f) => (
-            <li
-              key={f.id}
-              className="inline-flex max-w-48 items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)]"
-              title={`feature: ${f.title}`}
-            >
-              <span className="shrink-0 font-medium text-[var(--color-accent)]">feature</span>
-              <span className="truncate">{f.title}</span>
-              <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+            <li key={f.id}>
+              <button
+                type="button"
+                onClick={() => navigateToFeature(f.id)}
+                className={`inline-flex max-w-48 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] ${
+                  f.archived ? 'border-dashed border-[var(--color-border)] opacity-60' : 'border-[var(--color-border)]'
+                }`}
+                title={f.archived ? `feature arquivada (órfã de contexto): ${f.title}` : `feature: ${f.title}`}
+              >
+                <span className="shrink-0 font-medium text-[var(--color-accent)]">feature</span>
+                <span className="truncate">{f.title}</span>
+                {f.archived ? (
+                  <span className="shrink-0">órfã</span>
+                ) : (
+                  <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+                )}
+              </button>
             </li>
           ))}
         </ul>

@@ -25,7 +25,9 @@ export interface ProgressChild {
   status: KeyResultStatus | TaskStatus
   // Peso no rollup (null = 1).
   weight: number | null
-  // Progresso já calculado do filho (null conta como 0 no numerador).
+  // Progresso já calculado do filho. null = não iniciado/não medido: sai do
+  // rollup (numerador E denominador) — regra única (Onda 0). Filho iniciado
+  // sem progresso mensurável ainda entra como 0 explícito, não null.
   progress: number | null
 }
 
@@ -49,15 +51,21 @@ function metricProgress(entity: ProgressInput): number | null {
 }
 
 function rollupProgress(children?: ProgressChild[]): number | null {
-  // KRs cancelled saem do rollup (numerador E denominador).
-  const eligible = (children ?? []).filter((c) => c.status !== 'cancelled')
+  // Cancelled OU progresso null (não iniciado/não medido) saem do rollup —
+  // numerador E denominador (regra única, Onda 0: antes um KR sem measurement
+  // contava como 0 falso enquanto ocupava o denominador; agora sai igual a
+  // uma feature nunca iniciada). Filho com progresso explícito, mesmo 0,
+  // conta normalmente.
+  const eligible = (children ?? []).filter(
+    (c): c is ProgressChild & { progress: number } => c.status !== 'cancelled' && c.progress !== null,
+  )
   if (eligible.length === 0) return null
   let weightSum = 0
   let weighted = 0
   for (const c of eligible) {
     const weight = c.weight ?? 1
     weightSum += weight
-    weighted += weight * (c.progress ?? 0)
+    weighted += weight * c.progress
   }
   if (weightSum === 0) return null
   return clamp(weighted / weightSum)
@@ -100,21 +108,51 @@ export interface FeatureRollupSource {
 }
 
 // Progresso de uma feature: % de tarefas done vinculadas a ela. Sem tarefas
-// elegíveis (nenhuma, ou todas cancelled), cai pro status da feature:
-// done → 100; demais → null (indeterminado, fica fora do rollup do pai).
+// elegíveis (nenhuma, ou todas cancelled), cai pro status da feature: done →
+// 100; 'pending' (nunca iniciada) → null (indeterminado, fora do rollup do
+// pai); demais status (in-progress/blocked/paused — já começou) → 0 explícito
+// em vez de sumir (regra única de null, Onda 0).
 export function computeFeatureProgress(
   status: FeatureStatus,
   taskStatuses: TaskStatus[],
 ): number | null {
   const rollup = computeTaskRollup(taskStatuses)
   if (rollup !== null) return rollup
-  return status === 'done' ? 100 : null
+  if (status === 'done') return 100
+  return status === 'pending' ? null : 0
+}
+
+// ---- Tom semântico da ProgressBar (Onda 1) ----
+
+export type ProgressTone = 'accent' | 'warning' | 'danger'
+
+export interface ScheduleToneInput {
+  progress: number | null
+  startDate: number | null
+  endDate: number | null
+}
+
+// Compara progresso% vs % do prazo já decorrido (startDate→endDate). Sem
+// prazo definido (falta start ou end, ou intervalo inválido) ou progresso
+// indeterminado, não dá pra avaliar atraso — mantém o accent neutro. Atraso
+// (tempo decorrido à frente do progresso) > 15 pontos = warning, > 30 = danger.
+export function objectiveProgressTone(input: ScheduleToneInput, now: number = Date.now()): ProgressTone {
+  const { progress, startDate, endDate } = input
+  if (progress === null || startDate === null || endDate === null || endDate <= startDate) {
+    return 'accent'
+  }
+  const elapsedPct = clamp(((now - startDate) / (endDate - startDate)) * 100)
+  const gap = elapsedPct - progress
+  if (gap > 30) return 'danger'
+  if (gap > 15) return 'warning'
+  return 'accent'
 }
 
 // Feature como filho de rollup (peso 1). Retorna null quando a feature deve
-// ficar FORA do denominador (arquivada ou progresso indeterminado) — a
-// exclusão acontece aqui, não em rollupProgress: FeatureStatus não tem
-// 'cancelled', então o status emitido é a sentinela não-cancelled 'active'.
+// ficar FORA do denominador (arquivada, ou 'pending' sem tasks — indeterminado)
+// — rollupProgress também filtra progress null, mas resolver aqui evita
+// carregar um ProgressChild fantasma. FeatureStatus não tem 'cancelled', então
+// o status emitido é a sentinela não-cancelled 'active'.
 export function featureProgressChild(
   feature: FeatureRollupSource,
   taskStatuses: TaskStatus[],

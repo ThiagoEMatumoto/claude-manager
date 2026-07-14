@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, History, Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
-import type { Feature, FeatureStatus, Project } from '../../../shared/types/ipc'
+import type { Feature, FeatureStatus, ObjectiveWithProgress, Project } from '../../../shared/types/ipc'
 import { STATUS_META, STATUS_ORDER } from './status'
 
-// 'drafts' = rascunhos ocultos (auto-criados sem registros); o conjunto vem
-// pronto da FeaturesArea via byProject — aqui só pulamos o filtro de status.
-type StatusFilter = 'all' | FeatureStatus | 'drafts'
+// 'drafts' = rascunhos ocultos (auto-criados sem registros); 'app-dev' = dev
+// do próprio claude-manager (Onda 3 — oculta por default de todos os outros
+// filtros). Os dois conjuntos vêm prontos da FeaturesArea via byProject — aqui
+// só pulamos o filtro de status pra eles.
+type StatusFilter = 'all' | FeatureStatus | 'drafts' | 'app-dev'
 
 interface Props {
   projects: Project[]
@@ -16,8 +18,13 @@ interface Props {
   loading: boolean
   query: string
   filter: StatusFilter
+  // Filtro por objetivo (Onda 2): byProject já vem filtrado pela área — aqui
+  // só populamos o select e refletimos o valor escolhido.
+  objectives: ObjectiveWithProgress[]
+  objectiveFilter: string
   onQuery: (q: string) => void
   onFilter: (f: StatusFilter) => void
+  onObjectiveFilter: (id: string) => void
   onSelect: (id: string) => void
   onReload: () => void
   onNew: () => void
@@ -29,6 +36,7 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'Todas' },
   ...STATUS_ORDER.map((s) => ({ id: s as StatusFilter, label: STATUS_META[s].label })),
   { id: 'drafts', label: 'Rascunhos' },
+  { id: 'app-dev', label: 'App dev' },
 ]
 
 export function FeaturesSidebar({
@@ -38,8 +46,11 @@ export function FeaturesSidebar({
   loading,
   query,
   filter,
+  objectives,
+  objectiveFilter,
   onQuery,
   onFilter,
+  onObjectiveFilter,
   onSelect,
   onReload,
   onNew,
@@ -55,7 +66,14 @@ export function FeaturesSidebar({
       .map((project) => {
         const all = byProject[project.id] ?? []
         const features = all.filter((f) => {
-          if (filter !== 'all' && filter !== 'drafts' && f.status !== filter) return false
+          if (
+            filter !== 'all' &&
+            filter !== 'drafts' &&
+            filter !== 'app-dev' &&
+            f.status !== filter
+          ) {
+            return false
+          }
           if (q && !f.title.toLowerCase().includes(q)) return false
           return true
         })
@@ -130,6 +148,21 @@ export function FeaturesSidebar({
             </button>
           ))}
         </div>
+        {objectives.length > 0 && (
+          <select
+            value={objectiveFilter}
+            onChange={(e) => onObjectiveFilter(e.target.value)}
+            className="mt-2 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="">Objetivo — todos</option>
+            <option value="none">Sem objetivo</option>
+            {objectives.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.title}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">

@@ -79,18 +79,23 @@ interface FeatureActivityRow {
   project_id: string
   last_session_at: number | null
   session_count: number
+  objective_link_count: number
 }
 
 // Features ativas (in-progress|blocked|paused, não-arquivadas) com a atividade
 // real de sessões: última sessão = MAX(COALESCE(ended_at, started_at)) e
 // contagem, agregadas só sobre sessions com feature_id (sessões avulsas e sem
 // vínculo ficam de fora do GROUP BY). LEFT JOIN: feature sem nenhuma sessão
-// aparece com lastSessionAt null e sessionCount 0.
+// aparece com lastSessionAt null e sessionCount 0. objective_link_count (Onda
+// 0) espelha a mesma agregação de feature-store.objectiveLinkCounts.
+// Features app-dev (Onda 3) ficam fora por default — não são "trabalho" no
+// sentido que o card mede, e poluiriam o sinal do "sem OKR".
 function featureActivity(): OverviewFeatureActivity[] {
   const rows = getDb()
     .prepare(
       `SELECT f.id, f.title, f.status, f.project_id,
-              s.last_session_at, COALESCE(s.session_count, 0) AS session_count
+              s.last_session_at, COALESCE(s.session_count, 0) AS session_count,
+              COALESCE(l.link_count, 0) AS objective_link_count
        FROM features f
        LEFT JOIN (
          SELECT feature_id,
@@ -100,7 +105,11 @@ function featureActivity(): OverviewFeatureActivity[] {
          WHERE feature_id IS NOT NULL
          GROUP BY feature_id
        ) s ON s.feature_id = f.id
+       LEFT JOIN (
+         SELECT feature_id, COUNT(*) AS link_count FROM feature_links GROUP BY feature_id
+       ) l ON l.feature_id = f.id
        WHERE f.status IN ('in-progress', 'blocked', 'paused') AND f.archived_at IS NULL
+         AND f.is_app_dev = 0
        ORDER BY COALESCE(s.last_session_at, f.updated_at) DESC`,
     )
     .all() as FeatureActivityRow[]
@@ -111,6 +120,7 @@ function featureActivity(): OverviewFeatureActivity[] {
     projectId: r.project_id,
     lastSessionAt: r.last_session_at,
     sessionCount: r.session_count,
+    objectiveLinkCount: r.objective_link_count,
   }))
 }
 

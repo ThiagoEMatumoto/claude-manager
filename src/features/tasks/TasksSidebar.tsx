@@ -2,11 +2,21 @@ import { useMemo } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
-import type { Task, TaskPriority, TaskStatus } from '../../../shared/types/ipc'
+import type {
+  Feature,
+  ObjectiveWithProgress,
+  Task,
+  TaskOrigin,
+  TaskPriority,
+  TaskStatus,
+} from '../../../shared/types/ipc'
 import { PRIORITY_META, PRIORITY_ORDER, TASK_STATUS_META, TASK_STATUS_ORDER } from './status'
 
 export type StatusFilter = 'all' | TaskStatus
 export type PriorityFilter = 'all' | TaskPriority
+export type OriginFilter = 'all' | TaskOrigin
+
+const ORIGIN_META: Record<TaskOrigin, string> = { manual: 'manual', auto: 'automática' }
 
 interface Props {
   // Já filtradas por status/prioridade (filtro do store); query/tags são
@@ -16,10 +26,19 @@ interface Props {
   query: string
   statusFilter: StatusFilter
   priorityFilter: PriorityFilter
+  // Auto/manual (Onda 3 — higiene): 'all' por default, sem esconder nada
+  // sozinho; só dá o controle de foco.
+  originFilter: OriginFilter
   selectedTags: string[]
+  // Objetivo/feature pra popular o select de vínculo; '' = todos (Onda 2).
+  objectives: ObjectiveWithProgress[]
+  features: Feature[]
+  linkFilter: string
   onQuery: (q: string) => void
   onStatusFilter: (s: StatusFilter) => void
   onPriorityFilter: (p: PriorityFilter) => void
+  onOriginFilter: (o: OriginFilter) => void
+  onLinkFilter: (id: string) => void
   onToggleTag: (tag: string) => void
   onReload: () => void
   onNew: () => void
@@ -55,10 +74,16 @@ export function TasksSidebar({
   query,
   statusFilter,
   priorityFilter,
+  originFilter,
   selectedTags,
+  objectives,
+  features,
+  linkFilter,
   onQuery,
   onStatusFilter,
   onPriorityFilter,
+  onOriginFilter,
+  onLinkFilter,
   onToggleTag,
   onReload,
   onNew,
@@ -132,6 +157,46 @@ export function TasksSidebar({
             />
           ))}
         </div>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          <Pill active={originFilter === 'all'} label="Origem — todas" onClick={() => onOriginFilter('all')} />
+          <Pill
+            active={originFilter === 'manual'}
+            label={ORIGIN_META.manual}
+            onClick={() => onOriginFilter('manual')}
+          />
+          <Pill
+            active={originFilter === 'auto'}
+            label={ORIGIN_META.auto}
+            onClick={() => onOriginFilter('auto')}
+          />
+        </div>
+        {(objectives.length > 0 || features.length > 0) && (
+          <select
+            value={linkFilter}
+            onChange={(e) => onLinkFilter(e.target.value)}
+            className="mt-1.5 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="">Objetivo/Feature — todos</option>
+            {objectives.length > 0 && (
+              <optgroup label="Objetivos">
+                {objectives.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {features.length > 0 && (
+              <optgroup label="Features">
+                {features.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
         {allTags.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {allTags.map((tag) => {

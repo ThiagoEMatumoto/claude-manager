@@ -1,4 +1,4 @@
-import type { TaskPriority, TaskStatus } from './types/ipc'
+import type { TaskOrigin, TaskPriority, TaskStatus } from './types/ipc'
 
 // Funções puras de tarefas pendentes do dashboard (Fase 4) — importáveis por
 // main e renderer (precedente: shared/progress.ts). "Pendente" = tarefa que
@@ -60,4 +60,32 @@ export function classifyDue(dueDate: number | null, now: number): DueBucket {
   const nextDay = new Date(dayStart)
   nextDay.setDate(nextDay.getDate() + 1)
   return dueDate < nextDay.getTime() ? 'today' : 'upcoming'
+}
+
+// ---- Auto-tasks paradas (nudge de higiene, Onda 3) ----
+
+// Mesmo threshold de "parada" usado pra features (home-selectors.ts,
+// STALLED_FEATURE_MS) — convenção de UX compartilhada, não uma dependência
+// estrutural entre os dois módulos.
+export const STOPPED_AUTO_TASK_MS = 3 * 24 * 60 * 60 * 1000
+
+export interface StoppedAutoTaskInput {
+  origin: TaskOrigin
+  status: TaskStatus
+  updatedAt: number
+}
+
+// Tarefas auto-criadas (origin='auto'), ainda pendentes, sem toque há mais de
+// 3 dias — candidatas ao nudge "N auto paradas → arquivar" (bulk-cancel
+// manual; decay automático via cron é Onda 4, deferida).
+export function selectStoppedAutoTasks<T extends StoppedAutoTaskInput>(
+  tasks: T[],
+  now: number,
+): T[] {
+  return tasks.filter(
+    (t) =>
+      t.origin === 'auto' &&
+      isPendingStatus(t.status) &&
+      now - t.updatedAt > STOPPED_AUTO_TASK_MS,
+  )
 }

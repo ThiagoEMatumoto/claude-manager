@@ -158,6 +158,8 @@ function fromFrontmatter(fm: Partial<Frontmatter>, docPath: string, body: string
     completedAt: typeof fm.completed === 'number' ? fm.completed : null,
     archivedAt: null, // archive vive só no SQLite, não no frontmatter
     origin: 'manual', // idem: origin vive só no SQLite (reindex preserva o valor da row)
+    objectiveLinkCount: 0, // idem: vem de feature_links, reindexFromFile sobrescreve com o valor real
+    isAppDev: false, // idem: is_app_dev vive só no SQLite, reindexFromFile preserva o valor real
     body,
   }
 }
@@ -201,9 +203,15 @@ interface FeatureRow {
   completed_at: number | null
   archived_at: number | null
   origin: string
+  is_app_dev: number
 }
 
-function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string): Feature {
+function rowToFeature(
+  row: FeatureRow,
+  repos: FeatureRepoLink[],
+  objectiveLinkCount: number,
+  body?: string,
+): Feature {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -216,6 +224,8 @@ function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string):
     model: row.model,
     repos,
     origin: row.origin as FeatureOrigin,
+    objectiveLinkCount,
+    isAppDev: !!row.is_app_dev,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -229,6 +239,27 @@ function loadRepos(featureId: string): FeatureRepoLink[] {
     .prepare('SELECT repo_id, branch, worktree_path FROM feature_repos WHERE feature_id = ?')
     .all(featureId) as Array<{ repo_id: string; branch: string | null; worktree_path: string | null }>
   return rows.map((r) => ({ repoId: r.repo_id, branch: r.branch, worktreePath: r.worktree_path }))
+}
+
+// ---- Vínculos a objetivos/KRs: contagem (Onda 0) ----
+// Dado que faltava em toda projeção (achado-raiz: "ninguém expõe quantas
+// features não têm OKR") — causa raiz da sub-linkagem.
+
+// Uso pontual (get/findFeatureByRepoBranch): 1 SELECT por feature.
+function objectiveLinkCountOf(featureId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM feature_links WHERE feature_id = ?')
+    .get(featureId) as { n: number }
+  return row.n
+}
+
+// Batch (mesmo padrão de sessionCounts/recordStats): featureId -> count de
+// feature_links num único GROUP BY, pra listagens não caírem em N+1.
+function objectiveLinkCounts(): Map<string, number> {
+  const rows = getDb()
+    .prepare('SELECT feature_id, COUNT(*) AS n FROM feature_links GROUP BY feature_id')
+    .all() as Array<{ feature_id: string; n: number }>
+  return new Map(rows.map((r) => [r.feature_id, r.n]))
 }
 
 function writeRepos(featureId: string, repos: FeatureRepoLink[]): void {
@@ -250,9 +281,9 @@ function upsertIndex(f: Feature): void {
     db.prepare(
       `INSERT INTO features
          (id, project_id, slug, title, status, objective, doc_path,
-          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin)
+          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin, is_app_dev)
        VALUES (@id, @project_id, @slug, @title, @status, @objective, @doc_path,
-               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin)
+               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin, @is_app_dev)
        ON CONFLICT(id) DO UPDATE SET
          project_id  = excluded.project_id,
          slug        = excluded.slug,
@@ -277,10 +308,12 @@ function upsertIndex(f: Feature): void {
       created_at: f.createdAt,
       updated_at: f.updatedAt,
       completed_at: f.completedAt,
-      // archived_at e origin não vêm do frontmatter; ambos são omitidos do
-      // DO UPDATE — a row existente preserva os valores (inseridos só no INSERT).
+      // archived_at, origin e is_app_dev não vêm do frontmatter; todos são
+      // omitidos do DO UPDATE — a row existente preserva os valores
+      // (inseridos só no INSERT).
       archived_at: f.archivedAt,
       origin: f.origin,
+      is_app_dev: f.isAppDev ? 1 : 0,
     })
     db.prepare('DELETE FROM feature_repos WHERE feature_id = ?').run(f.id)
     const ins = db.prepare(
@@ -309,6 +342,8 @@ export function create(input: CreateFeatureInput): Feature {
     model: input.model ?? null,
     repos: input.repos ?? [],
     origin: input.origin ?? 'manual',
+    objectiveLinkCount: 0, // feature nova: links são gravados depois via setObjectiveLinks
+    isAppDev: input.isAppDev ?? false,
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -359,7 +394,10 @@ function listRows(opts: ListOpts): FeatureRow[] {
 }
 
 export function list(projectId?: string): Feature[] {
-  return listRows({ projectId }).map((row) => rowToFeature(row, loadRepos(row.id)))
+  const linkCounts = objectiveLinkCounts()
+  return listRows({ projectId }).map((row) =>
+    rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
+  )
 }
 
 // Agrega a contagem de sessões ligadas (sessions.feature_id) num único GROUP BY,
@@ -395,9 +433,10 @@ export function listWithStats(opts?: {
 }): FeatureWithStats[] {
   const counts = sessionCounts()
   const records = recordStats()
+  const linkCounts = objectiveLinkCounts()
   return listRows({ includeArchived: opts?.includeArchived, includeDrafts: opts?.includeDrafts })
     .map((row) => ({
-      ...rowToFeature(row, loadRepos(row.id)),
+      ...rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
       sessionCount: counts.get(row.id) ?? 0,
       recordCount: records.get(row.id)?.count ?? 0,
       lastRecordAt: records.get(row.id)?.last ?? null,
@@ -410,7 +449,7 @@ export function get(id: string): Feature | null {
   if (!row) return null
   // Corpo vem do `.md` (fonte de verdade); cai pra string vazia se o arquivo sumiu.
   const doc = readDoc(row.doc_path)
-  return rowToFeature(row, loadRepos(row.id), doc?.body ?? '')
+  return rowToFeature(row, loadRepos(row.id), objectiveLinkCountOf(row.id), doc?.body ?? '')
 }
 
 // ---- Helpers de resolução (auto-vínculo de sessões a features, fase 8) ----
@@ -446,14 +485,15 @@ export function findFeatureByRepoBranch(repoId: string, branch: string): Feature
     )
     .get(repoId, branch) as FeatureRow | undefined
   if (!row) return null
-  return rowToFeature(row, loadRepos(row.id))
+  return rowToFeature(row, loadRepos(row.id), objectiveLinkCountOf(row.id))
 }
 
 // Features NÃO-arquivadas de um projeto (sem corpo). INCLUI rascunhos: o fuzzy
 // match da resolução de sessões precisa enxergá-los pra linkar em vez de duplicar.
 export function listActiveFeaturesByProject(projectId: string): Feature[] {
+  const linkCounts = objectiveLinkCounts()
   return listRows({ projectId, includeDrafts: true }).map((row) =>
-    rowToFeature(row, loadRepos(row.id)),
+    rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
   )
 }
 
@@ -581,6 +621,13 @@ export function archive(id: string): void {
   getDb().prepare('UPDATE features SET archived_at = ?, updated_at = ? WHERE id = ?').run(now, now, id)
 }
 
+// Estampa/limpa a tag app-dev (Onda 3 — separação app-dev). Sem bump de
+// updated_at de propósito: é uma correção de metadado, não uma mudança de
+// atividade — não deve "subir" a feature nas listagens ordenadas por atividade.
+export function setAppDev(id: string, value: boolean): void {
+  getDb().prepare('UPDATE features SET is_app_dev = ? WHERE id = ?').run(value ? 1 : 0, id)
+}
+
 // ---- Vínculos Feature → Objetivo/KR (Fase 3) ----
 
 // feature_links é polimórfico (sem FK em target_id), espelho de task_links:
@@ -600,9 +647,38 @@ export function listObjectiveLinks(featureId: string): FeatureObjectiveLink[] {
   }))
 }
 
+// Títulos dos OKRs que a feature serve (Onda 2 — contexto injetado no spawn):
+// objetivo direto OU o objetivo dono do KR, quando o vínculo é a um KR. Query
+// direta em objectives/key_results (sem importar objective-store — mesmo
+// padrão de linkedFeatureRows em objective-store.ts, que também consulta
+// `features` direto pra evitar import circular).
+export function linkedObjectiveTitles(featureId: string): string[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT o.title FROM feature_links l
+         JOIN objectives o ON o.id = l.target_id
+        WHERE l.feature_id = ? AND l.target_type = 'objective'
+       UNION
+       SELECT o.title FROM feature_links l
+         JOIN key_results kr ON kr.id = l.target_id
+         JOIN objectives o ON o.id = kr.objective_id
+        WHERE l.feature_id = ? AND l.target_type = 'key_result'`,
+    )
+    .all(featureId, featureId) as Array<{ title: string }>
+  return rows.map((r) => r.title)
+}
+
+// Tabela dona de cada FeatureLinkTargetType — usada pra validar existência do
+// alvo antes de gravar (feature_links é polimórfico, sem FK em target_id).
+const LINK_TARGET_TABLE: Record<FeatureLinkTargetType, string> = {
+  objective: 'objectives',
+  key_result: 'key_results',
+}
+
 // Substitui o conjunto de vínculos (replace-all em transação); retorna os
 // links anteriores pra que o IPC notifique também os objetivos que perderam
-// a feature. Bumpa updated_at (espelha setLinks de task-store).
+// a feature. Bumpa updated_at (espelha setLinks de task-store). Valida que
+// cada alvo existe antes de gravar — mata órfãos por id alucinado.
 export function setObjectiveLinks(
   featureId: string,
   links: FeatureObjectiveLink[],
@@ -614,7 +690,17 @@ export function setObjectiveLinks(
     const ins = db.prepare(
       'INSERT OR IGNORE INTO feature_links (feature_id, target_type, target_id) VALUES (?, ?, ?)',
     )
-    for (const link of links) ins.run(featureId, link.targetType, link.targetId)
+    for (const link of links) {
+      const target = db
+        .prepare(`SELECT 1 FROM ${LINK_TARGET_TABLE[link.targetType]} WHERE id = ?`)
+        .get(link.targetId)
+      if (!target) {
+        throw new Error(
+          `cannot link feature ${featureId} to ${link.targetType} ${link.targetId}: target not found`,
+        )
+      }
+      ins.run(featureId, link.targetType, link.targetId)
+    }
     db.prepare('UPDATE features SET updated_at = ? WHERE id = ?').run(Date.now(), featureId)
   })
   tx()
@@ -645,14 +731,18 @@ export function reindexFromFile(path: string): Feature | null {
   }
   const doc = readDoc(path)
   if (!doc) return null
-  // preserva archived_at e origin existentes (vivem só no SQLite)
+  // preserva archived_at, origin e is_app_dev existentes (vivem só no SQLite)
   const existing = getDb()
-    .prepare('SELECT archived_at, origin FROM features WHERE id = ?')
-    .get(doc.feature.id) as { archived_at: number | null; origin: string } | undefined
+    .prepare('SELECT archived_at, origin, is_app_dev FROM features WHERE id = ?')
+    .get(doc.feature.id) as
+    | { archived_at: number | null; origin: string; is_app_dev: number }
+    | undefined
   const feature: Feature = {
     ...doc.feature,
     archivedAt: existing?.archived_at ?? null,
     origin: (existing?.origin as FeatureOrigin) ?? 'manual',
+    isAppDev: !!existing?.is_app_dev,
+    objectiveLinkCount: objectiveLinkCountOf(doc.feature.id),
   }
   upsertIndex(feature)
   return feature

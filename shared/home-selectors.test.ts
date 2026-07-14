@@ -3,6 +3,7 @@ import {
   groupLiveSessions,
   isStalledFeature,
   selectActiveObjectives,
+  selectFeaturesWithoutObjective,
   selectRecentUsage,
   selectTodayUsage,
   selectUrgentTasks,
@@ -206,6 +207,26 @@ describe('usage selectors', () => {
       const { costDeltaPct } = selectRecentUsage([point(dayAgo(0), { costUsd: 6 })], now)
       expect(costDeltaPct).toBeNull()
     })
+  })
+})
+
+describe('selectFeaturesWithoutObjective', () => {
+  function feature(id: string, objectiveLinkCount: number): { id: string; objectiveLinkCount: number } {
+    return { id, objectiveLinkCount }
+  }
+
+  it('keeps only features with zero objective links', () => {
+    const result = selectFeaturesWithoutObjective([
+      feature('a', 0),
+      feature('b', 2),
+      feature('c', 0),
+      feature('d', 1),
+    ])
+    expect(result.map((f) => f.id)).toEqual(['a', 'c'])
+  })
+
+  it('returns empty when every feature has at least one link', () => {
+    expect(selectFeaturesWithoutObjective([feature('a', 1)])).toEqual([])
   })
 })
 

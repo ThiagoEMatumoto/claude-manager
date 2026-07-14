@@ -109,3 +109,19 @@ export function decideRegistration(inp: RegistrationInputs): RegistrationDecisio
   if (!title) return { action: 'skip' }
   return { action: 'create', title }
 }
+
+// ---- Auto-sugestão de vínculo a objetivo (Onda 2 — fecha a sub-linkagem) ----
+
+// Score alto: confiança suficiente pra gravar o link automaticamente. Score
+// médio: sinaliza "precisa revisão humana" (nunca grava link silenciosamente
+// abaixo do threshold alto). Abaixo do médio: ignora — sem sinal aproveitável.
+export const OBJECTIVE_LINK_THRESHOLD_HIGH = 0.6
+export const OBJECTIVE_LINK_THRESHOLD_MEDIUM = 0.35
+
+export type ObjectiveLinkDecision = 'link' | 'needs-review' | 'skip'
+
+export function decideObjectiveLink(score: number): ObjectiveLinkDecision {
+  if (score >= OBJECTIVE_LINK_THRESHOLD_HIGH) return 'link'
+  if (score >= OBJECTIVE_LINK_THRESHOLD_MEDIUM) return 'needs-review'
+  return 'skip'
+}

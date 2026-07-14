@@ -78,6 +78,22 @@ export function isStalledFeature(feature: FeatureActivityInput, now: number): bo
   return feature.lastSessionAt !== null && now - feature.lastSessionAt > STALLED_FEATURE_MS
 }
 
+// ---- Features de trabalho sem OKR (card 3 — Onda 1, transparência) ----
+
+export interface FeatureWithoutObjectiveInput {
+  objectiveLinkCount: number
+}
+
+// `features` já vem filtrado a features "de trabalho" (in-progress/blocked/
+// paused, não-arquivadas — ver featureActivity no overview-store) — aqui só
+// isola as sem nenhum vínculo a objetivo (achado-raiz #2 da curadoria: o dado
+// existia mas não era exposto em lugar nenhum).
+export function selectFeaturesWithoutObjective<T extends FeatureWithoutObjectiveInput>(
+  features: T[],
+): T[] {
+  return features.filter((f) => f.objectiveLinkCount === 0)
+}
+
 // ---- Objetivos ativos (card 4) ----
 
 export interface ObjectiveNodeInput {

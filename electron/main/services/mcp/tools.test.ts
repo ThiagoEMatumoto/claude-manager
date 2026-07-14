@@ -281,6 +281,23 @@ describe('mcp tools — tasks', () => {
       { parentType: 'objective', parentId: b.id },
     ])
   })
+
+  it('task_create via MCP sempre grava origin "auto" (Onda 0)', () => {
+    const { task } = call<{ task: Task }>('task_create', { title: 'Criada pela sessão' })
+    expect(task.origin).toBe('auto')
+  })
+
+  it('task_create com link pra um alvo inexistente falha (mata órfão por id alucinado)', () => {
+    expect(() =>
+      tool('task_create').handler({
+        title: 'Link fantasma',
+        links: [{ parentType: 'objective', parentId: 'nao-existe' }],
+      }),
+    ).toThrow(/target not found/)
+    // Nada foi persistido: a transação de create+links foi revertida.
+    const { items } = call<{ items: Task[] }>('task_list', { search: 'Link fantasma' })
+    expect(items).toHaveLength(0)
+  })
 })
 
 describe('mcp tools — features', () => {
@@ -372,6 +389,68 @@ describe('mcp tools — features', () => {
       { targetType: 'objective', targetId: a.id },
       { targetType: 'objective', targetId: b.id },
     ])
+  })
+
+  it('feature_set_objective_links com alvo inexistente falha (mata órfão por id alucinado)', () => {
+    seedProject('proj-mcp')
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Sem alvo válido',
+    })
+    expect(() =>
+      tool('feature_set_objective_links').handler({
+        featureId: feature.id,
+        links: [{ targetType: 'objective', targetId: 'nao-existe' }],
+      }),
+    ).toThrow(/target not found/)
+  })
+
+  it('feature_list/feature_get expõem objectiveLinkCount (Onda 0)', () => {
+    seedProject('proj-mcp')
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo pra contar',
+      kind: 'okr',
+    })
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Sem OKR ainda',
+    })
+    const { items } = call<{ items: Feature[] }>('feature_list', { projectId: 'proj-mcp' })
+    expect(items.find((f) => f.id === feature.id)?.objectiveLinkCount).toBe(0)
+
+    call('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: objective.id }],
+    })
+    const { feature: linked } = call<{ feature: Feature }>('feature_get', { id: feature.id })
+    expect(linked.objectiveLinkCount).toBe(1)
+  })
+
+  it('objective_get expõe feature arquivada depois de vinculada como órfã em vez de sumir (Onda 1), e a exclui do rollup', () => {
+    seedProject('proj-mcp')
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo com feature órfã',
+      kind: 'okr',
+    })
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Vai ser arquivada',
+    })
+    call('feature_update', { id: feature.id, status: 'in-progress' })
+    call('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: objective.id }],
+    })
+    call('feature_archive', { id: feature.id })
+
+    const { objective: detail } = call<{ objective: ObjectiveDetail }>('objective_get', {
+      id: objective.id,
+    })
+    expect(detail.linkedFeatures).toHaveLength(1)
+    expect(detail.linkedFeatures[0]).toMatchObject({ id: feature.id, archived: true })
+    // Arquivada sai do rollup (sem outro filho elegível) — progresso fica indeterminado,
+    // não 0: a feature não conta contra o objetivo, só sai da conta.
+    expect(detail.progress).toBeNull()
   })
 })
 

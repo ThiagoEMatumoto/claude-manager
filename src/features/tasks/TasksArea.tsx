@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarClock, Columns3, LayoutList } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { featuresApi, objectivesApi } from '@/lib/ipc'
+import { navigateToFeature, navigateToObjective } from '@/lib/nav'
 import { useTasksStore } from '@/store/tasksStore'
 import type {
   Feature,
@@ -12,7 +13,7 @@ import type {
 import { TaskBoard } from './TaskBoard'
 import { TaskDialog } from './TaskDialog'
 import { TaskList } from './TaskList'
-import { TasksSidebar, type PriorityFilter, type StatusFilter } from './TasksSidebar'
+import { TasksSidebar, type OriginFilter, type PriorityFilter, type StatusFilter } from './TasksSidebar'
 import { PendingView } from './PendingView'
 import { PARENT_TYPE_META } from './status'
 import { useTasks } from './useTasks'
@@ -38,11 +39,22 @@ export function TasksArea() {
   const updateTask = useTasksStore((s) => s.updateTask)
   const deleteTask = useTasksStore((s) => s.deleteTask)
   const setTaskLinks = useTasksStore((s) => s.setLinks)
+  const focusTaskId = useTasksStore((s) => s.focusTaskId)
+  const clearFocusTask = useTasksStore((s) => s.clearFocusTask)
 
   // query/tags filtram em memória; status/prioridade vão pro filtro do store
   // (mesmo padrão de ObjectivesArea).
   const [query, setQuery] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  // Filtro auto/manual (Onda 3 — higiene): 'all' por default.
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all')
+  // App-dev (Onda 3 — separação app-dev): tarefas linkadas a uma feature
+  // app-dev ficam ocultas por default (dev do próprio claude-manager, não
+  // "trabalho"); toggle explícito pra revê-las.
+  const [showAppDev, setShowAppDev] = useState(false)
+  // Filtro por objetivo/feature (Onda 2 — fecha a sub-linkagem): '' = todos.
+  // Casa por parentId direto (não distingue objective/feature — ids não colidem).
+  const [linkFilter, setLinkFilter] = useState('')
   const [view, setView] = useState<ViewMode>('list')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -52,6 +64,9 @@ export function TasksArea() {
   const [objectives, setObjectives] = useState<ObjectiveWithProgress[]>([])
   const [features, setFeatures] = useState<Feature[]>([])
   const [krTitles, setKrTitles] = useState<Map<string, string>>(new Map())
+  // KR id -> objective id: resolve pra onde navegar quando o vínculo da tarefa
+  // é um key_result (sem view de detalhe própria — leva pro objetivo dono).
+  const [krObjectiveId, setKrObjectiveId] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
     let alive = true
@@ -63,11 +78,16 @@ export function TasksArea() {
       const details = await Promise.all(objs.map((o) => objectivesApi.get(o.id)))
       if (!alive) return
       const titles = new Map<string, string>()
+      const objectiveIds = new Map<string, string>()
       for (const d of details) {
         if (!d) continue
-        for (const kr of d.keyResults) titles.set(kr.id, kr.title)
+        for (const kr of d.keyResults) {
+          titles.set(kr.id, kr.title)
+          objectiveIds.set(kr.id, d.id)
+        }
       }
       setKrTitles(titles)
+      setKrObjectiveId(objectiveIds)
     })()
     return () => {
       alive = false
@@ -90,6 +110,20 @@ export function TasksArea() {
     [objectivesById, krTitles, featuresById],
   )
 
+  // Chips de vínculo (LinkChips) navegam pro objetivo/feature dono — KR não
+  // tem view própria, então leva pro objetivo que o contém.
+  const navigateLink = useCallback(
+    (link: TaskLink) => {
+      if (link.parentType === 'feature') {
+        navigateToFeature(link.parentId)
+        return
+      }
+      const objectiveId = link.parentType === 'objective' ? link.parentId : krObjectiveId.get(link.parentId)
+      if (objectiveId) navigateToObjective(objectiveId)
+    },
+    [krObjectiveId],
+  )
+
   const statusFilter: StatusFilter = filter.status ?? 'all'
   const priorityFilter: PriorityFilter = filter.priority ?? 'all'
 
@@ -106,9 +140,21 @@ export function TasksArea() {
       if (selectedTags.length > 0 && !selectedTags.every((tag) => t.tags.includes(tag))) {
         return false
       }
+      if (linkFilter && !t.links.some((l) => l.parentId === linkFilter)) {
+        return false
+      }
+      if (originFilter !== 'all' && t.origin !== originFilter) {
+        return false
+      }
+      if (
+        !showAppDev &&
+        t.links.some((l) => l.parentType === 'feature' && featuresById.get(l.parentId)?.isAppDev)
+      ) {
+        return false
+      }
       return true
     })
-  }, [tasks, q, selectedTags])
+  }, [tasks, q, selectedTags, linkFilter, originFilter, showAppDev, featuresById])
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -126,9 +172,30 @@ export function TasksArea() {
     setDialogOpen(true)
   }
 
+  // navigateToTask (nav.ts) só troca a área + seta focusTaskId — abre o
+  // dialog de edição aqui assim que a tarefa aparecer na lista carregada.
+  useEffect(() => {
+    if (!focusTaskId) return
+    const task = tasks.find((t) => t.id === focusTaskId)
+    if (task) {
+      setEditingTask(task)
+      setDialogOpen(true)
+      clearFocusTask()
+    }
+  }, [focusTaskId, tasks, clearFocusTask])
+
   async function handleDelete(task: Task) {
     if (!window.confirm(`Excluir "${task.title}"?`)) return
     await deleteTask(task.id)
+  }
+
+  // Nudge "N auto paradas → arquivar" (Onda 3): bulk-cancel manual, sem decay
+  // automático (Onda 4, deferida). Reusa o update singular já existente — sem
+  // endpoint novo pra um caso que é só "N updates em sequência".
+  async function handleArchiveStopped(stopped: Task[]) {
+    for (const task of stopped) {
+      await updateTask({ id: task.id, status: 'cancelled' })
+    }
   }
 
   return (
@@ -139,24 +206,43 @@ export function TasksArea() {
         query={query}
         statusFilter={statusFilter}
         priorityFilter={priorityFilter}
+        originFilter={originFilter}
         selectedTags={selectedTags}
+        objectives={objectives}
+        features={features}
+        linkFilter={linkFilter}
         onQuery={setQuery}
         onStatusFilter={(s) => void setFilter({ ...filter, status: s === 'all' ? undefined : s })}
         onPriorityFilter={(p) =>
           void setFilter({ ...filter, priority: p === 'all' ? undefined : p })
         }
+        onOriginFilter={setOriginFilter}
+        onLinkFilter={setLinkFilter}
         onToggleTag={toggleTag}
         onReload={() => void refresh()}
         onNew={openCreate}
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-end gap-1 border-b border-[var(--color-border)] px-4 py-2">
+        <div className="flex items-center justify-end gap-3 border-b border-[var(--color-border)] px-4 py-2">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-dim)]">
+            <input
+              type="checkbox"
+              checked={showAppDev}
+              onChange={(e) => setShowAppDev(e.target.checked)}
+            />
+            mostrar app-dev
+          </label>
           <ViewToggle value={view} onChange={setView} />
         </div>
         {view === 'board' ? (
           <div className="flex-1 overflow-hidden p-5">
-            <TaskBoard tasks={listed} resolveLinkLabel={resolveLinkLabel} onEdit={openEdit} />
+            <TaskBoard
+              tasks={listed}
+              resolveLinkLabel={resolveLinkLabel}
+              onEdit={openEdit}
+              onNavigateLink={navigateLink}
+            />
           </div>
         ) : view === 'pending' ? (
           <div className="flex-1 overflow-y-auto p-5">
@@ -165,6 +251,8 @@ export function TasksArea() {
               resolveLinkLabel={resolveLinkLabel}
               onEdit={openEdit}
               onDelete={(t) => void handleDelete(t)}
+              onNavigateLink={navigateLink}
+              onArchiveStopped={handleArchiveStopped}
             />
           </div>
         ) : (
@@ -174,6 +262,7 @@ export function TasksArea() {
               resolveLinkLabel={resolveLinkLabel}
               onEdit={openEdit}
               onDelete={(t) => void handleDelete(t)}
+              onNavigateLink={navigateLink}
             />
           </div>
         )}

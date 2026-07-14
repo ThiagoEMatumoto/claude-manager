@@ -6,6 +6,7 @@ interface Props {
   tasks: Task[]
   resolveLinkLabel: (link: TaskLink) => string
   onEdit: (task: Task) => void
+  onNavigateLink?: (link: TaskLink) => void
 }
 
 // Colunas do board (modelo: FeatureBoard, estático sem drag&drop). Canceladas
@@ -29,10 +30,12 @@ function TaskCard({
   task,
   resolveLinkLabel,
   onEdit,
+  onNavigateLink,
 }: {
   task: Task
   resolveLinkLabel: (link: TaskLink) => string
   onEdit: (task: Task) => void
+  onNavigateLink?: (link: TaskLink) => void
 }) {
   return (
     <li>
@@ -57,7 +60,7 @@ function TaskCard({
                 #{tag}
               </span>
             ))}
-            <LinkChips links={task.links} resolveLinkLabel={resolveLinkLabel} />
+            <LinkChips links={task.links} resolveLinkLabel={resolveLinkLabel} onNavigate={onNavigateLink} />
           </div>
         )}
       </button>
@@ -65,7 +68,7 @@ function TaskCard({
   )
 }
 
-export function TaskBoard({ tasks, resolveLinkLabel, onEdit }: Props) {
+export function TaskBoard({ tasks, resolveLinkLabel, onEdit, onNavigateLink }: Props) {
   const grouped = useMemo(() => {
     const by: Record<ColumnId, Task[]> = {
       todo: [],
@@ -105,6 +108,7 @@ export function TaskBoard({ tasks, resolveLinkLabel, onEdit }: Props) {
                       task={task}
                       resolveLinkLabel={resolveLinkLabel}
                       onEdit={onEdit}
+                      onNavigateLink={onNavigateLink}
                     />
                   ))}
                 </ul>

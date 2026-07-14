@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useAppStore } from '@/store/appStore'
-import { useObjectivesStore } from '@/store/objectivesStore'
+import { navigateToFeature, navigateToObjective, navigateToTask } from '@/lib/nav'
 import type {
   OverviewFeatureSummary,
   OverviewKeyResultNode,
@@ -14,20 +13,18 @@ import { KIND_META, STATUS_META } from '@/features/objectives/status'
 import { STATUS_META as FEATURE_STATUS_META } from '@/features/features/status'
 import { PriorityBadge, TaskStatusBadge } from '@/features/tasks/TaskList'
 
-// Clicar no título de um objetivo leva pra área de Objetivos com ele
-// selecionado (select carrega o detail; setArea troca a view).
-function navigateToObjective(id: string): void {
-  void useObjectivesStore.getState().select(id)
-  useAppStore.getState().setArea('objectives')
-}
-
 function fmtProgress(progress: number | null): string {
   return progress === null ? '—' : `${Math.round(progress)}%`
 }
 
+// Linha clicável: mesmo signifier visual em toda a árvore (hover de destaque
+// no fundo da linha, igual às linhas de lista do resto do app).
+const ROW_CLASS =
+  'flex w-full items-center gap-2 rounded py-0.5 text-left transition hover:bg-[var(--color-surface-2)]/60'
+
 function TaskLine({ task }: { task: OverviewTaskSummary }) {
   return (
-    <div className="flex items-center gap-2 py-0.5">
+    <button type="button" onClick={() => navigateToTask(task.id)} className={ROW_CLASS} title="Abrir em Tarefas">
       <TaskStatusBadge status={task.status} />
       <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text)]">{task.title}</span>
       {task.priority && <PriorityBadge priority={task.priority} />}
@@ -36,14 +33,19 @@ function TaskLine({ task }: { task: OverviewTaskSummary }) {
           {new Date(task.dueDate).toLocaleDateString('pt-BR')}
         </span>
       )}
-    </div>
+    </button>
   )
 }
 
 function FeatureLine({ feature }: { feature: OverviewFeatureSummary }) {
   const meta = FEATURE_STATUS_META[feature.status]
   return (
-    <div className="flex items-center gap-2 py-0.5">
+    <button
+      type="button"
+      onClick={() => navigateToFeature(feature.id)}
+      className={ROW_CLASS}
+      title="Abrir em Features"
+    >
       <span
         className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[10px] font-medium"
         style={{ color: meta.color }}
@@ -58,7 +60,7 @@ function FeatureLine({ feature }: { feature: OverviewFeatureSummary }) {
       <span className="shrink-0 text-[10px] tabular-nums text-[var(--color-text-dim)]">
         {fmtProgress(feature.progress)}
       </span>
-    </div>
+    </button>
   )
 }
 

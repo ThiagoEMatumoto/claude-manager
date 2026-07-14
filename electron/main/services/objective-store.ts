@@ -163,14 +163,17 @@ interface LinkedFeatureRow {
   archived_at: number | null
 }
 
-// Features NÃO-arquivadas vinculadas a um objetivo/KR via feature_links.
+// Features vinculadas a um objetivo/KR via feature_links — inclui as
+// arquivadas (Onda 1: o alvo some do JOIN sozinho se a feature foi deletada
+// de verdade; arquivada é vínculo que sobrevive e precisa sinalizar "órfã de
+// contexto" em vez de sumir em silêncio da lista, mesmo saindo do rollup).
 // Query direta (sem importar feature-store — evita acoplamento circular).
 function linkedFeatureRows(targetType: FeatureLinkTargetType, targetId: string): LinkedFeatureRow[] {
   return getDb()
     .prepare(
       `SELECT f.id, f.title, f.status, f.archived_at FROM features f
        JOIN feature_links l ON l.feature_id = f.id
-       WHERE l.target_type = ? AND l.target_id = ? AND f.archived_at IS NULL
+       WHERE l.target_type = ? AND l.target_id = ?
        ORDER BY f.updated_at DESC`,
     )
     .all(targetType, targetId) as LinkedFeatureRow[]
@@ -213,6 +216,7 @@ export function linkedFeatureSummaries(
     title: f.title,
     status: f.status as FeatureStatus,
     progress: computeFeatureProgress(f.status as FeatureStatus, featureTaskStatuses(f.id)),
+    archived: f.archived_at !== null,
   }))
 }
 

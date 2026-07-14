@@ -287,7 +287,9 @@ function taskTools(notify: McpNotify): ToolDef[] {
       inputSchema: taskCreateSchema,
       handler: (args) => {
         const input = taskCreateSchema.parse(args)
-        const task = taskStore.create(input)
+        // Todo task_create MCP vem de uma sessão Claude Code — origin='auto'
+        // não é client-settable (Onda 0: coluna origin first-class).
+        const task = taskStore.create({ ...input, origin: 'auto' })
         notify.broadcast('task:updated', task)
         notify.affectedObjectives(task.links)
         return ok({ task })

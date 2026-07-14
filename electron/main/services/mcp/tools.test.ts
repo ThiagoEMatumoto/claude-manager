@@ -281,6 +281,11 @@ describe('mcp tools — tasks', () => {
       { parentType: 'objective', parentId: b.id },
     ])
   })
+
+  it('task_create via MCP sempre grava origin "auto" (Onda 0)', () => {
+    const { task } = call<{ task: Task }>('task_create', { title: 'Criada pela sessão' })
+    expect(task.origin).toBe('auto')
+  })
 })
 
 describe('mcp tools — features', () => {

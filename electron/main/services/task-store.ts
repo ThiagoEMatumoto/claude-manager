@@ -5,6 +5,7 @@ import type {
   Task,
   TaskLink,
   TaskListFilter,
+  TaskOrigin,
   TaskParentType,
   TaskPriority,
   TaskStatus,
@@ -31,6 +32,8 @@ interface TaskRow {
   tags: string
   notes: string | null
   position: number
+  origin: string
+  source_session_id: string | null
   created_at: number
   updated_at: number
 }
@@ -64,6 +67,8 @@ function rowToTask(row: TaskRow, links: TaskLink[]): Task {
     notes: row.notes,
     position: row.position,
     links,
+    origin: row.origin as TaskOrigin,
+    sourceSessionId: row.source_session_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -144,6 +149,8 @@ function taskToRowParams(task: Task): Record<string, unknown> {
     tags: JSON.stringify(task.tags),
     notes: task.notes,
     position: task.position,
+    origin: task.origin,
+    source_session_id: task.sourceSessionId,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
   }
@@ -179,6 +186,8 @@ export function create(input: CreateTaskInput): Task {
     notes: input.notes ?? null,
     position: input.position ?? nextPosition(),
     links: input.links ?? [],
+    origin: input.origin ?? 'manual',
+    sourceSessionId: input.sourceSessionId ?? null,
     createdAt: now,
     updatedAt: now,
   }
@@ -187,9 +196,9 @@ export function create(input: CreateTaskInput): Task {
     db.prepare(
       `INSERT INTO tasks
          (id, title, description, status, priority, due_date, started_at, completed_at,
-          tags, notes, position, created_at, updated_at)
+          tags, notes, position, origin, source_session_id, created_at, updated_at)
        VALUES (@id, @title, @description, @status, @priority, @due_date, @started_at, @completed_at,
-               @tags, @notes, @position, @created_at, @updated_at)`,
+               @tags, @notes, @position, @origin, @source_session_id, @created_at, @updated_at)`,
     ).run(taskToRowParams(task))
     insertLinks(task.id, task.links)
   })

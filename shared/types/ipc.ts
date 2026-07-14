@@ -827,6 +827,9 @@ export interface ObjectiveListFilter {
 export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
 export type TaskPriority = 'low' | 'medium' | 'high'
 export type TaskParentType = 'objective' | 'key_result' | 'feature'
+// 'manual' = criada pelo usuário (IPC); 'auto' = criada via MCP tool task_create
+// (chamada por uma sessão Claude Code). Mesmo padrão de FeatureOrigin.
+export type TaskOrigin = 'manual' | 'auto'
 
 // Vínculo polimórfico tarefa → parent (sem FK real em parentId; tarefa
 // standalone = sem vínculos). Alimenta o rollup de KRs/objetivos auto_rollup.
@@ -850,6 +853,11 @@ export interface Task {
   notes: string | null
   position: number
   links: TaskLink[]
+  origin: TaskOrigin
+  // Sessão MCP que criou a task (quando conhecida). O server MCP hoje é
+  // stateless/compartilhado (electron/main/services/mcp/server.ts) — sem
+  // identificação de sessão por request — então fica null por enquanto.
+  sourceSessionId: string | null
   createdAt: number
   updatedAt: number
 }
@@ -864,6 +872,9 @@ export interface CreateTaskInput {
   notes?: string | null
   position?: number
   links?: TaskLink[]
+  // Default 'manual'. O handler MCP de task_create passa 'auto'.
+  origin?: TaskOrigin
+  sourceSessionId?: string | null
 }
 
 export interface UpdateTaskInput {

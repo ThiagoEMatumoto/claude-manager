@@ -158,6 +158,7 @@ function fromFrontmatter(fm: Partial<Frontmatter>, docPath: string, body: string
     completedAt: typeof fm.completed === 'number' ? fm.completed : null,
     archivedAt: null, // archive vive só no SQLite, não no frontmatter
     origin: 'manual', // idem: origin vive só no SQLite (reindex preserva o valor da row)
+    objectiveLinkCount: 0, // idem: vem de feature_links, reindexFromFile sobrescreve com o valor real
     body,
   }
 }
@@ -203,7 +204,12 @@ interface FeatureRow {
   origin: string
 }
 
-function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string): Feature {
+function rowToFeature(
+  row: FeatureRow,
+  repos: FeatureRepoLink[],
+  objectiveLinkCount: number,
+  body?: string,
+): Feature {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -216,6 +222,7 @@ function rowToFeature(row: FeatureRow, repos: FeatureRepoLink[], body?: string):
     model: row.model,
     repos,
     origin: row.origin as FeatureOrigin,
+    objectiveLinkCount,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -229,6 +236,27 @@ function loadRepos(featureId: string): FeatureRepoLink[] {
     .prepare('SELECT repo_id, branch, worktree_path FROM feature_repos WHERE feature_id = ?')
     .all(featureId) as Array<{ repo_id: string; branch: string | null; worktree_path: string | null }>
   return rows.map((r) => ({ repoId: r.repo_id, branch: r.branch, worktreePath: r.worktree_path }))
+}
+
+// ---- Vínculos a objetivos/KRs: contagem (Onda 0) ----
+// Dado que faltava em toda projeção (achado-raiz: "ninguém expõe quantas
+// features não têm OKR") — causa raiz da sub-linkagem.
+
+// Uso pontual (get/findFeatureByRepoBranch): 1 SELECT por feature.
+function objectiveLinkCountOf(featureId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM feature_links WHERE feature_id = ?')
+    .get(featureId) as { n: number }
+  return row.n
+}
+
+// Batch (mesmo padrão de sessionCounts/recordStats): featureId -> count de
+// feature_links num único GROUP BY, pra listagens não caírem em N+1.
+function objectiveLinkCounts(): Map<string, number> {
+  const rows = getDb()
+    .prepare('SELECT feature_id, COUNT(*) AS n FROM feature_links GROUP BY feature_id')
+    .all() as Array<{ feature_id: string; n: number }>
+  return new Map(rows.map((r) => [r.feature_id, r.n]))
 }
 
 function writeRepos(featureId: string, repos: FeatureRepoLink[]): void {
@@ -309,6 +337,7 @@ export function create(input: CreateFeatureInput): Feature {
     model: input.model ?? null,
     repos: input.repos ?? [],
     origin: input.origin ?? 'manual',
+    objectiveLinkCount: 0, // feature nova: links são gravados depois via setObjectiveLinks
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -359,7 +388,10 @@ function listRows(opts: ListOpts): FeatureRow[] {
 }
 
 export function list(projectId?: string): Feature[] {
-  return listRows({ projectId }).map((row) => rowToFeature(row, loadRepos(row.id)))
+  const linkCounts = objectiveLinkCounts()
+  return listRows({ projectId }).map((row) =>
+    rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
+  )
 }
 
 // Agrega a contagem de sessões ligadas (sessions.feature_id) num único GROUP BY,
@@ -395,9 +427,10 @@ export function listWithStats(opts?: {
 }): FeatureWithStats[] {
   const counts = sessionCounts()
   const records = recordStats()
+  const linkCounts = objectiveLinkCounts()
   return listRows({ includeArchived: opts?.includeArchived, includeDrafts: opts?.includeDrafts })
     .map((row) => ({
-      ...rowToFeature(row, loadRepos(row.id)),
+      ...rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
       sessionCount: counts.get(row.id) ?? 0,
       recordCount: records.get(row.id)?.count ?? 0,
       lastRecordAt: records.get(row.id)?.last ?? null,
@@ -410,7 +443,7 @@ export function get(id: string): Feature | null {
   if (!row) return null
   // Corpo vem do `.md` (fonte de verdade); cai pra string vazia se o arquivo sumiu.
   const doc = readDoc(row.doc_path)
-  return rowToFeature(row, loadRepos(row.id), doc?.body ?? '')
+  return rowToFeature(row, loadRepos(row.id), objectiveLinkCountOf(row.id), doc?.body ?? '')
 }
 
 // ---- Helpers de resolução (auto-vínculo de sessões a features, fase 8) ----
@@ -446,14 +479,15 @@ export function findFeatureByRepoBranch(repoId: string, branch: string): Feature
     )
     .get(repoId, branch) as FeatureRow | undefined
   if (!row) return null
-  return rowToFeature(row, loadRepos(row.id))
+  return rowToFeature(row, loadRepos(row.id), objectiveLinkCountOf(row.id))
 }
 
 // Features NÃO-arquivadas de um projeto (sem corpo). INCLUI rascunhos: o fuzzy
 // match da resolução de sessões precisa enxergá-los pra linkar em vez de duplicar.
 export function listActiveFeaturesByProject(projectId: string): Feature[] {
+  const linkCounts = objectiveLinkCounts()
   return listRows({ projectId, includeDrafts: true }).map((row) =>
-    rowToFeature(row, loadRepos(row.id)),
+    rowToFeature(row, loadRepos(row.id), linkCounts.get(row.id) ?? 0),
   )
 }
 
@@ -653,6 +687,7 @@ export function reindexFromFile(path: string): Feature | null {
     ...doc.feature,
     archivedAt: existing?.archived_at ?? null,
     origin: (existing?.origin as FeatureOrigin) ?? 'manual',
+    objectiveLinkCount: objectiveLinkCountOf(doc.feature.id),
   }
   upsertIndex(feature)
   return feature

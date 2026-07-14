@@ -569,6 +569,9 @@ export interface Feature {
   repos: FeatureRepoLink[]
   // Vive só no SQLite (como archivedAt) — não vai pro frontmatter do `.md`.
   origin: FeatureOrigin
+  // COUNT de feature_links da feature (0 = "sem OKR"). Onda 0: dado que não
+  // existia em nenhuma projeção — causa raiz da sub-linkagem.
+  objectiveLinkCount: number
   createdAt: number
   updatedAt: number
   completedAt: number | null
@@ -1314,6 +1317,8 @@ export interface OverviewFeatureActivity {
   projectId: string
   lastSessionAt: number | null
   sessionCount: number
+  // COUNT de feature_links (0 = "sem OKR") — mesma projeção de Feature.objectiveLinkCount.
+  objectiveLinkCount: number
 }
 
 // Payload agregado do dashboard: a árvore inteira numa chamada IPC (evita N+1

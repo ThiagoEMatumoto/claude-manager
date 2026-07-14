@@ -30,6 +30,7 @@ function makeFeature(overrides: Partial<Feature> = {}): Feature {
     model: null,
     repos: [],
     origin: 'manual',
+    objectiveLinkCount: 0,
     createdAt: 0,
     updatedAt: 0,
     completedAt: null,

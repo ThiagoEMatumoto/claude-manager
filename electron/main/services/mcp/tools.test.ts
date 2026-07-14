@@ -373,6 +373,27 @@ describe('mcp tools — features', () => {
       { targetType: 'objective', targetId: b.id },
     ])
   })
+
+  it('feature_list/feature_get expõem objectiveLinkCount (Onda 0)', () => {
+    seedProject('proj-mcp')
+    const { objective } = call<{ objective: Objective }>('objective_create', {
+      title: 'Objetivo pra contar',
+      kind: 'okr',
+    })
+    const { feature } = call<{ feature: Feature }>('feature_create', {
+      projectId: 'proj-mcp',
+      title: 'Sem OKR ainda',
+    })
+    const { items } = call<{ items: Feature[] }>('feature_list', { projectId: 'proj-mcp' })
+    expect(items.find((f) => f.id === feature.id)?.objectiveLinkCount).toBe(0)
+
+    call('feature_set_objective_links', {
+      featureId: feature.id,
+      links: [{ targetType: 'objective', targetId: objective.id }],
+    })
+    const { feature: linked } = call<{ feature: Feature }>('feature_get', { id: feature.id })
+    expect(linked.objectiveLinkCount).toBe(1)
+  })
 })
 
 describe('mcp tools — overview', () => {

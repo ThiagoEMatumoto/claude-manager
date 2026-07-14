@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  decideObjectiveLink,
   decideRegistration,
   deriveTitle,
   fuzzyScore,
   humanizeBranch,
   isProtectedBranch,
   normalizeBranch,
+  OBJECTIVE_LINK_THRESHOLD_HIGH,
+  OBJECTIVE_LINK_THRESHOLD_MEDIUM,
   pickWorkBranch,
   type RegistrationInputs,
 } from './feature-heuristics'
@@ -132,5 +135,22 @@ describe('decideRegistration', () => {
 
   it('PULA quando não há branch nem prompt para nomear', () => {
     expect(decideRegistration({ ...base, firstPrompt: null }).action).toBe('skip')
+  })
+})
+
+describe('decideObjectiveLink', () => {
+  it('LINKA em score alto (>= threshold alto)', () => {
+    expect(decideObjectiveLink(OBJECTIVE_LINK_THRESHOLD_HIGH)).toBe('link')
+    expect(decideObjectiveLink(1)).toBe('link')
+  })
+
+  it('sinaliza needs-review em score médio (entre os dois thresholds)', () => {
+    expect(decideObjectiveLink(OBJECTIVE_LINK_THRESHOLD_MEDIUM)).toBe('needs-review')
+    expect(decideObjectiveLink(OBJECTIVE_LINK_THRESHOLD_HIGH - 0.01)).toBe('needs-review')
+  })
+
+  it('PULA em score baixo (abaixo do threshold médio) — nunca grava silenciosamente', () => {
+    expect(decideObjectiveLink(OBJECTIVE_LINK_THRESHOLD_MEDIUM - 0.01)).toBe('skip')
+    expect(decideObjectiveLink(0)).toBe('skip')
   })
 })

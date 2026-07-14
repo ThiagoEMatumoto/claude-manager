@@ -1,7 +1,12 @@
 import { BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
 import matter from 'gray-matter'
-import type { Feature, FeatureSynthError, FeatureSynthMode } from '../../../shared/types/ipc'
+import type {
+  Feature,
+  FeatureLinkTargetType,
+  FeatureSynthError,
+  FeatureSynthMode,
+} from '../../../shared/types/ipc'
 import { getDb } from './db'
 import {
   get as getFeature,
@@ -15,10 +20,19 @@ import {
   getRepoPath,
   saveSessionRecord,
   listSessionRecords,
+  setObjectiveLinks,
 } from './feature-store'
+import { list as listObjectives, loadKeyResults } from './objective-store'
+import { create as createTask } from './task-store'
 import { findTranscriptPath } from './session-activity'
 import { runClaude } from './claude-cli'
-import { isProtectedBranch, normalizeBranch, fuzzyScore, decideRegistration } from './feature-heuristics'
+import {
+  isProtectedBranch,
+  normalizeBranch,
+  fuzzyScore,
+  decideRegistration,
+  decideObjectiveLink,
+} from './feature-heuristics'
 import {
   buildDigest,
   renderDigestForRecord,
@@ -69,6 +83,56 @@ function resolveModel(feature: Feature): string | null {
     return row?.value?.trim() || null
   } catch {
     return null
+  }
+}
+
+// Auto-sugestão de vínculo a objetivo (Onda 2 — fecha a sub-linkagem: a causa
+// raiz era ninguém expor "quantas features não têm OKR", nem sugerir um).
+// Função de módulo (não método) — exportada pra ser exercitada direto em
+// teste de integração sem precisar do singleton `featureMemory`. Roda só
+// quando a feature resolvida ainda não tem NENHUM vínculo — feature já
+// linkada não é candidata (evita sobrescrever escolha humana). Mesmo
+// fuzzyScore do link sessão→feature, contra títulos de objetivos/KRs ativos
+// (objectives não são escopados por projeto no schema atual — Fase 1 os
+// trata como camada global, sem project_id).
+export function maybeSuggestObjectiveLink(featureId: string, prompt: string | null): void {
+  if (!prompt) return
+  const feature = getFeature(featureId)
+  if (!feature || feature.objectiveLinkCount > 0) return
+
+  let best: { targetType: FeatureLinkTargetType; targetId: string; title: string; score: number } | null =
+    null
+  for (const objective of listObjectives({ status: 'active' })) {
+    const score = fuzzyScore(prompt, objective.title)
+    if (!best || score > best.score) {
+      best = { targetType: 'objective', targetId: objective.id, title: objective.title, score }
+    }
+    for (const kr of loadKeyResults(objective.id)) {
+      if (kr.status !== 'active') continue
+      const krScore = fuzzyScore(prompt, kr.title)
+      if (!best || krScore > best.score) {
+        best = { targetType: 'key_result', targetId: kr.id, title: kr.title, score: krScore }
+      }
+    }
+  }
+  if (!best) return
+
+  const decision = decideObjectiveLink(best.score)
+  if (decision === 'link') {
+    setObjectiveLinks(featureId, [{ targetType: best.targetType, targetId: best.targetId }])
+    const updated = getFeature(featureId)
+    if (updated && isVisibleFeature(updated)) broadcast('feature:updated', updated)
+  } else if (decision === 'needs-review') {
+    // Sinal "precisa revisão" reusa o mecanismo já existente de auto-task
+    // tagueada (mesmo padrão do task_create via MCP) em vez de inventar uma
+    // coluna nova — aparece na aba Pendências, linkada à feature.
+    const targetLabel = best.targetType === 'objective' ? 'objetivo' : 'key result'
+    createTask({
+      title: `Revisar vínculo sugerido: "${feature.title}" → ${targetLabel} "${best.title}"`,
+      tags: ['needs-review', 'auto'],
+      origin: 'auto',
+      links: [{ parentType: 'feature', parentId: featureId }],
+    })
   }
 }
 
@@ -273,6 +337,7 @@ class FeatureMemoryService {
     if (decision.action === 'skip') return null
     if (decision.action === 'link') {
       this.persistLink(info.sessionId, decision.featureId)
+      maybeSuggestObjectiveLink(decision.featureId, firstPrompt)
       return { featureId: decision.featureId, kind: 'auto-linked' }
     }
 
@@ -288,6 +353,7 @@ class FeatureMemoryService {
       repos: [{ repoId: info.repoId, branch: workBranch ?? branch ?? 'main', worktreePath: repoPath }],
     })
     this.persistLink(info.sessionId, created.id)
+    maybeSuggestObjectiveLink(created.id, firstPrompt)
     return { featureId: created.id, kind: 'auto-created' }
   }
 

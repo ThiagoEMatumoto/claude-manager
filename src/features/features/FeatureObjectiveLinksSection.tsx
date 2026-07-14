@@ -5,6 +5,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Icon } from '@/components/ui/Icon'
 import { Select } from '@/features/objectives/ObjectiveDialog'
 import { featuresApi, objectivesApi } from '@/lib/ipc'
+import { navigateToObjective } from '@/lib/nav'
 import type {
   FeatureLinkTargetType,
   FeatureObjectiveLink,
@@ -29,22 +30,28 @@ interface Props {
   featureId: string
   objectives: ObjectiveWithProgress[]
   krTitles: Map<string, string>
+  // KR id -> objective id (Onda 2): navega pro objetivo dono quando o chip é
+  // de um key_result, que não tem view própria. Nome distinto do state local
+  // `krObjectiveId` do dialog (objetivo escolhido no picker de KR) abaixo.
+  krToObjectiveId: Map<string, string>
 }
 
 function LinkChip({
   link,
   label,
   onRemove,
+  onNavigate,
 }: {
   link: FeatureObjectiveLink
   label: string
   onRemove?: () => void
+  // Ausente dentro do dialog de edição: navegar no meio da edição do draft
+  // seria surpreendente — só os chips de exibição navegam.
+  onNavigate?: () => void
 }) {
-  return (
-    <li
-      className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text)]"
-      title={`${TARGET_TYPE_LABEL[link.targetType]}: ${label}`}
-    >
+  const title = `${TARGET_TYPE_LABEL[link.targetType]}: ${label}`
+  const content = (
+    <>
       <span className="shrink-0 font-medium text-[var(--color-accent)]">
         {TARGET_TYPE_LABEL[link.targetType]}
       </span>
@@ -53,19 +60,51 @@ function LinkChip({
         <button
           type="button"
           title="Remover vínculo"
-          onClick={onRemove}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove()
+          }}
           className="shrink-0 rounded text-[var(--color-text-dim)] hover:text-[var(--color-danger)]"
         >
           <Icon as={X} size={11} />
         </button>
       )}
+    </>
+  )
+
+  if (onNavigate) {
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={onNavigate}
+          title={title}
+          className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
+        >
+          {content}
+        </button>
+      </li>
+    )
+  }
+
+  return (
+    <li
+      className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text)]"
+      title={title}
+    >
+      {content}
     </li>
   )
 }
 
 // Seção "Objetivos" do FeatureDoc: chips dos vínculos feature → objetivo/KR e
 // dialog de edição (replace-all via setObjectiveLinks, espelho do TaskDialog).
-export function FeatureObjectiveLinksSection({ featureId, objectives, krTitles }: Props) {
+export function FeatureObjectiveLinksSection({
+  featureId,
+  objectives,
+  krTitles,
+  krToObjectiveId,
+}: Props) {
   const [links, setLinks] = useState<FeatureObjectiveLink[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [draft, setDraft] = useState<FeatureObjectiveLink[]>([])
@@ -156,7 +195,18 @@ export function FeatureObjectiveLinksSection({ featureId, objectives, krTitles }
       ) : (
         <ul className="flex flex-wrap gap-1.5">
           {links.map((link) => (
-            <LinkChip key={linkKey(link)} link={link} label={resolveLabel(link)} />
+            <LinkChip
+              key={linkKey(link)}
+              link={link}
+              label={resolveLabel(link)}
+              onNavigate={() =>
+                navigateToObjective(
+                  link.targetType === 'objective'
+                    ? link.targetId
+                    : (krToObjectiveId.get(link.targetId) ?? link.targetId),
+                )
+              }
+            />
           ))}
         </ul>
       )}

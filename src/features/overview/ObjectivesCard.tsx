@@ -1,5 +1,4 @@
-import { useAppStore } from '@/store/appStore'
-import { useObjectivesStore } from '@/store/objectivesStore'
+import { navigateToObjective } from '@/lib/nav'
 import { ProgressBar } from '@/features/objectives/ProgressBar'
 import { selectActiveObjectives } from '../../../shared/home-selectors'
 import type { OverviewObjectiveNode } from '../../../shared/types/ipc'
@@ -23,11 +22,6 @@ export function ObjectivesCard({ nodes }: { nodes: OverviewObjectiveNode[] }) {
       )}
     </HomeCard>
   )
-}
-
-function navigateToObjective(id: string): void {
-  void useObjectivesStore.getState().select(id)
-  useAppStore.getState().setArea('objectives')
 }
 
 function ObjectiveRow({ node }: { node: OverviewObjectiveNode }) {

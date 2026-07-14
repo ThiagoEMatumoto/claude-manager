@@ -58,7 +58,7 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
     [feature?.body],
   )
   // Lookup compartilhado pelas seções de Tarefas e Objetivos (uma busca só).
-  const { objectives, krTitles } = useObjectiveLookups()
+  const { objectives, krTitles, krObjectiveId } = useObjectiveLookups()
 
   if (!feature) {
     return (
@@ -149,6 +149,7 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
           featureId={feature.id}
           objectives={objectives}
           krTitles={krTitles}
+          krToObjectiveId={krObjectiveId}
         />
       </div>
     </div>

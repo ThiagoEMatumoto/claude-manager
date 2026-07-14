@@ -7,6 +7,7 @@ interface Props {
   resolveLinkLabel: (link: TaskLink) => string
   onEdit: (task: Task) => void
   onDelete: (task: Task) => void
+  onNavigateLink?: (link: TaskLink) => void
 }
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 }
@@ -14,7 +15,7 @@ const PRIORITY_RANK: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2
 // Lista flat (não agrupada): a ordenação prioridade → prazo é o ponto da view,
 // e agrupar por status quebraria essa ordem global. O badge de status em cada
 // linha supre a informação.
-export function PendingView({ tasks, resolveLinkLabel, onEdit, onDelete }: Props) {
+export function PendingView({ tasks, resolveLinkLabel, onEdit, onDelete, onNavigateLink }: Props) {
   const pending = useMemo(() => {
     return tasks
       .filter((t) => t.status === 'todo' || t.status === 'in_progress' || t.status === 'blocked')
@@ -49,6 +50,7 @@ export function PendingView({ tasks, resolveLinkLabel, onEdit, onDelete }: Props
           resolveLinkLabel={resolveLinkLabel}
           onEdit={onEdit}
           onDelete={onDelete}
+          onNavigateLink={onNavigateLink}
         />
       ))}
     </ul>

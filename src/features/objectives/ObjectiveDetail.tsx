@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArrowLeft, Pencil, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { navigateToFeature } from '@/lib/nav'
 import { objectiveProgressTone } from '../../../shared/progress'
 import type { KeyResult, ObjectiveDetail as ObjectiveDetailType } from '../../../shared/types/ipc'
 import { DIRECTION_LABEL, PRIORITY_LABEL, PROGRESS_MODE_LABEL } from './status'
@@ -302,7 +303,12 @@ export function ObjectiveDetail({
                       : 'border-[var(--color-border)]'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => navigateToFeature(f.id)}
+                    title="Abrir em Features"
+                    className="flex w-full items-center justify-between gap-3 rounded text-left transition hover:opacity-80"
+                  >
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">
                       {f.title}
                     </span>
@@ -316,7 +322,7 @@ export function ObjectiveDetail({
                     ) : (
                       <FeatureStatusBadge status={f.status} />
                     )}
-                  </div>
+                  </button>
                   {!f.archived && <ProgressBar value={f.progress} className="mt-2" />}
                 </li>
               ))}

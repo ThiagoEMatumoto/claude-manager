@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
-import { get as getFeature } from '../services/feature-store'
+import { get as getFeature, linkedObjectiveTitles } from '../services/feature-store'
 import * as handoffStore from '../services/handoff-store'
 // formatPtyInjection vive em services/handoff/inject.ts (fonte canônica, sem
 // dependência de electron). Reexportado abaixo para não quebrar quem importa
@@ -219,7 +219,7 @@ export function sweepOrphanImageTemps(): void {
 function buildFeatureContextOrNull(featureId: string): string | null {
   const feature = getFeature(featureId)
   if (!feature) return null
-  return buildFeatureContextContent(feature)
+  return buildFeatureContextContent(feature, linkedObjectiveTitles(featureId))
 }
 
 // Monta a string do innerCmd do spawn novo. PURA: sem I/O — recebe os pedaços já

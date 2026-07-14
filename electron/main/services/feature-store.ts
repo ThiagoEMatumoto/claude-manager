@@ -634,6 +634,27 @@ export function listObjectiveLinks(featureId: string): FeatureObjectiveLink[] {
   }))
 }
 
+// Títulos dos OKRs que a feature serve (Onda 2 — contexto injetado no spawn):
+// objetivo direto OU o objetivo dono do KR, quando o vínculo é a um KR. Query
+// direta em objectives/key_results (sem importar objective-store — mesmo
+// padrão de linkedFeatureRows em objective-store.ts, que também consulta
+// `features` direto pra evitar import circular).
+export function linkedObjectiveTitles(featureId: string): string[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT o.title FROM feature_links l
+         JOIN objectives o ON o.id = l.target_id
+        WHERE l.feature_id = ? AND l.target_type = 'objective'
+       UNION
+       SELECT o.title FROM feature_links l
+         JOIN key_results kr ON kr.id = l.target_id
+         JOIN objectives o ON o.id = kr.objective_id
+        WHERE l.feature_id = ? AND l.target_type = 'key_result'`,
+    )
+    .all(featureId, featureId) as Array<{ title: string }>
+  return rows.map((r) => r.title)
+}
+
 // Tabela dona de cada FeatureLinkTargetType — usada pra validar existência do
 // alvo antes de gravar (feature_links é polimórfico, sem FK em target_id).
 const LINK_TARGET_TABLE: Record<FeatureLinkTargetType, string> = {

@@ -88,6 +88,8 @@ interface FeatureActivityRow {
 // vínculo ficam de fora do GROUP BY). LEFT JOIN: feature sem nenhuma sessão
 // aparece com lastSessionAt null e sessionCount 0. objective_link_count (Onda
 // 0) espelha a mesma agregação de feature-store.objectiveLinkCounts.
+// Features app-dev (Onda 3) ficam fora por default — não são "trabalho" no
+// sentido que o card mede, e poluiriam o sinal do "sem OKR".
 function featureActivity(): OverviewFeatureActivity[] {
   const rows = getDb()
     .prepare(
@@ -107,6 +109,7 @@ function featureActivity(): OverviewFeatureActivity[] {
          SELECT feature_id, COUNT(*) AS link_count FROM feature_links GROUP BY feature_id
        ) l ON l.feature_id = f.id
        WHERE f.status IN ('in-progress', 'blocked', 'paused') AND f.archived_at IS NULL
+         AND f.is_app_dev = 0
        ORDER BY COALESCE(s.last_session_at, f.updated_at) DESC`,
     )
     .all() as FeatureActivityRow[]

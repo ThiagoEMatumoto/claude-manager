@@ -114,11 +114,23 @@ export function FeaturesArea() {
     [withStats],
   )
 
+  // App-dev (Onda 3 — separação app-dev): dev do próprio claude-manager, fora
+  // de qualquer outro filtro por default — só aparece no filtro "App dev".
+  const appDevFeatures = useMemo(() => withStats.filter((f) => f.isAppDev), [withStats])
+
   const q = query.trim().toLowerCase()
   const listed = useMemo(() => {
-    const source: Feature[] = filter === 'drafts' ? drafts : features
+    const source: Feature[] = filter === 'drafts' ? drafts : filter === 'app-dev' ? appDevFeatures : features
     const filtered = source.filter((f) => {
-      if (filter !== 'all' && filter !== 'drafts' && f.status !== filter) return false
+      if (
+        filter !== 'all' &&
+        filter !== 'drafts' &&
+        filter !== 'app-dev' &&
+        f.status !== filter
+      ) {
+        return false
+      }
+      if (filter !== 'app-dev' && f.isAppDev) return false
       if (q && !f.title.toLowerCase().includes(q)) return false
       if (!matchesObjectiveFilter(f)) return false
       return true
@@ -127,14 +139,25 @@ export function FeaturesArea() {
     // o updated_at do índice (mexer em metadado não "sobe" a feature).
     const activity = (f: Feature) => statsById.get(f.id)?.lastRecordAt ?? f.updatedAt
     return [...filtered].sort((a, b) => activity(b) - activity(a))
-  }, [features, drafts, statsById, filter, q, matchesObjectiveFilter])
+  }, [features, drafts, appDevFeatures, statsById, filter, q, matchesObjectiveFilter])
 
-  // Sidebar agrupada por projeto: no filtro "Rascunhos" troca a fonte pelos drafts.
+  // Sidebar agrupada por projeto: no filtro "Rascunhos"/"App dev" troca a
+  // fonte pelo conjunto correspondente; nos demais filtros, app-dev fica fora.
   const sidebarByProject = useMemo(() => {
     let base = byProject
     if (filter === 'drafts') {
       const by: Record<string, Feature[]> = {}
       for (const f of drafts) (by[f.projectId] ??= []).push(f)
+      base = by
+    } else if (filter === 'app-dev') {
+      const by: Record<string, Feature[]> = {}
+      for (const f of appDevFeatures) (by[f.projectId] ??= []).push(f)
+      base = by
+    } else {
+      const by: Record<string, Feature[]> = {}
+      for (const [projectId, feats] of Object.entries(base)) {
+        by[projectId] = feats.filter((f) => !f.isAppDev)
+      }
       base = by
     }
     if (objectiveFilter === '') return base
@@ -144,12 +167,12 @@ export function FeaturesArea() {
       if (kept.length > 0) filtered[projectId] = kept
     }
     return filtered
-  }, [filter, byProject, drafts, objectiveFilter, matchesObjectiveFilter])
+  }, [filter, byProject, drafts, appDevFeatures, objectiveFilter, matchesObjectiveFilter])
 
-  // Board: usa a lista com stats (inclui arquivadas, mas NUNCA rascunhos).
-  // Filtro de status do board é por coluna, então só aplica a busca textual aqui.
+  // Board: usa a lista com stats (inclui arquivadas, mas NUNCA rascunhos nem
+  // app-dev — mesmo default-oculto das outras views).
   const boardFeatures = useMemo(() => {
-    const visible = withStats.filter((f) => !isDraftFeature(f.origin, f.recordCount))
+    const visible = withStats.filter((f) => !isDraftFeature(f.origin, f.recordCount) && !f.isAppDev)
     const filtered = q ? visible.filter((f) => f.title.toLowerCase().includes(q)) : visible
     return filtered.filter(matchesObjectiveFilter)
   }, [withStats, q, matchesObjectiveFilter])

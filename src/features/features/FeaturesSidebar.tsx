@@ -5,9 +5,11 @@ import { Input } from '@/components/ui/Input'
 import type { Feature, FeatureStatus, ObjectiveWithProgress, Project } from '../../../shared/types/ipc'
 import { STATUS_META, STATUS_ORDER } from './status'
 
-// 'drafts' = rascunhos ocultos (auto-criados sem registros); o conjunto vem
-// pronto da FeaturesArea via byProject — aqui só pulamos o filtro de status.
-type StatusFilter = 'all' | FeatureStatus | 'drafts'
+// 'drafts' = rascunhos ocultos (auto-criados sem registros); 'app-dev' = dev
+// do próprio claude-manager (Onda 3 — oculta por default de todos os outros
+// filtros). Os dois conjuntos vêm prontos da FeaturesArea via byProject — aqui
+// só pulamos o filtro de status pra eles.
+type StatusFilter = 'all' | FeatureStatus | 'drafts' | 'app-dev'
 
 interface Props {
   projects: Project[]
@@ -34,6 +36,7 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'Todas' },
   ...STATUS_ORDER.map((s) => ({ id: s as StatusFilter, label: STATUS_META[s].label })),
   { id: 'drafts', label: 'Rascunhos' },
+  { id: 'app-dev', label: 'App dev' },
 ]
 
 export function FeaturesSidebar({
@@ -63,7 +66,14 @@ export function FeaturesSidebar({
       .map((project) => {
         const all = byProject[project.id] ?? []
         const features = all.filter((f) => {
-          if (filter !== 'all' && filter !== 'drafts' && f.status !== filter) return false
+          if (
+            filter !== 'all' &&
+            filter !== 'drafts' &&
+            filter !== 'app-dev' &&
+            f.status !== filter
+          ) {
+            return false
+          }
           if (q && !f.title.toLowerCase().includes(q)) return false
           return true
         })

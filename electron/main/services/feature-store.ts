@@ -159,6 +159,7 @@ function fromFrontmatter(fm: Partial<Frontmatter>, docPath: string, body: string
     archivedAt: null, // archive vive só no SQLite, não no frontmatter
     origin: 'manual', // idem: origin vive só no SQLite (reindex preserva o valor da row)
     objectiveLinkCount: 0, // idem: vem de feature_links, reindexFromFile sobrescreve com o valor real
+    isAppDev: false, // idem: is_app_dev vive só no SQLite, reindexFromFile preserva o valor real
     body,
   }
 }
@@ -202,6 +203,7 @@ interface FeatureRow {
   completed_at: number | null
   archived_at: number | null
   origin: string
+  is_app_dev: number
 }
 
 function rowToFeature(
@@ -223,6 +225,7 @@ function rowToFeature(
     repos,
     origin: row.origin as FeatureOrigin,
     objectiveLinkCount,
+    isAppDev: !!row.is_app_dev,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -278,9 +281,9 @@ function upsertIndex(f: Feature): void {
     db.prepare(
       `INSERT INTO features
          (id, project_id, slug, title, status, objective, doc_path,
-          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin)
+          synth_mode, model, created_at, updated_at, completed_at, archived_at, origin, is_app_dev)
        VALUES (@id, @project_id, @slug, @title, @status, @objective, @doc_path,
-               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin)
+               @synth_mode, @model, @created_at, @updated_at, @completed_at, @archived_at, @origin, @is_app_dev)
        ON CONFLICT(id) DO UPDATE SET
          project_id  = excluded.project_id,
          slug        = excluded.slug,
@@ -305,10 +308,12 @@ function upsertIndex(f: Feature): void {
       created_at: f.createdAt,
       updated_at: f.updatedAt,
       completed_at: f.completedAt,
-      // archived_at e origin não vêm do frontmatter; ambos são omitidos do
-      // DO UPDATE — a row existente preserva os valores (inseridos só no INSERT).
+      // archived_at, origin e is_app_dev não vêm do frontmatter; todos são
+      // omitidos do DO UPDATE — a row existente preserva os valores
+      // (inseridos só no INSERT).
       archived_at: f.archivedAt,
       origin: f.origin,
+      is_app_dev: f.isAppDev ? 1 : 0,
     })
     db.prepare('DELETE FROM feature_repos WHERE feature_id = ?').run(f.id)
     const ins = db.prepare(
@@ -338,6 +343,7 @@ export function create(input: CreateFeatureInput): Feature {
     repos: input.repos ?? [],
     origin: input.origin ?? 'manual',
     objectiveLinkCount: 0, // feature nova: links são gravados depois via setObjectiveLinks
+    isAppDev: input.isAppDev ?? false,
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -615,6 +621,13 @@ export function archive(id: string): void {
   getDb().prepare('UPDATE features SET archived_at = ?, updated_at = ? WHERE id = ?').run(now, now, id)
 }
 
+// Estampa/limpa a tag app-dev (Onda 3 — separação app-dev). Sem bump de
+// updated_at de propósito: é uma correção de metadado, não uma mudança de
+// atividade — não deve "subir" a feature nas listagens ordenadas por atividade.
+export function setAppDev(id: string, value: boolean): void {
+  getDb().prepare('UPDATE features SET is_app_dev = ? WHERE id = ?').run(value ? 1 : 0, id)
+}
+
 // ---- Vínculos Feature → Objetivo/KR (Fase 3) ----
 
 // feature_links é polimórfico (sem FK em target_id), espelho de task_links:
@@ -718,14 +731,17 @@ export function reindexFromFile(path: string): Feature | null {
   }
   const doc = readDoc(path)
   if (!doc) return null
-  // preserva archived_at e origin existentes (vivem só no SQLite)
+  // preserva archived_at, origin e is_app_dev existentes (vivem só no SQLite)
   const existing = getDb()
-    .prepare('SELECT archived_at, origin FROM features WHERE id = ?')
-    .get(doc.feature.id) as { archived_at: number | null; origin: string } | undefined
+    .prepare('SELECT archived_at, origin, is_app_dev FROM features WHERE id = ?')
+    .get(doc.feature.id) as
+    | { archived_at: number | null; origin: string; is_app_dev: number }
+    | undefined
   const feature: Feature = {
     ...doc.feature,
     archivedAt: existing?.archived_at ?? null,
     origin: (existing?.origin as FeatureOrigin) ?? 'manual',
+    isAppDev: !!existing?.is_app_dev,
     objectiveLinkCount: objectiveLinkCountOf(doc.feature.id),
   }
   upsertIndex(feature)

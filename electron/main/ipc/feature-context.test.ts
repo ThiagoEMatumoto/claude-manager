@@ -31,6 +31,7 @@ function makeFeature(overrides: Partial<Feature> = {}): Feature {
     repos: [],
     origin: 'manual',
     objectiveLinkCount: 0,
+    isAppDev: false,
     createdAt: 0,
     updatedAt: 0,
     completedAt: null,

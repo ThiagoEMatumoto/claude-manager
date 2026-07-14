@@ -3,7 +3,9 @@
 // o feature_link direto; score médio grava um sinal "needs-review" (task
 // tagueada) em vez de link silencioso; score baixo não faz nada. Mesma
 // estratégia de setup de mcp/tools.test.ts — DB real (tmp dir), electron mockado.
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', async () => {
@@ -17,12 +19,15 @@ vi.mock('electron', async () => {
   }
 })
 
+vi.mock('./session-activity', () => ({ findTranscriptPath: vi.fn() }))
+
 import { app } from 'electron'
 import { closeDb, getDb } from './db'
 import { create as createFeature, get as getFeature, listObjectiveLinks } from './feature-store'
 import { create as createObjective, createKeyResult } from './objective-store'
 import { list as listTasks } from './task-store'
-import { maybeSuggestObjectiveLink } from './feature-memory'
+import { maybeSuggestObjectiveLink, isSelfRepoPath, featureMemory } from './feature-memory'
+import { findTranscriptPath } from './session-activity'
 
 afterAll(() => {
   closeDb()
@@ -116,5 +121,102 @@ describe('maybeSuggestObjectiveLink', () => {
     maybeSuggestObjectiveLink(feature.id, null)
 
     expect(listObjectiveLinks(feature.id)).toEqual([])
+  })
+})
+
+// ---- Auto-tag app-dev (Onda 3 — separação app-dev) ----
+
+describe('isSelfRepoPath', () => {
+  it('true quando o package.json do repo tem name claude-manager', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'self-repo-'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'claude-manager' }))
+    expect(isSelfRepoPath(dir)).toBe(true)
+  })
+
+  it('false pra outro package.json', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'other-repo-'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'some-other-app' }))
+    expect(isSelfRepoPath(dir)).toBe(false)
+  })
+
+  it('false sem package.json ou sem path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'no-pkg-'))
+    expect(isSelfRepoPath(dir)).toBe(false)
+    expect(isSelfRepoPath(null)).toBe(false)
+  })
+})
+
+function transcriptLine(obj: unknown): string {
+  return JSON.stringify(obj)
+}
+
+// Transcript mínimo que passa a guarda de atividade (userTurns>=2, editCount>=1)
+// e carrega uma branch de trabalho (feat/*), pra decideRegistration cair em 'create'.
+function makeSelfSessionTranscript(dir: string, branch = 'feat/self-test'): string {
+  const path = join(dir, 'sess.jsonl')
+  const lines = [
+    transcriptLine({ gitBranch: branch, message: { role: 'user', content: 'primeiro prompt' } }),
+    transcriptLine({
+      gitBranch: branch,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'a.ts' } }],
+      },
+    }),
+    transcriptLine({ gitBranch: branch, message: { role: 'user', content: 'segundo prompt' } }),
+  ]
+  writeFileSync(path, lines.join('\n'))
+  return path
+}
+
+function seedRepo(id: string, path: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO repos (id, project_id, label, path, position, created_at) VALUES (?, 'proj-1', ?, ?, 0, ?)`,
+    )
+    .run(id, id, path, Date.now())
+}
+
+describe('resolveFeature — auto-tag app-dev', () => {
+  it('estampa isAppDev quando o repo da sessão é o próprio claude-manager', () => {
+    const repoDir = mkdtempSync(join(tmpdir(), 'self-app-repo-'))
+    writeFileSync(join(repoDir, 'package.json'), JSON.stringify({ name: 'claude-manager' }))
+    seedRepo('repo-self', repoDir)
+
+    const transcriptDir = mkdtempSync(join(tmpdir(), 'self-app-transcript-'))
+    const transcriptPath = makeSelfSessionTranscript(transcriptDir)
+    vi.mocked(findTranscriptPath).mockReturnValue(transcriptPath)
+
+    const result = featureMemory.registerOnly({
+      sessionId: 'sess-1',
+      ccSessionId: 'cc-1',
+      repoId: 'repo-self',
+      featureId: null,
+    })
+
+    expect(result).not.toBeNull()
+    const feature = getFeature(result!.featureId)
+    expect(feature?.isAppDev).toBe(true)
+  })
+
+  it('NÃO estampa isAppDev pra um repo qualquer', () => {
+    const repoDir = mkdtempSync(join(tmpdir(), 'other-app-repo-'))
+    writeFileSync(join(repoDir, 'package.json'), JSON.stringify({ name: 'some-other-app' }))
+    seedRepo('repo-other', repoDir)
+
+    const transcriptDir = mkdtempSync(join(tmpdir(), 'other-app-transcript-'))
+    const transcriptPath = makeSelfSessionTranscript(transcriptDir, 'feat/other-test')
+    vi.mocked(findTranscriptPath).mockReturnValue(transcriptPath)
+
+    const result = featureMemory.registerOnly({
+      sessionId: 'sess-2',
+      ccSessionId: 'cc-2',
+      repoId: 'repo-other',
+      featureId: null,
+    })
+
+    expect(result).not.toBeNull()
+    const feature = getFeature(result!.featureId)
+    expect(feature?.isAppDev).toBe(false)
   })
 })

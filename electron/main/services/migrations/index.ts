@@ -30,6 +30,7 @@ import * as scheduledJobs from './028_scheduled_jobs'
 import * as webAudit from './029_web_audit'
 import * as sessionsTitleSource from './030_sessions_title_source'
 import * as taskOrigin from './031_task_origin'
+import * as featureAppDev from './032_feature_app_dev'
 
 interface Migration {
   version: number
@@ -75,6 +76,7 @@ export const migrations: Migration[] = [
   webAudit,
   sessionsTitleSource,
   taskOrigin,
+  featureAppDev,
 ]
 
 export function runMigrations(db: Database.Database): void {

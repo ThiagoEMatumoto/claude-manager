@@ -48,6 +48,10 @@ export function TasksArea() {
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   // Filtro auto/manual (Onda 3 — higiene): 'all' por default.
   const [originFilter, setOriginFilter] = useState<OriginFilter>('all')
+  // App-dev (Onda 3 — separação app-dev): tarefas linkadas a uma feature
+  // app-dev ficam ocultas por default (dev do próprio claude-manager, não
+  // "trabalho"); toggle explícito pra revê-las.
+  const [showAppDev, setShowAppDev] = useState(false)
   // Filtro por objetivo/feature (Onda 2 — fecha a sub-linkagem): '' = todos.
   // Casa por parentId direto (não distingue objective/feature — ids não colidem).
   const [linkFilter, setLinkFilter] = useState('')
@@ -142,9 +146,15 @@ export function TasksArea() {
       if (originFilter !== 'all' && t.origin !== originFilter) {
         return false
       }
+      if (
+        !showAppDev &&
+        t.links.some((l) => l.parentType === 'feature' && featuresById.get(l.parentId)?.isAppDev)
+      ) {
+        return false
+      }
       return true
     })
-  }, [tasks, q, selectedTags, linkFilter, originFilter])
+  }, [tasks, q, selectedTags, linkFilter, originFilter, showAppDev, featuresById])
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -214,7 +224,15 @@ export function TasksArea() {
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-end gap-1 border-b border-[var(--color-border)] px-4 py-2">
+        <div className="flex items-center justify-end gap-3 border-b border-[var(--color-border)] px-4 py-2">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-dim)]">
+            <input
+              type="checkbox"
+              checked={showAppDev}
+              onChange={(e) => setShowAppDev(e.target.checked)}
+            />
+            mostrar app-dev
+          </label>
           <ViewToggle value={view} onChange={setView} />
         </div>
         {view === 'board' ? (

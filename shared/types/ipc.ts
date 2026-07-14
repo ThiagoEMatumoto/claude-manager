@@ -572,6 +572,9 @@ export interface Feature {
   // COUNT de feature_links da feature (0 = "sem OKR"). Onda 0: dado que não
   // existia em nenhuma projeção — causa raiz da sub-linkagem.
   objectiveLinkCount: number
+  // Estampada quando o repo da sessão é o próprio claude-manager (Onda 3 —
+  // separação app-dev). Vive só no SQLite, mesmo padrão de origin.
+  isAppDev: boolean
   createdAt: number
   updatedAt: number
   completedAt: number | null
@@ -607,6 +610,9 @@ export interface CreateFeatureInput {
   // Default 'manual'. A resolução automática de sessões passa 'auto' (rascunho
   // oculto até a feature ganhar o 1º session record).
   origin?: FeatureOrigin
+  // Default false. resolveFeature passa true quando a sessão roda no repo do
+  // próprio claude-manager (Onda 3 — separação app-dev).
+  isAppDev?: boolean
   // Seções iniciais do corpo (preenchem o esqueleto de headings).
   overview?: string
   businessRules?: string

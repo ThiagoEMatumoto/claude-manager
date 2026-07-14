@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import matter from 'gray-matter'
 import type {
   Feature,
@@ -21,6 +22,7 @@ import {
   saveSessionRecord,
   listSessionRecords,
   setObjectiveLinks,
+  setAppDev,
 } from './feature-store'
 import { list as listObjectives, loadKeyResults } from './objective-store'
 import { create as createTask } from './task-store'
@@ -48,6 +50,14 @@ const DEBOUNCE_MS = 4_000
 const SYNTH_MODEL_KEY = 'synth_model'
 const SYNTH_MODE_KEY = 'synth_mode'
 const MAX_AUTO_OBJECTIVE_CHARS = 600
+
+// Identidade do próprio claude-manager, pro auto-tag app-dev (Onda 3 —
+// separação app-dev). O nome do package.json do repo é o sinal escolhido:
+// estável em qualquer worktree do repo (todas carregam o mesmo package.json),
+// e independente de onde o Electron está rodando (dev vs packaged) — ao
+// contrário de comparar paths, que quebraria em qualquer clone/worktree fora
+// do path exato de quem escreveu este código.
+const SELF_PACKAGE_NAME = 'claude-manager'
 
 // Modo de síntese global (app_prefs); 'threshold' como default seguro.
 function globalSynthMode(): FeatureSynthMode {
@@ -83,6 +93,21 @@ function resolveModel(feature: Feature): string | null {
     return row?.value?.trim() || null
   } catch {
     return null
+  }
+}
+
+// Detecta se `repoPath` é o repo do próprio claude-manager (Onda 3 —
+// separação app-dev): lê o package.json do repo e compara `name`. Função de
+// módulo (não método), testável direto com fixtures de filesystem sem
+// precisar montar uma sessão inteira.
+export function isSelfRepoPath(repoPath: string | null): boolean {
+  if (!repoPath) return false
+  try {
+    const raw = readFileSync(join(repoPath, 'package.json'), 'utf8')
+    const pkg = JSON.parse(raw) as { name?: unknown }
+    return pkg.name === SELF_PACKAGE_NAME
+  } catch {
+    return false
   }
 }
 
@@ -295,10 +320,21 @@ class FeatureMemoryService {
     info: SessionExitInfo,
     ccSessionId: string,
   ): { featureId: string; kind: LinkKind } | null {
+    // Tag app-dev (Onda 3): calculada uma vez por resolução, aplicada em
+    // qualquer um dos 3 caminhos (manual/link/create) — é sobre o repo da
+    // SESSÃO, não sobre como a feature foi resolvida.
+    const appDev = isSelfRepoPath(getRepoPath(info.repoId))
+    const tagAppDev = (featureId: string): void => {
+      if (appDev) setAppDev(featureId, true)
+    }
+
     // 1. Manual vence (sem guarda de atividade — o usuário escolheu a feature).
     if (info.featureId) {
       const f = getFeature(info.featureId)
-      if (f) return { featureId: f.id, kind: 'manual' }
+      if (f) {
+        tagAppDev(f.id)
+        return { featureId: f.id, kind: 'manual' }
+      }
       // feature manual sumiu — cai pra auto-resolução.
     }
 
@@ -337,6 +373,7 @@ class FeatureMemoryService {
     if (decision.action === 'skip') return null
     if (decision.action === 'link') {
       this.persistLink(info.sessionId, decision.featureId)
+      tagAppDev(decision.featureId)
       maybeSuggestObjectiveLink(decision.featureId, firstPrompt)
       return { featureId: decision.featureId, kind: 'auto-linked' }
     }
@@ -349,6 +386,7 @@ class FeatureMemoryService {
       title: decision.title,
       status: 'in-progress',
       origin: 'auto',
+      isAppDev: appDev,
       objective: firstPrompt ? firstPrompt.slice(0, MAX_AUTO_OBJECTIVE_CHARS) : null,
       repos: [{ repoId: info.repoId, branch: workBranch ?? branch ?? 'main', worktreePath: repoPath }],
     })

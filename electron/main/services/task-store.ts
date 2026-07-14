@@ -193,7 +193,47 @@ function nextPosition(): number {
   return (row.max ?? 0) + 1
 }
 
+const AUTO_DEDUP_WINDOW_MS = 72 * 60 * 60 * 1000
+
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function linksKey(links: TaskLink[]): string {
+  return links
+    .map((l) => `${l.parentType}:${l.parentId}`)
+    .sort()
+    .join(',')
+}
+
+// Dedup de auto-tasks no chokepoint do store (Onda 3), não só no handler MCP:
+// sessões repetidas tendem a recriar a "mesma" tarefa auto (mesmo título
+// normalizado, mesmo parent) dentro de uma janela curta. Enquanto a tarefa
+// existente não estiver 'done' e tiver sido criada nas últimas 72h, reusa o id
+// em vez de duplicar — silencioso, sem custo pra quem chama.
+function findRecentAutoDuplicate(title: string, links: TaskLink[]): Task | null {
+  const db = getDb()
+  const normalized = normalizeTitle(title)
+  const wantedKey = linksKey(links)
+  const since = Date.now() - AUTO_DEDUP_WINDOW_MS
+  const rows = db
+    .prepare(`SELECT id FROM tasks WHERE origin = 'auto' AND status != 'done' AND created_at >= ?`)
+    .all(since) as Array<{ id: string }>
+  for (const row of rows) {
+    const candidate = loadTask(row.id)
+    if (!candidate) continue
+    if (normalizeTitle(candidate.title) === normalized && linksKey(candidate.links) === wantedKey) {
+      return candidate
+    }
+  }
+  return null
+}
+
 export function create(input: CreateTaskInput): Task {
+  if ((input.origin ?? 'manual') === 'auto') {
+    const dup = findRecentAutoDuplicate(input.title.trim(), input.links ?? [])
+    if (dup) return dup
+  }
   const now = Date.now()
   const status = input.status ?? 'todo'
   const task: Task = {

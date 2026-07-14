@@ -2,7 +2,13 @@ import { useMemo } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
-import type { Task, TaskPriority, TaskStatus } from '../../../shared/types/ipc'
+import type {
+  Feature,
+  ObjectiveWithProgress,
+  Task,
+  TaskPriority,
+  TaskStatus,
+} from '../../../shared/types/ipc'
 import { PRIORITY_META, PRIORITY_ORDER, TASK_STATUS_META, TASK_STATUS_ORDER } from './status'
 
 export type StatusFilter = 'all' | TaskStatus
@@ -17,9 +23,14 @@ interface Props {
   statusFilter: StatusFilter
   priorityFilter: PriorityFilter
   selectedTags: string[]
+  // Objetivo/feature pra popular o select de vínculo; '' = todos (Onda 2).
+  objectives: ObjectiveWithProgress[]
+  features: Feature[]
+  linkFilter: string
   onQuery: (q: string) => void
   onStatusFilter: (s: StatusFilter) => void
   onPriorityFilter: (p: PriorityFilter) => void
+  onLinkFilter: (id: string) => void
   onToggleTag: (tag: string) => void
   onReload: () => void
   onNew: () => void
@@ -56,9 +67,13 @@ export function TasksSidebar({
   statusFilter,
   priorityFilter,
   selectedTags,
+  objectives,
+  features,
+  linkFilter,
   onQuery,
   onStatusFilter,
   onPriorityFilter,
+  onLinkFilter,
   onToggleTag,
   onReload,
   onNew,
@@ -132,6 +147,33 @@ export function TasksSidebar({
             />
           ))}
         </div>
+        {(objectives.length > 0 || features.length > 0) && (
+          <select
+            value={linkFilter}
+            onChange={(e) => onLinkFilter(e.target.value)}
+            className="mt-1.5 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="">Objetivo/Feature — todos</option>
+            {objectives.length > 0 && (
+              <optgroup label="Objetivos">
+                {objectives.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {features.length > 0 && (
+              <optgroup label="Features">
+                {features.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
         {allTags.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {allTags.map((tag) => {

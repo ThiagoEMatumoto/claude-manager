@@ -46,6 +46,9 @@ export function TasksArea() {
   // (mesmo padrão de ObjectivesArea).
   const [query, setQuery] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  // Filtro por objetivo/feature (Onda 2 — fecha a sub-linkagem): '' = todos.
+  // Casa por parentId direto (não distingue objective/feature — ids não colidem).
+  const [linkFilter, setLinkFilter] = useState('')
   const [view, setView] = useState<ViewMode>('list')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -131,9 +134,12 @@ export function TasksArea() {
       if (selectedTags.length > 0 && !selectedTags.every((tag) => t.tags.includes(tag))) {
         return false
       }
+      if (linkFilter && !t.links.some((l) => l.parentId === linkFilter)) {
+        return false
+      }
       return true
     })
-  }, [tasks, q, selectedTags])
+  }, [tasks, q, selectedTags, linkFilter])
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -177,11 +183,15 @@ export function TasksArea() {
         statusFilter={statusFilter}
         priorityFilter={priorityFilter}
         selectedTags={selectedTags}
+        objectives={objectives}
+        features={features}
+        linkFilter={linkFilter}
         onQuery={setQuery}
         onStatusFilter={(s) => void setFilter({ ...filter, status: s === 'all' ? undefined : s })}
         onPriorityFilter={(p) =>
           void setFilter({ ...filter, priority: p === 'all' ? undefined : p })
         }
+        onLinkFilter={setLinkFilter}
         onToggleTag={toggleTag}
         onReload={() => void refresh()}
         onNew={openCreate}

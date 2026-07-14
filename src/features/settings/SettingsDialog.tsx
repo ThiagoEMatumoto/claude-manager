@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Settings, Palette, Keyboard, Bell, Info, RefreshCw, Variable, MessageSquare } from 'lucide-react'
 import { AboutTab } from './AboutTab'
 import { SyncTab } from './SyncTab'
@@ -122,6 +122,13 @@ function GeneralTab({ open }: { open: boolean }) {
   const [maxActiveHandoffs, setMaxActiveHandoffs] = useState(HANDOFFS_MAX_ACTIVE_DEFAULT)
   const [heartbeatTtlHours, setHeartbeatTtlHours] = useState(HANDOFFS_HEARTBEAT_TTL_DEFAULT)
   const [calendarIcsUrl, setCalendarIcsUrl] = useState('')
+  const icsUrlDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    return () => {
+      if (icsUrlDebounceRef.current) clearTimeout(icsUrlDebounceRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -206,8 +213,11 @@ function GeneralTab({ open }: { open: boolean }) {
   function updateCalendarIcsUrl(v: string) {
     setCalendarIcsUrl(v)
     // O main reinicia o watcher ao receber o set desta pref (liga/desliga/reaponta
-    // na hora). Trim aqui evita gravar espaços que ligariam o watcher por engano.
-    void prefsApi.set('meeting_calendar_ics_url', v.trim())
+    // na hora). Debounce evita reiniciar o watcher a cada tecla digitada.
+    if (icsUrlDebounceRef.current) clearTimeout(icsUrlDebounceRef.current)
+    icsUrlDebounceRef.current = setTimeout(() => {
+      void prefsApi.set('meeting_calendar_ics_url', v.trim())
+    }, 500)
   }
 
   return (

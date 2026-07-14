@@ -182,7 +182,7 @@ export function SessionSwitcher({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/50 pt-[12vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 pt-[12vh]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

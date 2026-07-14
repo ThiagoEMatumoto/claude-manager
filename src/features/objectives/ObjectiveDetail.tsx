@@ -65,9 +65,15 @@ function ManualProgress({
   )
 }
 
-// Legenda do rollup automático: com KRs o progresso vem deles; sem KRs, das
-// features vinculadas + tarefas diretas (espelha objectiveProgress no main).
+// Legenda do rollup automático: com KRs o progresso vem SÓ deles — features
+// linkadas direto ficam fora do número mesmo existindo (achado-raiz da
+// curadoria: linkar features a um objetivo com KRs não move o %). Sem KRs, o
+// progresso vem das features vinculadas + tarefas diretas (espelha
+// objectiveProgress no main).
 function rollupLegend(detail: ObjectiveDetailType): string {
+  if (detail.keyResults.length > 0 && detail.linkedFeatures.length > 0) {
+    return `Progresso vem só dos ${detail.keyResults.length} key result(s) — as ${detail.linkedFeatures.length} feature(s) abaixo não entram neste número.`
+  }
   if (detail.keyResults.length > 0) {
     return `Média ponderada de ${detail.keyResults.length} key result(s).`
   }
@@ -242,7 +248,9 @@ export function ObjectiveDetail({
 
         {detail.linkedFeatures.length > 0 && (
           <section className="mt-6">
-            <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Features</h2>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">
+              Features{detail.keyResults.length > 0 ? ' (fora do rollup)' : ''}
+            </h2>
             <ul className="flex flex-col gap-2">
               {detail.linkedFeatures.map((f) => (
                 <li

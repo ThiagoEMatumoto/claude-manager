@@ -7,6 +7,11 @@ interface Props {
   // Mapa pergunta→opção(ões) escolhida(s); ausente = ainda não respondido. Em
   // multiSelect o valor vem como "Opção A, Opção B" (labels juntos por ", ").
   answers?: Record<string, string>
+  // Clique-pra-responder: presente = o ChatView liberou o clique (card é o momento
+  // pendente + sessão 'waiting'). O handler de lá re-checa os guards no clique.
+  onRespond?: (optionIndex: number, label: string) => void
+  // Label da opção clicada, enquanto a resposta real não chega no JSONL (forId).
+  sentLabel?: string
 }
 
 // Uma opção foi escolhida se bate exata (single) ou aparece na lista juntada
@@ -18,10 +23,15 @@ function isSelected(answer: string | undefined, label: string): boolean {
 
 // Render dedicado de um AskUserQuestion (substitui o tool card genérico). Mostra
 // header + pergunta + opções (label em destaque, description abaixo). Quando
-// respondido, marca a(s) opção(ões) escolhida(s). Informativo: responder acontece
-// no compositor/terminal (o clique-pra-responder ficou pra validação live).
-export function QuestionCard({ questions, answers }: Props) {
+// respondido, marca a(s) opção(ões) escolhida(s). Com onRespond presente, as opções
+// viram botões que enviam a escolha ao PTY — V1 só pra pergunta ÚNICA sem
+// multiSelect (multi-pergunta tem tabs + "Review your answers" na TUI; multiSelect
+// exige espaço+Enter). Free-text/"Other" segue pelo compositor.
+export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props) {
   const answered = answers != null
+  const sent = sentLabel != null && !answered
+  const clickable =
+    onRespond != null && !answered && !sent && questions.length === 1 && !questions[0].multiSelect
   return (
     <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)]/60 text-sm">
       <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2">
@@ -51,19 +61,21 @@ export function QuestionCard({ questions, answers }: Props) {
               <div className="flex flex-col gap-1">
                 {q.options.map((opt, oi) => {
                   const selected = isSelected(answer, opt.label)
-                  return (
-                    <div
-                      key={oi}
-                      className={`flex items-start gap-2 rounded border px-2 py-1.5 ${
-                        selected
-                          ? 'border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10'
-                          : 'border-[var(--color-border)]'
-                      }`}
-                    >
+                  // Eco otimista do clique: check em tom dim até a resposta real
+                  // chegar no transcript e virar `selected`.
+                  const sentSelected = sent && opt.label === sentLabel
+                  const content = (
+                    <>
                       <Icon
                         as={Check}
                         size={13}
-                        className={`mt-0.5 shrink-0 ${selected ? 'text-[var(--color-accent)]' : 'text-transparent'}`}
+                        className={`mt-0.5 shrink-0 ${
+                          selected
+                            ? 'text-[var(--color-accent)]'
+                            : sentSelected
+                              ? 'text-[var(--color-text-dim)]'
+                              : 'text-transparent'
+                        }`}
                       />
                       <div className="min-w-0">
                         <div
@@ -77,6 +89,32 @@ export function QuestionCard({ questions, answers }: Props) {
                           </div>
                         )}
                       </div>
+                    </>
+                  )
+                  if (clickable) {
+                    return (
+                      <button
+                        key={oi}
+                        type="button"
+                        onClick={() => onRespond(oi, opt.label)}
+                        className="flex w-full items-start gap-2 rounded border border-[var(--color-border)] px-2 py-1.5 text-left transition hover:border-[var(--color-accent)]/60 hover:bg-[var(--color-accent)]/10"
+                      >
+                        {content}
+                      </button>
+                    )
+                  }
+                  return (
+                    <div
+                      key={oi}
+                      className={`flex items-start gap-2 rounded border px-2 py-1.5 ${
+                        selected
+                          ? 'border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10'
+                          : sentSelected
+                            ? 'border-[var(--color-border)] bg-[var(--color-surface-2)]'
+                            : 'border-[var(--color-border)]'
+                      }`}
+                    >
+                      {content}
                     </div>
                   )
                 })}
@@ -86,7 +124,11 @@ export function QuestionCard({ questions, answers }: Props) {
         })}
         {!answered && (
           <div className="text-xs text-[var(--color-text-dim)]">
-            Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.
+            {sent
+              ? 'Resposta enviada…'
+              : clickable
+                ? 'Clique numa opção pra responder — ou use o compositor/terminal.'
+                : 'Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.'}
           </div>
         )}
       </div>

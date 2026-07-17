@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { parseChatMessages, parseSubagentTurns, stripAnsi, type SubagentInfo } from './chat-transcript'
+import {
+  lastPlanFilePath,
+  parseChatMessages,
+  parseSubagentTurns,
+  stripAnsi,
+  type SubagentInfo,
+} from './chat-transcript'
 
 // Fixture representativo: prompt do usuário, resposta assistant com texto +
 // tool_use, tool_result do usuário (string e array), uma linha não-mensagem, uma
@@ -228,6 +234,7 @@ describe('parseChatMessages — interactive prompts', () => {
       kind: 'exit_plan_mode',
       id: 'plan_1',
       plan: '# My Plan\n\nDo the thing.',
+      planFilePath: null,
       allowedPrompts: ['edit'],
     })
     expect(m[2]).toEqual({ kind: 'plan_decision', forId: 'plan_1', approved: true })
@@ -304,7 +311,90 @@ describe('parseChatMessages — interactive prompts', () => {
         },
       }),
     )
-    expect(plan).toEqual({ kind: 'exit_plan_mode', id: 'p', plan: 'X', allowedPrompts: null })
+    expect(plan).toEqual({
+      kind: 'exit_plan_mode',
+      id: 'p',
+      plan: 'X',
+      planFilePath: null,
+      allowedPrompts: null,
+    })
+  })
+
+  it('extracts planFilePath from the ExitPlanMode input when present', () => {
+    const [plan] = parseChatMessages(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'p2',
+              name: 'ExitPlanMode',
+              input: { plan: 'X', planFilePath: '~/.claude/plans/some-plan.md' },
+            },
+          ],
+        },
+      }),
+    )
+    expect(plan).toMatchObject({
+      kind: 'exit_plan_mode',
+      planFilePath: '~/.claude/plans/some-plan.md',
+    })
+  })
+})
+
+// lastPlanFilePath: último Write/Edit do transcript mirando ~/.claude/plans/*.md
+// — o dado que permite mostrar o plano no card de aprovação PENDENTE.
+describe('lastPlanFilePath', () => {
+  const write = (id: string, filePath: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name: 'Write', input: { file_path: filePath } }],
+      },
+    })
+  const edit = (id: string, filePath: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name: 'Edit', input: { file_path: filePath } }],
+      },
+    })
+
+  it('resolves the LAST Write/Edit targeting ~/.claude/plans/*.md', () => {
+    const m = parseChatMessages(
+      [
+        write('w1', '/home/u/.claude/plans/first-plan.md'),
+        write('w2', '/home/u/project/src/index.ts'), // fora de plans → ignorado
+        edit('e1', '/home/u/.claude/plans/second-plan.md'),
+      ].join('\n'),
+    )
+    expect(lastPlanFilePath(m)).toBe('/home/u/.claude/plans/second-plan.md')
+  })
+
+  it('ignores non-Write/Edit tools and non-plan paths', () => {
+    const m = parseChatMessages(
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: '/home/u/.claude/plans/x.md' } },
+            ],
+          },
+        }),
+        write('w1', '/home/u/.claude/plans-other/x.md'),
+      ].join('\n'),
+    )
+    expect(lastPlanFilePath(m)).toBeNull()
+  })
+
+  it('is null when the transcript never wrote a plan file', () => {
+    expect(lastPlanFilePath(parseChatMessages(FIXTURE))).toBeNull()
   })
 })
 

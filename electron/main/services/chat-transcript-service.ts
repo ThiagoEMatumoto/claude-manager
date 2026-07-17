@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import { findTranscriptPath } from './session-activity'
-import { parseChatMessages } from './chat-transcript'
+import { lastPlanFilePath, parseChatMessages } from './chat-transcript'
 import { readSubagentInfos } from './subagent-turns'
 import type { ChatMessage, ChatTranscriptUpdate } from '../../../shared/types/chat'
 
@@ -29,6 +29,7 @@ export interface ChatTranscriptRead {
   path: string | null
   mtimeMs: number | null
   messages: ChatMessage[]
+  lastPlanFilePath: string | null
 }
 
 // Lê/observa o transcript JSONL de uma sessão pra alimentar o Chat View. O parser
@@ -46,9 +47,11 @@ class ChatTranscriptService {
   // Leitura pontual (chat:get-transcript). Lê o arquivo INTEIRO — o chat precisa do
   // histórico completo, ao contrário do tail de 64KB do session-activity.
   async read(ccSessionId: string | null): Promise<ChatTranscriptRead> {
-    if (!ccSessionId) return { ccSessionId, path: null, mtimeMs: null, messages: [] }
+    if (!ccSessionId)
+      return { ccSessionId, path: null, mtimeMs: null, messages: [], lastPlanFilePath: null }
     const path = findTranscriptPath(ccSessionId)
-    if (!path) return { ccSessionId, path: null, mtimeMs: null, messages: [] }
+    if (!path)
+      return { ccSessionId, path: null, mtimeMs: null, messages: [], lastPlanFilePath: null }
     return this.readPath(ccSessionId, path)
   }
 
@@ -58,15 +61,17 @@ class ChatTranscriptService {
       // Subagentes vivem em <projectDir>/<ccSessionId>/subagents/ (irmão do JSONL
       // principal em <projectDir>/<ccSessionId>.jsonl) — leitura síncrona barata.
       const subagents = readSubagentInfos(dirname(path), ccSessionId)
+      const messages = parseChatMessages(content, subagents)
       return {
         ccSessionId,
         path,
         mtimeMs: st.mtimeMs,
-        messages: parseChatMessages(content, subagents),
+        messages,
+        lastPlanFilePath: lastPlanFilePath(messages),
       }
     } catch {
       // arquivo sumiu / corrida — devolve vazio em vez de derrubar o handler.
-      return { ccSessionId, path, mtimeMs: null, messages: [] }
+      return { ccSessionId, path, mtimeMs: null, messages: [], lastPlanFilePath: null }
     }
   }
 
@@ -108,6 +113,7 @@ class ChatTranscriptService {
       sessionId,
       transcriptExists: false,
       messages: [],
+      lastPlanFilePath: null,
     } satisfies ChatTranscriptUpdate)
     entry.poll = setInterval(() => {
       const path = findTranscriptPath(entry.ccSessionId)
@@ -134,13 +140,14 @@ class ChatTranscriptService {
 
   private async emit(sessionId: string, entry: WatchEntry, path: string): Promise<void> {
     if (!this.watches.has(sessionId)) return // corrida com unwatch durante o debounce.
-    const { messages } = await this.readPath(entry.ccSessionId, path)
+    const read = await this.readPath(entry.ccSessionId, path)
     if (!this.watches.has(sessionId)) return
     // emit() só dispara depois do attach() (path encontrado) → o arquivo existe.
     broadcast('chat:transcript-update', {
       sessionId,
       transcriptExists: true,
-      messages,
+      messages: read.messages,
+      lastPlanFilePath: read.lastPlanFilePath,
     } satisfies ChatTranscriptUpdate)
   }
 }

@@ -20,7 +20,7 @@ import { SubagentCard } from './SubagentCard'
 import { SystemCard } from './SystemCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
-import { useChatTranscript } from './useChatTranscript'
+import { useChatTranscript, usePlanFile } from './useChatTranscript'
 import { buildDigitKey, buildPlanKeys, findManualApproveIndex } from './respond-keys'
 import { menuFingerprint, type TuiMenu } from '../tui-menu-parser'
 import {
@@ -65,8 +65,28 @@ interface Props {
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
+// Placeholder do card de plano pendente quando o conteúdo não pôde ser resolvido
+// (CLI antiga sem plan file, leitura falhou) — fail-safe, comportamento anterior.
+const PLAN_PLACEHOLDER = '_O plano está na conversa acima — revise antes de decidir._'
+
+// PlanCard de transcript (pós-fato) com fallback de robustez: se o input do
+// ExitPlanMode veio com plan vazio mas com planFilePath, busca o arquivo.
+// Componente próprio porque usePlanFile é um hook (não pode viver no map).
+function TranscriptPlanCard({
+  plan,
+  planFilePath,
+  decision,
+}: {
+  plan: string
+  planFilePath: string | null
+  decision?: boolean
+}) {
+  const fetched = usePlanFile(plan ? null : planFilePath)
+  return <PlanCard plan={plan || fetched || PLAN_PLACEHOLDER} decision={decision} />
+}
+
 export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode, onRespond, tuiMenu, reparseMenu }, ref) {
-  const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
+  const { messages, loading, transcriptExists, lastPlanFilePath } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   // Só auto-scrollamos se o usuário já estava colado no fim (não roubamos a
@@ -186,6 +206,14 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
 
   const manualApproveIndex =
     tuiMenu && tuiMenu.kind === 'plan' ? findManualApproveIndex(tuiMenu) : null
+
+  // Conteúdo do plano pro card PENDENTE: o tool_use do ExitPlanMode ainda não
+  // está no JSONL, mas o plan file foi escrito durante o plan mode — lemos ele
+  // pelo path do último Write/Edit em ~/.claude/plans/. Sem path ou leitura
+  // falhou → placeholder (fail-safe, CLIs antigas continuam como antes).
+  const pendingPlanText = usePlanFile(
+    tuiMenu?.kind === 'plan' ? lastPlanFilePath : null,
+  )
 
   // Card sintetizado só quando: menu íntegro + sessão 'waiting' + o transcript
   // não tem momento pendente próprio (nunca duplicar) + o menu não foi consumido.
@@ -309,7 +337,14 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
                 <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
               )
             case 'exit_plan_mode':
-              return <PlanCard key={i} plan={m.plan} decision={interactive.plans.get(m.id)} />
+              return (
+                <TranscriptPlanCard
+                  key={i}
+                  plan={m.plan}
+                  planFilePath={m.planFilePath}
+                  decision={interactive.plans.get(m.id)}
+                />
+              )
 
             // Resposta/decisão/status são fundidos no card acima (por forId) — não
             // renderizam sozinhos.
@@ -331,7 +366,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
         )}
         {showTuiCard && tuiMenu?.kind === 'plan' && (
           <PlanCard
-            plan={'_O plano está na conversa acima — revise antes de decidir._'}
+            plan={pendingPlanText ?? PLAN_PLACEHOLDER}
             onDecide={canRespondTui ? respondTuiPlan : undefined}
             sent={tuiSent != null && tuiSent.fp === menuFp}
             canApprove={manualApproveIndex != null}

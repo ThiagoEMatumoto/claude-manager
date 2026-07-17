@@ -70,14 +70,36 @@ function parseQuestions(input: unknown): ChatQuestion[] {
   })
 }
 
-// ExitPlanMode: input.plan (markdown) + input.allowedPrompts (pode ser null).
-function parsePlan(input: unknown): { plan: string; allowedPrompts: string[] | null } {
+// ExitPlanMode: input.plan (markdown) + input.planFilePath (caminho do arquivo
+// de plano em ~/.claude/plans, ausente em CLIs antigos) + input.allowedPrompts.
+function parsePlan(input: unknown): {
+  plan: string
+  planFilePath: string | null
+  allowedPrompts: string[] | null
+} {
   const o = (input ?? {}) as Record<string, unknown>
   const ap = o.allowedPrompts
   return {
     plan: typeof o.plan === 'string' ? o.plan : '',
+    planFilePath: typeof o.planFilePath === 'string' ? o.planFilePath : null,
     allowedPrompts: Array.isArray(ap) ? ap.filter((p): p is string => typeof p === 'string') : null,
   }
+}
+
+// PURO: último tool_use Write/Edit do transcript cujo alvo é um arquivo de plano
+// (~/.claude/plans/*.md). O plan file é escrito DURANTE o plan mode — este path
+// permite resolver o conteúdo do plano ANTES da aprovação, já que o tool_use
+// pendente do ExitPlanMode não é gravado no JSONL.
+const PLAN_FILE_RE = /\/\.claude\/plans\/[^/]+\.md$/
+export function lastPlanFilePath(messages: ChatMessage[]): string | null {
+  let last: string | null = null
+  for (const m of messages) {
+    if (m.kind !== 'tool_use') continue
+    if (m.name !== 'Write' && m.name !== 'Edit') continue
+    const fp = (m.input as { file_path?: unknown } | null | undefined)?.file_path
+    if (typeof fp === 'string' && PLAN_FILE_RE.test(fp)) last = fp
+  }
+  return last
 }
 
 // Mapa pergunta→opção(ões) escolhida(s) do toolUseResult de um AskUserQuestion.

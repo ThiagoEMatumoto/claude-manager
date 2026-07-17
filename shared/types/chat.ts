@@ -60,7 +60,16 @@ export type ChatMessage =
   | { kind: 'subagent_result'; forId: string; isError: boolean }
   | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
   | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
-  | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }
+  // planFilePath: caminho do arquivo de plano (~/.claude/plans/*.md) gravado pela
+  // CLI no input do ExitPlanMode — fallback pra UI buscar o conteúdo quando plan
+  // vier vazio. null em CLIs antigos.
+  | {
+      kind: 'exit_plan_mode'
+      id: string
+      plan: string
+      planFilePath: string | null
+      allowedPrompts: string[] | null
+    }
   | { kind: 'plan_decision'; forId: string; approved: boolean }
 
 // Retorno do read inicial (chat:get-transcript). path/mtimeMs são null quando a
@@ -73,6 +82,11 @@ export interface ChatTranscript {
   path: string | null
   mtimeMs: number | null
   messages: ChatMessage[]
+  // Último Write/Edit do transcript apontando pra ~/.claude/plans/*.md. O plan
+  // file é escrito DURANTE o plan mode, então este caminho permite mostrar o
+  // conteúdo do plano no card pendente (o tool_use do ExitPlanMode ainda não
+  // está no JSONL nesse momento). null quando a sessão nunca escreveu plano.
+  lastPlanFilePath: string | null
 }
 
 // Payload do broadcast chat:transcript-update. Emite a LISTA completa reparseada
@@ -83,4 +97,5 @@ export interface ChatTranscriptUpdate {
   sessionId: string
   transcriptExists: boolean
   messages: ChatMessage[]
+  lastPlanFilePath: string | null
 }

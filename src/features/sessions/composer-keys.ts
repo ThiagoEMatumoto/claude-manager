@@ -52,7 +52,8 @@ const HANDLE_IN_TEXTAREA: ForwardKeyResult = { handleInTextarea: true }
 
 // Navegação só é encaminhada com o textarea VAZIO; com texto, as setas/Home/End
 // editam o draft (cursor). Vazio = "modo de controle da TUI"; com texto = "edição".
-const NAV_SEQ: Record<string, string> = {
+// Exportado: respond-keys (cliques nos cards do chat) reusa as mesmas sequências.
+export const NAV_SEQ: Record<string, string> = {
   ArrowUp: '\x1b[A',
   ArrowDown: '\x1b[B',
   ArrowRight: '\x1b[C',

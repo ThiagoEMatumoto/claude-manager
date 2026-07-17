@@ -165,6 +165,12 @@ export function Terminal({
   const [searchQuery, setSearchQuery] = useState('')
   const composerRef = useRef<ComposerHandle>(null)
   const chatViewRef = useRef<ChatViewHandle>(null)
+  // WebGL addon vivo deste mount (null = DOM renderer). Ref (não var local do
+  // effect) pra outros effects (heal em resume/focus, crash de GPU) alcançarem.
+  const webglRef = useRef<WebglAddon | null>(null)
+  // Contexto WebGL já morreu neste mount? Nunca recriar (padrão VS Code): um
+  // driver que perdeu contexto tende a perder de novo — DOM renderer até remount.
+  const webglFailedRef = useRef(false)
 
   // cwd da sessão pra resolver paths relativos clicados no terminal. É o path do
   // repo do pane; vazio em sessões avulsas (aí só linkamos absolutos/`~`). Ref pra
@@ -553,12 +559,19 @@ export function Terminal({
         try {
           const addon = new WebglAddon()
           addon.onContextLoss(() => {
-            // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM.
+            // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM
+            // e o refresh repinta a tela inteira — sem ele ficam os fragmentos do
+            // atlas corrompido. Marca o mount como failed: nunca recriar WebGL aqui.
+            webglFailedRef.current = true
             addon.dispose()
             webgl = null
+            webglRef.current = null
+            term.refresh(0, term.rows - 1)
+            console.warn('[terminal] WebGL context lost — fallback DOM renderer', ccSessionId)
           })
           term.loadAddon(addon)
           webgl = addon
+          webglRef.current = addon
         } catch (err) {
           console.warn('[terminal] WebGL indisponível, seguindo com DOM renderer:', err)
         }
@@ -714,6 +727,7 @@ export function Terminal({
       setDataHandler(null)
       webgl?.dispose()
       webgl = null
+      webglRef.current = null
       term.dispose()
       xtermRef.current = null
       fitRef.current = null

@@ -59,15 +59,24 @@ export function resolveInteractive(messages: ChatMessage[]): InteractiveResoluti
   return { answers, plans, subagents }
 }
 
-// 'question' | 'plan' quando o ÚLTIMO momento interativo do transcript ainda não
-// tem resposta/decisão (claude aguardando o usuário); null caso contrário. Espelha
+// Momento interativo aguardando o usuário: kind + id do tool_use. O id permite à
+// UI saber QUAL card pode responder por clique (guard: só o card pendente).
+export interface PendingInteractive {
+  kind: 'question' | 'plan'
+  id: string
+}
+
+// Preenchido quando o ÚLTIMO momento interativo do transcript ainda não tem
+// resposta/decisão (claude aguardando o usuário); null caso contrário. Espelha
 // o critério "tool_use de AskUserQuestion/ExitPlanMode sem tool_result depois".
-export function pendingInteractive(messages: ChatMessage[]): 'question' | 'plan' | null {
+export function pendingInteractive(messages: ChatMessage[]): PendingInteractive | null {
   const { answers, plans } = resolveInteractive(messages)
-  let pending: 'question' | 'plan' | null = null
+  let pending: PendingInteractive | null = null
   for (const m of messages) {
-    if (m.kind === 'ask_user_question') pending = answers.has(m.id) ? null : 'question'
-    else if (m.kind === 'exit_plan_mode') pending = plans.has(m.id) ? null : 'plan'
+    if (m.kind === 'ask_user_question')
+      pending = answers.has(m.id) ? null : { kind: 'question', id: m.id }
+    else if (m.kind === 'exit_plan_mode')
+      pending = plans.has(m.id) ? null : { kind: 'plan', id: m.id }
   }
   return pending
 }
@@ -80,7 +89,7 @@ export function pendingInteractive(messages: ChatMessage[]): 'question' | 'plan'
 // precedência; este é o fallback que direciona o usuário ao terminal.
 export function showTerminalWaitBanner(input: {
   status: SessionActivity['status'] | undefined
-  pending: 'question' | 'plan' | null
+  pending: PendingInteractive | null
 }): boolean {
   return input.status === 'waiting' && input.pending === null
 }

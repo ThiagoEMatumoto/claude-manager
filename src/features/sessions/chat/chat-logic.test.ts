@@ -133,13 +133,14 @@ describe('resolveInteractive', () => {
 })
 
 describe('pendingInteractive', () => {
-  it('returns the kind of the last unanswered interactive moment', () => {
-    expect(pendingInteractive([{ kind: 'ask_user_question', id: 'a', questions: [] }])).toBe(
-      'question',
-    )
+  it('returns kind and id of the last unanswered interactive moment', () => {
+    expect(pendingInteractive([{ kind: 'ask_user_question', id: 'a', questions: [] }])).toEqual({
+      kind: 'question',
+      id: 'a',
+    })
     expect(
       pendingInteractive([{ kind: 'exit_plan_mode', id: 'p', plan: '#', allowedPrompts: null }]),
-    ).toBe('plan')
+    ).toEqual({ kind: 'plan', id: 'p' })
   })
 
   it('is null once the last interactive moment is resolved', () => {
@@ -156,7 +157,7 @@ describe('pendingInteractive', () => {
       { kind: 'plan_decision', forId: 'p', approved: true },
       { kind: 'ask_user_question', id: 'a', questions: [] },
     ]
-    expect(pendingInteractive(msgs)).toBe('question')
+    expect(pendingInteractive(msgs)).toEqual({ kind: 'question', id: 'a' })
   })
 
   it('is null when there is no interactive moment', () => {
@@ -170,8 +171,12 @@ describe('showTerminalWaitBanner', () => {
   })
 
   it('defers to the R5 card/banner when a question/plan is pending', () => {
-    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'question' })).toBe(false)
-    expect(showTerminalWaitBanner({ status: 'waiting', pending: 'plan' })).toBe(false)
+    expect(
+      showTerminalWaitBanner({ status: 'waiting', pending: { kind: 'question', id: 'a' } }),
+    ).toBe(false)
+    expect(showTerminalWaitBanner({ status: 'waiting', pending: { kind: 'plan', id: 'p' } })).toBe(
+      false,
+    )
   })
 
   it('does not show for non-waiting statuses', () => {

@@ -45,6 +45,12 @@ function getGpuStatus(): Promise<GpuStatus> {
 // com a fallback e o safety net (document.fonts.ready) re-mede quando ela chegar.
 const FONT_LOAD_TIMEOUT_MS = 800
 
+// Cap global de contextos WebGL vivos: o Chromium limita ~16 contextos WebGL por
+// processo — estourar derruba o contexto mais antigo (outra pane). Acima do cap
+// a pane fica no DOM renderer (v1: sem promoção automática ao liberar slot).
+const MAX_WEBGL_INSTANCES = 8
+let liveWebglCount = 0
+
 interface Props {
   session: Session
   repoLabel: string
@@ -171,6 +177,60 @@ export function Terminal({
   // Contexto WebGL já morreu neste mount? Nunca recriar (padrão VS Code): um
   // driver que perdeu contexto tende a perder de novo — DOM renderer até remount.
   const webglFailedRef = useRef(false)
+  // Guards de attach lidos dentro de callbacks/async: modo atual da pane e
+  // visibilidade do host no viewport (IntersectionObserver do mount effect).
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  const visibleRef = useRef(true)
+
+  // Dispose do WebGL vivo (se houver): devolve ao DOM renderer, repinta a tela
+  // toda (remove restos do atlas) e libera o slot do cap global.
+  function detachWebgl() {
+    const addon = webglRef.current
+    if (!addon) return
+    webglRef.current = null
+    addon.dispose()
+    liveWebglCount = Math.max(0, liveWebglCount - 1)
+    const term = xtermRef.current
+    term?.refresh(0, term.rows - 1)
+  }
+
+  // Ativa o renderer WebGL no term JÁ aberto, com todos os guards: GPU ligada,
+  // mount não marcado como failed, pane em modo terminal, host visível e slot
+  // livre no cap global. Async (status de GPU) — os guards re-checam após o await.
+  function attachWebgl() {
+    const term = xtermRef.current
+    if (!term || !term.element) return // exige term.open() já feito
+    if (webglRef.current || webglFailedRef.current) return
+    if (modeRef.current === 'chat' || !visibleRef.current) return
+    if (liveWebglCount >= MAX_WEBGL_INSTANCES) return
+    void getGpuStatus().then((status) => {
+      if (status.hwAccelDisabled) return
+      // Re-checa: o mount pode ter morrido (StrictMode/unmount), outro caminho
+      // pode ter attachado, o modo/visibilidade/cap podem ter mudado no meio.
+      if (xtermRef.current !== term) return
+      if (webglRef.current || webglFailedRef.current) return
+      if (modeRef.current === 'chat' || !visibleRef.current) return
+      if (liveWebglCount >= MAX_WEBGL_INSTANCES) return
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM
+          // e o refresh repinta a tela inteira — sem ele ficam os fragmentos do
+          // atlas corrompido. Marca o mount como failed: nunca recriar WebGL aqui.
+          webglFailedRef.current = true
+          detachWebgl()
+          console.warn('[terminal] WebGL context lost — fallback DOM renderer', ccSessionId)
+        })
+        term.loadAddon(addon)
+        webglRef.current = addon
+        liveWebglCount += 1
+        term.refresh(0, term.rows - 1)
+      } catch (err) {
+        console.warn('[terminal] WebGL indisponível, seguindo com DOM renderer:', err)
+      }
+    })
+  }
 
   // cwd da sessão pra resolver paths relativos clicados no terminal. É o path do
   // repo do pane; vazio em sessões avulsas (aí só linkamos absolutos/`~`). Ref pra
@@ -528,7 +588,6 @@ export function Terminal({
     xtermRef.current = term
     fitRef.current = fit
 
-    let webgl: WebglAddon | null = null
     // Gate do open: espera a JetBrains Mono (bounded) pra medição de célula e o
     // atlas de glifos nascerem com a fonte certa — sem isso o grid mede a
     // fallback e o texto troca/borra depois. `cancelled` cobre o double-mount do
@@ -551,31 +610,10 @@ export function Terminal({
       observer.observe(host)
 
       // Renderer WebGL: glifos nítidos e scroll mais fluido que o DOM renderer.
-      // Carrega DEPOIS do open (o addon exige o elemento montado). Só tenta com a
-      // GPU ligada; qualquer falha (driver, context loss) volta pro DOM renderer
-      // sem quebrar o terminal.
-      void getGpuStatus().then((status) => {
-        if (cancelled || status.hwAccelDisabled) return
-        try {
-          const addon = new WebglAddon()
-          addon.onContextLoss(() => {
-            // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM
-            // e o refresh repinta a tela inteira — sem ele ficam os fragmentos do
-            // atlas corrompido. Marca o mount como failed: nunca recriar WebGL aqui.
-            webglFailedRef.current = true
-            addon.dispose()
-            webgl = null
-            webglRef.current = null
-            term.refresh(0, term.rows - 1)
-            console.warn('[terminal] WebGL context lost — fallback DOM renderer', ccSessionId)
-          })
-          term.loadAddon(addon)
-          webgl = addon
-          webglRef.current = addon
-        } catch (err) {
-          console.warn('[terminal] WebGL indisponível, seguindo com DOM renderer:', err)
-        }
-      })
+      // Carrega DEPOIS do open (o addon exige o elemento montado). attachWebgl
+      // aplica os guards (GPU ligada, modo, visibilidade, cap global) e qualquer
+      // falha volta pro DOM renderer sem quebrar o terminal.
+      attachWebgl()
 
       // Safety net: se o timeout venceu a corrida (fonte ainda baixando), refaz
       // atlas e medidas quando todas as fonts do documento assentarem.
@@ -715,6 +753,20 @@ export function Terminal({
       term.options.theme = xtermTheme(tokens)
     })
 
+    // WebGL só em pane visível: host fora do viewport (aba oculta do dockview,
+    // grid rolado) → dispose libera o slot do cap; voltou a aparecer → re-attach.
+    // threshold 0: qualquer pixel visível conta como visível.
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries[entries.length - 1]?.isIntersecting ?? true
+        visibleRef.current = visible
+        if (visible) attachWebgl()
+        else detachWebgl()
+      },
+      { threshold: 0 },
+    )
+    io.observe(host)
+
     // O cleanup NÃO mata a sessão — só desfaz o xterm e os listeners. A sessão
     // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
@@ -722,12 +774,11 @@ export function Terminal({
       host.removeEventListener('contextmenu', onContextMenu)
       if (resizeRaf != null) cancelAnimationFrame(resizeRaf)
       observer.disconnect()
+      io.disconnect()
       offTheme()
       linkProvider.dispose()
       setDataHandler(null)
-      webgl?.dispose()
-      webgl = null
-      webglRef.current = null
+      detachWebgl()
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
@@ -741,6 +792,15 @@ export function Terminal({
   useEffect(() => {
     if (mode !== 'chat' && !exited) xtermRef.current?.focus()
   }, [mode, exited])
+
+  // WebGL só no modo terminal: em chat o xterm fica invisible sob o ChatView —
+  // manter um contexto WebGL ali gasta VRAM e ocupa slot do cap global à toa.
+  // Voltando pro terminal, re-attach (attachWebgl re-aplica todos os guards).
+  useEffect(() => {
+    if (mode === 'chat') detachWebgl()
+    else attachWebgl()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   // Zoom ao vivo: atualiza a fonte do xterm já montado quando o store muda, sem
   // recriar o terminal (a criação lê o tamanho via getState()).

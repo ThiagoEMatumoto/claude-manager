@@ -277,7 +277,7 @@ app.whenReady().then(async () => {
   // (a flag só vale antes do ready) e avisa o usuário via toast.
   app.on('child-process-gone', (_e, details) => {
     if (details.type !== 'GPU') return
-    if (!['crashed', 'oom', 'launch-failed'].includes(details.reason)) return
+    if (!['crashed', 'oom', 'launch-failed', 'killed'].includes(details.reason)) return
     gpuCrashCount += 1
     console.warn(`[gpu] processo de GPU morreu (${details.reason}) — crash #${gpuCrashCount}`)
     broadcast('gpu:crashed', { reason: details.reason, count: gpuCrashCount })

@@ -1986,6 +1986,8 @@ export interface Api {
   chat: {
     /** Read inicial: resolve cc_session_id → transcript → lista ordenada de mensagens. */
     getTranscript(sessionId: string): Promise<ChatTranscript>
+    /** Lê um arquivo de plano (validado dentro de ~/.claude/plans/); null se inválido/ilegível. */
+    readPlanFile(path: string): Promise<string | null>
     /** Começa a observar o JSONL da sessão; emite chat:transcript-update em cada mudança. */
     watch(sessionId: string): void
     /** Para o watcher (também é chamado automaticamente no pty:exit). */

@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
 import { get as getFeature, linkedObjectiveTitles } from '../services/feature-store'
@@ -955,6 +956,24 @@ export function registerSessionIpc(): void {
       path: read.path,
       mtimeMs: read.mtimeMs,
       messages: read.messages,
+      lastPlanFilePath: read.lastPlanFilePath,
+    }
+  })
+
+  // Lê um arquivo de PLANO por path (read-only), pro card de aprovação pendente.
+  // Segurança: o path vem do renderer — só aceitamos arquivos cujo realpath
+  // (symlinks/.. resolvidos) esteja DENTRO de ~/.claude/plans/. Qualquer coisa
+  // fora, inexistente ou ilegível → null (a UI cai no placeholder).
+  ipcMain.handle('chat:read-plan-file', async (_e, filePath: string): Promise<string | null> => {
+    if (typeof filePath !== 'string' || !filePath) return null
+    try {
+      const plansDir = await realpath(join(homedir(), '.claude', 'plans'))
+      const expanded = filePath.startsWith('~/') ? join(homedir(), filePath.slice(2)) : filePath
+      const resolved = await realpath(expanded)
+      if (!resolved.startsWith(plansDir + sep)) return null
+      return await readFile(resolved, 'utf8')
+    } catch {
+      return null
     }
   })
 

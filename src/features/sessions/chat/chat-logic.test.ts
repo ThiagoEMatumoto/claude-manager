@@ -16,15 +16,18 @@ const user = (text: string): ChatMessage => ({ kind: 'user', text })
 const assistant = (text: string): ChatMessage => ({ kind: 'assistant', text })
 
 describe('countUserMessages', () => {
-  it('counts only user messages', () => {
+  it('counts user messages and slash commands (both typed by the human)', () => {
     const msgs: ChatMessage[] = [
       user('a'),
       assistant('b'),
       { kind: 'tool_use', id: 't1', name: 'Read', input: {} },
       { kind: 'tool_result', forId: 't1', content: 'x', isError: false },
       user('c'),
+      { kind: 'command', name: 'goal', args: 'review X' },
+      { kind: 'command_output', text: 'ok' }, // saída não conta
+      { kind: 'meta', text: 'injected', label: 'injected' }, // injetado não conta
     ]
-    expect(countUserMessages(msgs)).toBe(2)
+    expect(countUserMessages(msgs)).toBe(3)
   })
 
   it('is zero for an empty transcript', () => {

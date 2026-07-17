@@ -31,9 +31,12 @@ export function resolveChatViewState(input: {
   return 'empty'
 }
 
+// Conta o que o HUMANO enviou pelo composer: bolhas de user e slash commands
+// (que o parser classifica como 'command', não 'user'). Sem contar 'command', o
+// eco otimista de um "/goal …" digitado nunca reconciliaria com o disco.
 export function countUserMessages(messages: ChatMessage[]): number {
   let n = 0
-  for (const m of messages) if (m.kind === 'user') n++
+  for (const m of messages) if (m.kind === 'user' || m.kind === 'command') n++
   return n
 }
 

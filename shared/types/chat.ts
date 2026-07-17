@@ -40,15 +40,36 @@ export type ChatMessage =
       turns: string[]
     }
   // Linha type:'system' do transcript, CURADA: só subtypes úteis (compactação,
-  // erro de API, comando local, info) viram um chip discreto colapsado. O ruído
-  // de alto volume (stop_hook_summary, turn_duration, …) é descartado no parser.
+  // erro de API, info) viram um chip discreto colapsado. O ruído de alto volume
+  // (stop_hook_summary, turn_duration, …) é descartado no parser.
   | { kind: 'system'; label: string; detail: string; level: 'info' | 'warning' | 'error' }
+  // Slash command do usuário (/goal, /model, …). A CLI grava como content string
+  // com <command-name>/<command-args> (formato atual, type:'user') ou como linha
+  // type:'system'/local_command (formato antigo) — ambos viram este kind. name SEM
+  // a barra inicial; a UI renderiza "/{name} {args}".
+  | { kind: 'command'; name: string; args: string }
+  // Saída de um slash command (<local-command-stdout>), com escapes ANSI já
+  // removidos no parser. Render colapsado (a saída costuma ser longa).
+  | { kind: 'command_output'; text: string }
+  // Conteúdo INJETADO no turno do usuário que o humano não digitou: isMeta:true
+  // (SKILL.md, avisos), <system-reminder>, caveats. label = resumo curto (primeira
+  // linha) pro chip colapsado; text = conteúdo integral pra expandir.
+  | { kind: 'meta'; text: string; label: string }
   // Resultado de um subagente (tool_result do Task/Agent). Não renderiza sozinho:
   // a UI funde o status (sucesso/erro) no SubagentCard por forId == id.
   | { kind: 'subagent_result'; forId: string; isError: boolean }
   | { kind: 'ask_user_question'; id: string; questions: ChatQuestion[] }
   | { kind: 'ask_user_question_answered'; forId: string; answers: Record<string, string> }
-  | { kind: 'exit_plan_mode'; id: string; plan: string; allowedPrompts: string[] | null }
+  // planFilePath: caminho do arquivo de plano (~/.claude/plans/*.md) gravado pela
+  // CLI no input do ExitPlanMode — fallback pra UI buscar o conteúdo quando plan
+  // vier vazio. null em CLIs antigos.
+  | {
+      kind: 'exit_plan_mode'
+      id: string
+      plan: string
+      planFilePath: string | null
+      allowedPrompts: string[] | null
+    }
   | { kind: 'plan_decision'; forId: string; approved: boolean }
 
 // Retorno do read inicial (chat:get-transcript). path/mtimeMs são null quando a
@@ -61,6 +82,11 @@ export interface ChatTranscript {
   path: string | null
   mtimeMs: number | null
   messages: ChatMessage[]
+  // Último Write/Edit do transcript apontando pra ~/.claude/plans/*.md. O plan
+  // file é escrito DURANTE o plan mode, então este caminho permite mostrar o
+  // conteúdo do plano no card pendente (o tool_use do ExitPlanMode ainda não
+  // está no JSONL nesse momento). null quando a sessão nunca escreveu plano.
+  lastPlanFilePath: string | null
 }
 
 // Payload do broadcast chat:transcript-update. Emite a LISTA completa reparseada
@@ -71,4 +97,5 @@ export interface ChatTranscriptUpdate {
   sessionId: string
   transcriptExists: boolean
   messages: ChatMessage[]
+  lastPlanFilePath: string | null
 }

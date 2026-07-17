@@ -11,6 +11,9 @@ export function useChatTranscript(sessionId: string) {
   // O read inicial sinaliza inexistência via path null; o broadcast via flag. Isso
   // distingue "aguardando transcript" (arquivo não nasceu) de "vazio real".
   const [transcriptExists, setTranscriptExists] = useState(false)
+  // Último arquivo de plano escrito pela sessão (~/.claude/plans/*.md) — usado
+  // pra mostrar o CONTEÚDO do plano no card de aprovação pendente.
+  const [lastPlanFilePath, setLastPlanFilePath] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -28,6 +31,7 @@ export function useChatTranscript(sessionId: string) {
       gotUpdate = true
       setMessages(u.messages)
       setTranscriptExists(u.transcriptExists)
+      setLastPlanFilePath(u.lastPlanFilePath)
       setLoading(false)
     })
 
@@ -37,6 +41,7 @@ export function useChatTranscript(sessionId: string) {
         if (cancelled || gotUpdate) return
         setMessages(t.messages)
         setTranscriptExists(t.path !== null)
+        setLastPlanFilePath(t.lastPlanFilePath)
         setLoading(false)
       })
       .catch(() => {
@@ -53,5 +58,28 @@ export function useChatTranscript(sessionId: string) {
     }
   }, [sessionId])
 
-  return { messages, loading, transcriptExists }
+  return { messages, loading, transcriptExists, lastPlanFilePath }
+}
+
+// Conteúdo de um arquivo de plano (~/.claude/plans) via IPC read-only. null
+// enquanto carrega, sem path, ou quando a leitura falha — a UI cai no fallback.
+export function usePlanFile(path: string | null): string | null {
+  const [content, setContent] = useState<string | null>(null)
+  useEffect(() => {
+    if (!path) {
+      setContent(null)
+      return
+    }
+    let cancelled = false
+    void chatApi
+      .readPlanFile(path)
+      .then((c) => {
+        if (!cancelled) setContent(c)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [path])
+  return content
 }

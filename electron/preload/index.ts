@@ -128,6 +128,7 @@ const api: Api = {
   },
   chat: {
     getTranscript: (sessionId) => invoke('chat:get-transcript', sessionId),
+    readPlanFile: (path) => invoke('chat:read-plan-file', path),
     watch: (sessionId) => {
       void invoke('chat:watch', sessionId)
     },

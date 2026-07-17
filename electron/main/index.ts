@@ -14,6 +14,7 @@ import { registerGitIpc, cloneMissingWithToasts } from './ipc/git'
 import { backfillRepoRemotes } from './services/git-remote'
 import { listMissingRepos } from './services/repo-clone'
 import { getPref } from './services/prefs-store'
+import { setGpuState } from './services/gpu-state'
 import { rescheduleAutoPull, runAutoPullNow, stopAutoPull } from './services/repo-pull-scheduler'
 import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
@@ -51,13 +52,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const isDev = !app.isPackaged
 
-// No Linux, o compositing por GPU do Chromium falha em várias combinações de
-// driver (ex: nVidia/Wayland) e pinta a janela inteira de preto, mesmo com o DOM
-// renderizado normalmente. Desligar a aceleração de hardware evita isso; o custo
-// é desprezível para um app focado em terminal. Precisa ser chamado antes do ready.
-if (process.platform === 'linux') {
-  app.disableHardwareAcceleration()
+// GPU: default agora é aceleração LIGADA em todas as plataformas (nitidez do
+// terminal via renderer WebGL). Em drivers problemáticos (ex: nVidia/Wayland,
+// janela preta) desliga-se via pref gpu.disabled (Settings) ou CM_DISABLE_GPU=1.
+// Precisa rodar antes do ready; o getPref abre o DB cedo — as migrações são puro
+// SQLite (sem dependência pós-ready), mas o try/catch cobre qualquer falha de
+// I/O caindo no default (GPU ligada).
+function safeGetBoolPref(key: string): boolean {
+  try {
+    return getPref(key, false)
+  } catch {
+    return false
+  }
 }
+const gpuOff = process.env.CM_DISABLE_GPU === '1' || safeGetBoolPref('gpu.disabled')
+if (gpuOff) app.disableHardwareAcceleration()
+// Opt-in experimental: renderização nativa no Wayland (sem XWayland). Linux apenas.
+const ozoneWayland = process.platform === 'linux' && safeGetBoolPref('gpu.ozoneWayland')
+if (ozoneWayland) app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
+setGpuState({ hwAccelDisabled: gpuOff, ozoneWayland })
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({

@@ -1,37 +1,47 @@
-import { NAV_SEQ } from '../composer-keys'
+import type { TuiMenu } from '../tui-menu-parser'
 
 // Tradução dos cliques nos cards interativos do chat (QuestionCard/PlanCard) em
 // teclas pro PTY vivo — o mesmo canal write() usado pelo onForwardKey do composer.
 //
-// Achados do binário da CLI do claude (engenharia reversa; podem driftar entre
-// versões — validar ao vivo antes de evoluir):
-// - AskUserQuestion: o highlight inicial é a PRIMEIRA opção; as sentinelas
-//   "__other__"/"__chat__" (Other / Chat about this) ficam DEPOIS das opções —
-//   navegar N× pra baixo a partir do topo seleciona a opção N com segurança.
-// - Existe handler de dígitos (key >= '1' && key <= '9') que seleciona o índice,
-//   mas a semântica selecionar-vs-submeter NÃO foi confirmada ao vivo; por isso a
-//   V1 usa setas+Enter e a troca por dígitos fica pra depois da validação live.
-// - Multi-pergunta tem tabs + tela "Review your answers" → V1 não torna clicável.
-// - ExitPlanMode: a contagem de opções do menu VARIA entre versões da CLI → NUNCA
-//   usar setas nesse menu. Enter aprova (highlight inicial = Yes) e Esc rejeita
-//   independente da posição do highlight.
-// - Risco de drift: se o usuário já navegou no menu pelo TERMINAL, o highlight não
-//   está mais no topo e as sequências abaixo podem selecionar a opção errada. O
-//   guard de status/pending do ChatView reduz mas não elimina esse risco.
+// Achados de validação LIVE (claude 2.1.212) + strings do binário:
+// - O handler de dígitos da TUI (key >= '1' && key <= '9') seleciona E SUBMETE a
+//   opção N — confirmado ao vivo (<1,5s, sem Enter). Por isso a resposta é UM
+//   dígito, imune ao drift de highlight que tornava setas+Enter frágeis (se o
+//   usuário já navegou no menu pelo terminal, o highlight não está no topo).
+// - ExitPlanMode: a CONTAGEM e a ORDEM das opções variam entre versões/modos
+//   (ultraplan/bypass). Aprovar NUNCA usa Enter cego — o highlight inicial pode
+//   ser "Yes, auto-accept edits", que muda o modo de permissão. Só aprovamos via
+//   dígito da opção de aprovação MANUAL parseada do buffer; sem match, a UI nem
+//   renderiza o botão. Esc rejeita de qualquer posição.
+// - A fonte do menu é o parse do buffer do xterm (tui-menu-parser): a CLI não
+//   grava o tool_use pendente no JSONL, então o transcript não expõe o momento.
 
-// Seleciona a opção `optionIndex` de um AskUserQuestion: desce N vezes a partir do
-// highlight inicial (opção 0) e confirma com Enter.
-export function buildQuestionKeys(optionIndex: number): string[] {
-  const seqs: string[] = []
-  for (let i = 0; i < optionIndex; i++) seqs.push(NAV_SEQ.ArrowDown)
-  seqs.push('\r')
-  return seqs
+// Um clique numa opção vira o dígito dela (1-based na TUI; index aqui é 0-based).
+// Fora do range coberto pelo handler da TUI ('1'..'9') → [] (nunca digitar).
+export function buildDigitKey(index: number): string[] {
+  if (!Number.isInteger(index) || index < 0 || index > 8) return []
+  return [String(index + 1)]
 }
 
-// Decide um ExitPlanMode: Enter aprova (highlight inicial = Yes); Esc rejeita de
-// qualquer posição. Sem setas — ver nota sobre contagem variável no header.
-export function buildPlanKeys(d: 'approve' | 'reject'): string[] {
-  return d === 'approve' ? ['\r'] : ['\x1b']
+// Opção de aprovação MANUAL no menu de plano parseado. Prefixo estrito: não pode
+// casar "Yes, auto-accept edits" (evidência dos labels no binário da CLI).
+const MANUAL_APPROVE_RE = /^Yes, manually approve/i
+
+export function findManualApproveIndex(menu: TuiMenu): number | null {
+  if (menu.kind !== 'plan') return null
+  const opt = menu.options.find((o) => MANUAL_APPROVE_RE.test(o.label))
+  return opt ? opt.index : null
+}
+
+// Decide um ExitPlanMode: aprovar = dígito da opção de aprovação manual (null =
+// não encontrada → [] e a UI não oferece o botão); rejeitar = Esc, que cancela
+// de qualquer posição do highlight.
+export function buildPlanKeys(
+  d: 'approve' | 'reject',
+  manualApproveIndex: number | null,
+): string[] {
+  if (d === 'reject') return ['\x1b']
+  return manualApproveIndex == null ? [] : buildDigitKey(manualApproveIndex)
 }
 
 // Reproduz as sequências no PTY com um respiro entre elas: a TUI (Ink) processa

@@ -1,32 +1,96 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlanKeys, buildQuestionKeys, playKeys } from './respond-keys'
+import {
+  buildDigitKey,
+  buildPlanKeys,
+  findManualApproveIndex,
+  playKeys,
+} from './respond-keys'
+import type { TuiMenu } from '../tui-menu-parser'
 
 const DOWN = '\x1b[B'
 
-describe('buildQuestionKeys', () => {
-  it('selects the first option with a plain Enter (initial highlight)', () => {
-    expect(buildQuestionKeys(0)).toEqual(['\r'])
+describe('buildDigitKey', () => {
+  it('turns a 0-based option index into the 1-based TUI digit', () => {
+    expect(buildDigitKey(0)).toEqual(['1'])
+    expect(buildDigitKey(2)).toEqual(['3'])
+    expect(buildDigitKey(8)).toEqual(['9'])
   })
 
-  it('navigates N down then Enter for the Nth option', () => {
-    expect(buildQuestionKeys(1)).toEqual([DOWN, '\r'])
-    expect(buildQuestionKeys(2)).toEqual([DOWN, DOWN, '\r'])
-    expect(buildQuestionKeys(4)).toEqual([DOWN, DOWN, DOWN, DOWN, '\r'])
+  it('fails closed outside the TUI digit handler range (1..9)', () => {
+    expect(buildDigitKey(-1)).toEqual([])
+    expect(buildDigitKey(9)).toEqual([])
+    expect(buildDigitKey(1.5)).toEqual([])
+  })
+
+  it('never emits arrows or Enter (digit selects AND submits)', () => {
+    const all = [buildDigitKey(0), buildDigitKey(4), buildDigitKey(8)].flat().join('')
+    expect(all).not.toContain(DOWN)
+    expect(all).not.toContain('\r')
+  })
+})
+
+function planMenu(labels: string[]): TuiMenu {
+  return {
+    kind: 'plan',
+    question: 'Would you like to proceed?',
+    options: labels.map((label, index) => ({ index, label })),
+    multiSelect: false,
+  }
+}
+
+describe('findManualApproveIndex', () => {
+  it('finds "Yes, manually approve edits" at any position', () => {
+    expect(
+      findManualApproveIndex(
+        planMenu(['Yes, auto-accept edits', 'Yes, manually approve edits', 'No, keep planning']),
+      ),
+    ).toBe(1)
+    expect(
+      findManualApproveIndex(
+        planMenu([
+          'Yes, and bypass permissions',
+          'Yes, auto-accept edits',
+          'Yes, manually approve edits',
+          'No, keep planning',
+        ]),
+      ),
+    ).toBe(2)
+  })
+
+  it('never matches "Yes, auto-accept edits"', () => {
+    expect(
+      findManualApproveIndex(planMenu(['Yes, auto-accept edits', 'No, keep planning'])),
+    ).toBeNull()
+  })
+
+  it('returns null for question menus', () => {
+    const menu: TuiMenu = {
+      kind: 'question',
+      options: [{ index: 0, label: 'Yes, manually approve edits' }],
+      multiSelect: false,
+    }
+    expect(findManualApproveIndex(menu)).toBeNull()
   })
 })
 
 describe('buildPlanKeys', () => {
-  it('approves with a single Enter (initial highlight = Yes)', () => {
-    expect(buildPlanKeys('approve')).toEqual(['\r'])
+  it('approves via the parsed manual-approve digit only', () => {
+    expect(buildPlanKeys('approve', 1)).toEqual(['2'])
+    expect(buildPlanKeys('approve', 2)).toEqual(['3'])
+  })
+
+  it('fails closed when the manual-approve option was not found', () => {
+    expect(buildPlanKeys('approve', null)).toEqual([])
+  })
+
+  it('never approves with a blind Enter (would hit auto-accept edits)', () => {
+    expect(buildPlanKeys('approve', 0).join('')).not.toContain('\r')
+    expect(buildPlanKeys('approve', null).join('')).not.toContain('\r')
   })
 
   it('rejects with a single Esc (position-independent)', () => {
-    expect(buildPlanKeys('reject')).toEqual(['\x1b'])
-  })
-
-  it('never uses arrow keys (plan menu has a variable option count)', () => {
-    expect(buildPlanKeys('approve').join('')).not.toContain(DOWN)
-    expect(buildPlanKeys('reject').join('')).not.toContain(DOWN)
+    expect(buildPlanKeys('reject', null)).toEqual(['\x1b'])
+    expect(buildPlanKeys('reject', 1)).toEqual(['\x1b'])
   })
 })
 

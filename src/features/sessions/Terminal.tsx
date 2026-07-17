@@ -16,6 +16,7 @@ import { useSession } from './useSession'
 import { Composer, type ComposerHandle } from './Composer'
 import { ComposerToolbar } from './ComposerToolbar'
 import { SessionHeader } from './SessionHeader'
+import { AgentHud } from './AgentHud'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
@@ -852,6 +853,10 @@ export function Terminal({
           </div>
         )}
       </div>
+
+      {/* HUD fino de agentes (statusline): FORA do container relative, entre o
+          terminal e o composer — visível nos dois modos (terminal e chat). */}
+      {!exited && <AgentHud activity={activity} now={now} />}
 
       {!exited && (
         <Composer

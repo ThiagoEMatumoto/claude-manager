@@ -555,14 +555,47 @@ const SYSTEM_FIXTURE = [
 describe('parseChatMessages — system context (curated)', () => {
   const m = parseChatMessages(SYSTEM_FIXTURE)
 
-  it('keeps whitelisted subtypes as system chips, drops noise', () => {
-    expect(m.map((x) => x.kind)).toEqual(['system', 'system', 'system', 'user'])
+  it('keeps whitelisted subtypes as system chips, drops noise, unifies local_command', () => {
+    expect(m.map((x) => x.kind)).toEqual(['system', 'system', 'command', 'user'])
   })
 
-  it('maps subtype to label/detail/level (local_command extracts the name)', () => {
+  it('maps subtype to label/detail/level', () => {
     expect(m[0]).toEqual({ kind: 'system', label: 'Conversa compactada', detail: 'Conversation compacted', level: 'info' })
     expect(m[1]).toEqual({ kind: 'system', label: 'Erro de API', detail: 'rate limited', level: 'error' })
-    expect(m[2]).toMatchObject({ kind: 'system', label: 'Comando /model', level: 'info' })
+  })
+
+  it('emits the SAME command kind as the current user-string format', () => {
+    expect(m[2]).toEqual({ kind: 'command', name: 'model', args: '' })
+  })
+
+  it('extracts command_output from old-format local_command content, ANSI stripped', () => {
+    const old = parseChatMessages(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'local_command',
+        level: 'info',
+        content:
+          '<command-name>/cost</command-name>\n<command-args></command-args>\n<local-command-stdout>\u001B[1mTotal:\u001B[22m $1.23</local-command-stdout>',
+      }),
+    )
+    expect(old).toEqual([
+      { kind: 'command', name: 'cost', args: '' },
+      { kind: 'command_output', text: 'Total: $1.23' },
+    ])
+    // Mesmo output do formato atual (user-string) pros mesmos dados.
+    const current = parseChatMessages(
+      [
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: '<command-name>/cost</command-name>\n<command-args></command-args>' },
+        }),
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: '<local-command-stdout>\u001B[1mTotal:\u001B[22m $1.23</local-command-stdout>' },
+        }),
+      ].join('\n'),
+    )
+    expect(current).toEqual(old)
   })
 })
 

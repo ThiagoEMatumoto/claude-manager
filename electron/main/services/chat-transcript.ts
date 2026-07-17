@@ -154,7 +154,6 @@ const SYSTEM_LABELS: Record<string, string> = {
   compact_boundary: 'Conversa compactada',
   api_error: 'Erro de API',
   informational: 'Sistema',
-  local_command: 'Comando local',
 }
 
 function asLevel(v: unknown): 'info' | 'warning' | 'error' {
@@ -168,18 +167,32 @@ function parseSystemLine(
 ): { label: string; detail: string; level: 'info' | 'warning' | 'error' } | null {
   const sub = obj.subtype
   if (!sub || !(sub in SYSTEM_LABELS)) return null
-  let label = SYSTEM_LABELS[sub]
+  const label = SYSTEM_LABELS[sub]
   const content = typeof obj.content === 'string' ? obj.content : ''
   if (sub === 'api_error') {
     const detail = typeof obj.error === 'string' ? obj.error : content || JSON.stringify(obj.error ?? '')
     return { label, detail, level: 'error' }
   }
-  if (sub === 'local_command') {
-    // content vem como <command-name>/x</command-name>… — extrai o nome pro chip.
-    const name = /<command-name>([^<]*)<\/command-name>/.exec(content)?.[1]?.trim()
-    if (name) label = `Comando ${name}`
-  }
   return { label, detail: content || label, level: asLevel(obj.level) }
+}
+
+// Slash command embutido em content (<command-name>/<command-args>), presente
+// tanto no formato atual (content string de type:'user') quanto no antigo
+// (type:'system'/local_command). name normalizado SEM a barra.
+function parseCommandTag(text: string): { name: string; args: string } | null {
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1]?.trim()
+  if (!name) return null
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+  return { name: name.replace(/^\//, ''), args }
+}
+
+// Saída de comando local (<local-command-stdout>), com ANSI removido. null quando
+// a tag não existe OU a saída é vazia (comando mudo não gera chip).
+function parseStdoutTag(text: string): string | null {
+  const inner = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)?.[1]
+  if (inner == null) return null
+  const clean = stripAnsi(inner).trim()
+  return clean || null
 }
 
 // Remove escapes ANSI (CSI: cores/estilos; OSC: títulos/hyperlinks) da saída de
@@ -212,14 +225,12 @@ function metaLabel(text: string): string {
 export function classifyUserString(obj: RawLine, text: string): ChatMessage {
   if (obj.isMeta === true) return { kind: 'meta', text, label: metaLabel(text) }
   if (text.includes('<command-name>')) {
-    const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1]?.trim() ?? ''
-    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
-    return { kind: 'command', name: name.replace(/^\//, ''), args }
+    const cmd = parseCommandTag(text)
+    if (cmd) return { kind: 'command', ...cmd }
+    return { kind: 'meta', text, label: metaLabel(text) }
   }
   if (text.includes('<local-command-stdout>')) {
-    const inner =
-      /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)?.[1] ?? text
-    return { kind: 'command_output', text: stripAnsi(inner).trim() }
+    return { kind: 'command_output', text: parseStdoutTag(text) ?? '' }
   }
   if (text.includes('<local-command-caveat>')) {
     return { kind: 'meta', text, label: metaLabel(text) }
@@ -311,6 +322,16 @@ export function parseChatMessages(
     }
     if (obj.isSidechain === true) continue
     if (obj.type === 'system') {
+      // Formato ANTIGO de slash command (type:'system'/local_command): emite os
+      // MESMOS kinds command/command_output do formato atual — visual unificado.
+      if (obj.subtype === 'local_command') {
+        const content = typeof obj.content === 'string' ? obj.content : ''
+        const cmd = parseCommandTag(content)
+        if (cmd) push({ kind: 'command', ...cmd })
+        const stdout = parseStdoutTag(content)
+        if (stdout) push({ kind: 'command_output', text: stdout })
+        continue
+      }
       const sys = parseSystemLine(obj)
       if (sys) push({ kind: 'system', ...sys })
       continue

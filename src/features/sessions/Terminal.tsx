@@ -24,7 +24,7 @@ import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from 
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
-import { menuFingerprint, parseTuiMenu, type TuiMenu } from './tui-menu-parser'
+import { gateMenuByStatus, menuFingerprint, parseTuiMenu, type TuiMenu } from './tui-menu-parser'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { TERMINAL_FONT_FAMILY } from '@/lib/terminal-font'
@@ -253,15 +253,17 @@ export function Terminal({
     )
   }
 
-  // Menu TUI: parse na TRANSIÇÃO de status. Entrou em 'waiting' → tenta parsear
-  // o que já está desenhado (o debounce do PTY cobre desenhos posteriores);
-  // saiu de 'waiting' → limpa (menu não existe fora dessa espera).
+  // Menu TUI: parse na TRANSIÇÃO de status. Entrou num status elegível → tenta
+  // parsear o que já está desenhado (o debounce do PTY cobre desenhos
+  // posteriores); status inelegível → gate devolve null e limpa. 'waiting'
+  // aceita qualquer kind; 'starting'/'idle' (pré-transcript, ex.: trust prompt
+  // antes do 1º flush do JSONL) só permission/trust — ver gateMenuByStatus.
   useEffect(() => {
-    if (exited || activity?.status !== 'waiting') {
+    if (exited) {
       setPendingTuiMenu(null)
       return
     }
-    applyTuiMenu(readTuiMenu())
+    applyTuiMenu(gateMenuByStatus(readTuiMenu(), activity?.status))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.status, exited])
 
@@ -644,10 +646,11 @@ export function Terminal({
       permTimerRef.current = window.setTimeout(() => {
         const t = xtermRef.current
         if (!t) return
-        // Menu TUI pendente: só existe em 'waiting'. O parse roda no MESMO
-        // debounce (a saída assentou); fora de 'waiting' o menu é limpo.
-        if (statusRef.current === 'waiting') applyTuiMenu(parseTuiMenu(readTailText(t)))
-        else applyTuiMenu(null)
+        // Menu TUI pendente: o parse roda no MESMO debounce (a saída assentou).
+        // gateMenuByStatus decide por status × kind: 'waiting' aceita qualquer
+        // menu; 'starting'/'idle' (pré-transcript) só permission/trust; outros
+        // status limpam (null).
+        applyTuiMenu(gateMenuByStatus(parseTuiMenu(readTailText(t)), statusRef.current))
         if (statusRef.current === 'working' || statusRef.current === 'starting') return
         setCurrentMode(detectFooterMode(readFooterText(t)))
       }, 150)
@@ -667,6 +670,10 @@ export function Terminal({
       if (statusRef.current !== 'working' && statusRef.current !== 'starting') {
         setCurrentMode(detectFooterMode(readFooterText(term)))
       }
+      // Seed do menu TUI: um prompt já desenhado ANTES do mount (ex.: trust
+      // prompt numa pane remontada) não gera data event novo — sem este seed o
+      // card só apareceria no próximo byte do PTY.
+      applyTuiMenu(gateMenuByStatus(parseTuiMenu(readTailText(term)), statusRef.current))
     })
 
     // Copy-on-select: copiar automaticamente o que for selecionado.

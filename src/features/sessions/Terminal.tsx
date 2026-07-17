@@ -500,6 +500,7 @@ export function Terminal({
       term.open(host)
       fit.fit()
       resize(term.cols, term.rows)
+      term.scrollToBottom()
       observer.observe(host)
 
       // Renderer WebGL: glifos nítidos e scroll mais fluido que o DOM renderer.
@@ -529,6 +530,7 @@ export function Terminal({
         term.clearTextureAtlas()
         fit.fit()
         resize(term.cols, term.rows)
+        term.scrollToBottom()
       })
     })
 
@@ -630,11 +632,23 @@ export function Terminal({
     host.addEventListener('contextmenu', onContextMenu)
 
     // Criado aqui, mas só observa o host DEPOIS do open (no gate acima) — fit
-    // num terminal ainda não aberto não tem o que medir.
+    // num terminal ainda não aberto não tem o que medir. Coalescido via rAF:
+    // o textarea do Composer crescendo dispara rajadas de resize e o fit sem
+    // debounce thrasharia o grid. scrollToBottom re-pina o fundo — no shrink o
+    // viewport pode ficar 1 row acima e as status lines da TUI somem sob o
+    // overflow-hidden.
+    let resizeRaf: number | null = null
     const observer = new ResizeObserver(() => {
-      if (!xtermRef.current || !fitRef.current) return
-      fitRef.current.fit()
-      resize(xtermRef.current.cols, xtermRef.current.rows)
+      if (resizeRaf != null) cancelAnimationFrame(resizeRaf)
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = null
+        const t = xtermRef.current
+        const f = fitRef.current
+        if (!t || !f) return
+        f.fit()
+        resize(t.cols, t.rows)
+        t.scrollToBottom()
+      })
     })
 
     // Tema ao vivo: quando o tema do app muda (Configurações), re-deriva o
@@ -648,6 +662,7 @@ export function Terminal({
     return () => {
       cancelled = true
       host.removeEventListener('contextmenu', onContextMenu)
+      if (resizeRaf != null) cancelAnimationFrame(resizeRaf)
       observer.disconnect()
       offTheme()
       linkProvider.dispose()
@@ -677,6 +692,7 @@ export function Terminal({
     term.options.fontSize = fontSize
     fit.fit()
     resize(term.cols, term.rows)
+    term.scrollToBottom()
   }, [fontSize, resize])
 
   // Scrollback ao vivo: atualiza o histórico do xterm já montado quando o store muda,
@@ -705,6 +721,7 @@ export function Terminal({
           term.clearTextureAtlas()
           fit.fit()
           resize(term.cols, term.rows)
+          term.scrollToBottom()
         }
         subscribe()
       }
@@ -776,7 +793,9 @@ export function Terminal({
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      {/* min-h-[200px] (~11 rows na fonte default): garante espaço pra TUI
+          desenhar a caixa de input + status lines mesmo com o composer expandido. */}
+      <div className="relative min-h-[200px] flex-1 overflow-hidden">
         {/* xterm SEMPRE montado: em modo chat só ocultamos visualmente (invisible,
             não hidden, pra a caixa de layout sobreviver e o fit() seguir medindo
             certo). O PTY e o scrollback seguem vivos por baixo. */}

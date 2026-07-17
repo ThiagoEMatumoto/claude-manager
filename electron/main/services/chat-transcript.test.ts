@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseChatMessages, parseSubagentTurns, type SubagentInfo } from './chat-transcript'
+import { parseChatMessages, parseSubagentTurns, stripAnsi, type SubagentInfo } from './chat-transcript'
 
 // Fixture representativo: prompt do usuário, resposta assistant com texto +
 // tool_use, tool_result do usuário (string e array), uma linha não-mensagem, uma
@@ -305,6 +305,193 @@ describe('parseChatMessages — interactive prompts', () => {
       }),
     )
     expect(plan).toEqual({ kind: 'exit_plan_mode', id: 'p', plan: 'X', allowedPrompts: null })
+  })
+})
+
+// Classificação fail-safe de strings gravadas como turno de usuário: a CLI grava
+// como type:'user' muita coisa que o humano não digitou. Só string sem marker
+// conhecido pode virar bolha 'user'. Shapes espelham transcripts reais.
+describe('parseChatMessages — fail-safe user classification', () => {
+  const line = (o: object) => JSON.stringify(o)
+
+  it('turns isMeta:true strings into meta, never user', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        isMeta: true,
+        message: { role: 'user', content: '# SKILL.md\n\nInjected skill body.' },
+      }),
+    )
+    expect(m).toHaveLength(1)
+    expect(m[0]).toEqual({
+      kind: 'meta',
+      text: '# SKILL.md\n\nInjected skill body.',
+      label: 'SKILL.md',
+    })
+  })
+
+  it('turns current-format slash commands into command with name/args', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        message: {
+          role: 'user',
+          content:
+            '<command-message>goal is running…</command-message>\n<command-name>/goal</command-name>\n<command-args>review the PR</command-args>',
+        },
+      }),
+    )
+    expect(m).toEqual([{ kind: 'command', name: 'goal', args: 'review the PR' }])
+  })
+
+  it('turns <local-command-stdout> into command_output with ANSI stripped', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<local-command-stdout>\u001B[1mSet model to\u001B[22m opus</local-command-stdout>',
+        },
+      }),
+    )
+    expect(m).toEqual([{ kind: 'command_output', text: 'Set model to opus' }])
+  })
+
+  it('drops empty <local-command-stdout> instead of emitting an empty chip', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        message: { role: 'user', content: '<local-command-stdout></local-command-stdout>' },
+      }),
+    )
+    expect(m).toEqual([])
+  })
+
+  it('turns <local-command-caveat> into meta', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<local-command-caveat>Caveat: the messages below were generated…</local-command-caveat>',
+        },
+      }),
+    )
+    expect(m).toHaveLength(1)
+    expect(m[0]).toMatchObject({ kind: 'meta' })
+  })
+
+  it('turns task-notification and interruption markers into system chips', () => {
+    const m = parseChatMessages(
+      [
+        line({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: '<task-notification>\n<task-id>abc</task-id>\nBackground task done.\n</task-notification>',
+          },
+        }),
+        line({
+          type: 'user',
+          message: { role: 'user', content: '[Request interrupted by user for tool use]' },
+        }),
+      ].join('\n'),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['system', 'system'])
+    expect(m[0]).toMatchObject({ kind: 'system', label: 'Tarefa em background', level: 'info' })
+    expect(m[1]).toMatchObject({ kind: 'system', label: 'Interrompido pelo usuário', level: 'info' })
+  })
+
+  it('classifies <system-reminder> text blocks alongside tool_results as meta, not user', () => {
+    const m = parseChatMessages(
+      line({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu_9', content: 'ok', is_error: false },
+            { type: 'text', text: '<system-reminder>Hook context: lint passed.</system-reminder>' },
+          ],
+        },
+      }),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['tool_result', 'meta'])
+    expect(m.some((x) => x.kind === 'user')).toBe(false)
+  })
+
+  it('keeps plain strings as user (fail-safe default)', () => {
+    const m = parseChatMessages(
+      line({ type: 'user', message: { role: 'user', content: 'please fix the bug' } }),
+    )
+    expect(m).toEqual([{ kind: 'user', text: 'please fix the bug' }])
+  })
+})
+
+describe('stripAnsi', () => {
+  it('removes CSI and OSC sequences, keeping the text', () => {
+    expect(stripAnsi('\u001B[1;32mbold green\u001B[0m plain')).toBe('bold green plain')
+    expect(stripAnsi('\u001B]0;title\u0007body')).toBe('body')
+    expect(stripAnsi('no ansi [here]')).toBe('no ansi [here]')
+  })
+})
+
+// Agrupamento assistant: blocos text ADJACENTES do mesmo message.id fundem numa
+// única mensagem; ids distintos e tool_use no meio NÃO fundem.
+describe('parseChatMessages — assistant text grouping', () => {
+  const asst = (id: string, items: object[]) =>
+    JSON.stringify({ type: 'assistant', message: { id, role: 'assistant', content: items } })
+
+  it('merges three adjacent text lines sharing a message.id into one message', () => {
+    const m = parseChatMessages(
+      [
+        asst('msg_1', [{ type: 'text', text: 'Part one.' }]),
+        asst('msg_1', [{ type: 'text', text: 'Part two.' }]),
+        asst('msg_1', [{ type: 'text', text: 'Part three.' }]),
+      ].join('\n'),
+    )
+    expect(m).toEqual([{ kind: 'assistant', text: 'Part one.\n\nPart two.\n\nPart three.' }])
+  })
+
+  it('does not merge across distinct message ids', () => {
+    const m = parseChatMessages(
+      [
+        asst('msg_1', [{ type: 'text', text: 'Turn one.' }]),
+        asst('msg_2', [{ type: 'text', text: 'Turn two.' }]),
+      ].join('\n'),
+    )
+    expect(m).toEqual([
+      { kind: 'assistant', text: 'Turn one.' },
+      { kind: 'assistant', text: 'Turn two.' },
+    ])
+  })
+
+  it('does not merge through a tool_use in between (interleaving preserved)', () => {
+    const m = parseChatMessages(
+      [
+        asst('msg_1', [{ type: 'text', text: 'Before.' }]),
+        asst('msg_1', [{ type: 'tool_use', id: 'tu_x', name: 'Read', input: {} }]),
+        asst('msg_1', [{ type: 'text', text: 'After.' }]),
+      ].join('\n'),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['assistant', 'tool_use', 'assistant'])
+    expect(m[0]).toEqual({ kind: 'assistant', text: 'Before.' })
+    expect(m[2]).toEqual({ kind: 'assistant', text: 'After.' })
+  })
+
+  it('does not merge lines without a message.id', () => {
+    const m = parseChatMessages(
+      [
+        JSON.stringify({
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'A.' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'B.' }] },
+        }),
+      ].join('\n'),
+    )
+    expect(m).toHaveLength(2)
   })
 })
 

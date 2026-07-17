@@ -23,6 +23,9 @@ interface RawLine {
   type?: string
   // Turnos de subagente (Task) vivem inline com isSidechain:true.
   isSidechain?: boolean
+  // Conteúdo injetado pela CLI no turno do usuário (SKILL.md, caveats, avisos) —
+  // o humano NÃO digitou isso. Nunca pode virar bolha de usuário.
+  isMeta?: boolean
   // Linhas type:'system': metadados de nível de linha (sem `message`). subtype
   // classifica; content/error trazem o texto; level a severidade.
   subtype?: string
@@ -30,6 +33,9 @@ interface RawLine {
   level?: string
   error?: unknown
   message?: {
+    // id da mensagem da API. Linhas assistant de um mesmo turno de streaming
+    // compartilham o id — base do agrupamento de blocos text adjacentes.
+    id?: string
     role?: string
     content?: string | RawContentItem[]
   }
@@ -176,6 +182,60 @@ function parseSystemLine(
   return { label, detail: content || label, level: asLevel(obj.level) }
 }
 
+// Remove escapes ANSI (CSI: cores/estilos; OSC: títulos/hyperlinks) da saída de
+// comandos locais. Helper local de propósito — strip-ansi não é dependência do
+// projeto e uma regex cobre o que a CLI grava.
+const ANSI_RE =
+  // eslint-disable-next-line no-control-regex
+  /\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g
+export function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '')
+}
+
+// Rótulo curto pra um chip de meta: primeira linha não-vazia, sem marcadores de
+// heading/tag, truncada — o conteúdo integral fica na expansão.
+function metaLabel(text: string): string {
+  const first =
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l !== '') ?? ''
+  const clean = first.replace(/^#{1,6}\s+/, '').replace(/^<[^>]*>\s*/, '').trim()
+  const label = clean || 'conteúdo'
+  return label.length > 80 ? label.slice(0, 80) + '…' : label
+}
+
+// PURO: classifica uma STRING gravada como turno de usuário. A CLI grava como
+// type:'user' muita coisa que o humano não digitou (skills injetadas, slash
+// commands, stdout de comando, avisos) — a ordem abaixo é FAIL-SAFE: só string
+// sem nenhum marker conhecido vira bolha 'user'.
+export function classifyUserString(obj: RawLine, text: string): ChatMessage {
+  if (obj.isMeta === true) return { kind: 'meta', text, label: metaLabel(text) }
+  if (text.includes('<command-name>')) {
+    const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1]?.trim() ?? ''
+    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+    return { kind: 'command', name: name.replace(/^\//, ''), args }
+  }
+  if (text.includes('<local-command-stdout>')) {
+    const inner =
+      /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text)?.[1] ?? text
+    return { kind: 'command_output', text: stripAnsi(inner).trim() }
+  }
+  if (text.includes('<local-command-caveat>')) {
+    return { kind: 'meta', text, label: metaLabel(text) }
+  }
+  if (text.includes('<task-notification>')) {
+    return { kind: 'system', label: 'Tarefa em background', detail: text, level: 'info' }
+  }
+  if (text.trimStart().startsWith('[Request interrupted')) {
+    return { kind: 'system', label: 'Interrompido pelo usuário', detail: '', level: 'info' }
+  }
+  if (text.trimStart().startsWith('<system-reminder>')) {
+    return { kind: 'meta', text, label: metaLabel(text) }
+  }
+  return { kind: 'user', text }
+}
+
 // Normaliza o content de um tool_result para string: a CLI grava ou uma string
 // crua ou um array de blocos { type:'text', text }. Junta os blocos de texto;
 // ignora blocos não-textuais (ex.: imagens), que a F5b trataria à parte.
@@ -216,6 +276,30 @@ export function parseChatMessages(
   // Ids de tool_use que viraram subagente, pra dobrar o status (is_error) do
   // tool_result no card em vez de mostrar um tool_result genérico duplicado.
   const subIds = new Set<string>()
+  // Agrupamento de assistant: blocos text ADJACENTES do mesmo message.id fundem
+  // numa única mensagem (um turno de streaming vira várias linhas JSONL com o
+  // mesmo id). QUALQUER outro push (tool_use, thinking, user, …) quebra a
+  // adjacência — o interleaving texto→tool→texto é preservado.
+  let lastAssistantMergeId: string | null = null
+  const push = (msg: ChatMessage): void => {
+    lastAssistantMergeId = null
+    out.push(msg)
+  }
+  const pushAssistantText = (text: string, msgId: string | null): void => {
+    const last = out[out.length - 1]
+    if (msgId !== null && msgId === lastAssistantMergeId && last?.kind === 'assistant') {
+      out[out.length - 1] = { kind: 'assistant', text: last.text + '\n\n' + text }
+    } else {
+      out.push({ kind: 'assistant', text })
+    }
+    lastAssistantMergeId = msgId
+  }
+  // Classificação fail-safe + filtro de saída vazia (comando sem stdout não gera chip).
+  const pushUserText = (obj: RawLine, text: string): void => {
+    const msg = classifyUserString(obj, text)
+    if (msg.kind === 'command_output' && !msg.text) return
+    push(msg)
+  }
   for (const raw of jsonl.split('\n')) {
     const line = raw.trim()
     if (!line) continue
@@ -228,7 +312,7 @@ export function parseChatMessages(
     if (obj.isSidechain === true) continue
     if (obj.type === 'system') {
       const sys = parseSystemLine(obj)
-      if (sys) out.push({ kind: 'system', ...sys })
+      if (sys) push({ kind: 'system', ...sys })
       continue
     }
     if (obj.type !== 'user' && obj.type !== 'assistant') continue
@@ -237,7 +321,7 @@ export function parseChatMessages(
 
     if (obj.type === 'user') {
       if (typeof content === 'string') {
-        if (content.trim()) out.push({ kind: 'user', text: content })
+        if (content.trim()) pushUserText(obj, content)
         continue
       }
       if (Array.isArray(content)) {
@@ -245,23 +329,23 @@ export function parseChatMessages(
           if (item?.type === 'tool_result') {
             const forId = typeof item.tool_use_id === 'string' ? item.tool_use_id : ''
             if (askIds.has(forId)) {
-              out.push({
+              push({
                 kind: 'ask_user_question_answered',
                 forId,
                 answers: parseAnswers(obj.toolUseResult),
               })
             } else if (subIds.has(forId)) {
-              out.push({ kind: 'subagent_result', forId, isError: item.is_error === true })
+              push({ kind: 'subagent_result', forId, isError: item.is_error === true })
             } else if (planIds.has(forId)) {
               // Aprovação tem texto canônico "User has approved your plan."; a
               // ausência dele (rejeição/feedback) marca não-aprovado.
-              out.push({
+              push({
                 kind: 'plan_decision',
                 forId,
                 approved: /User has approved/i.test(toText(item.content)),
               })
             } else {
-              out.push({
+              push({
                 kind: 'tool_result',
                 forId,
                 content: toText(item.content),
@@ -269,7 +353,9 @@ export function parseChatMessages(
               })
             }
           } else if (item?.type === 'text' && typeof item.text === 'string') {
-            if (item.text.trim()) out.push({ kind: 'user', text: item.text })
+            // Mesma classificação fail-safe: text blocks junto de tool_results
+            // costumam ser system-reminders/contexto de hook, não o humano.
+            if (item.text.trim()) pushUserText(obj, item.text)
           }
         }
       }
@@ -277,23 +363,24 @@ export function parseChatMessages(
     }
 
     // assistant
+    const msgId = typeof obj.message?.id === 'string' ? obj.message.id : null
     if (Array.isArray(content)) {
       for (const item of content) {
         if (item?.type === 'text' && typeof item.text === 'string') {
-          if (item.text.trim()) out.push({ kind: 'assistant', text: item.text })
+          if (item.text.trim()) pushAssistantText(item.text, msgId)
         } else if (item?.type === 'thinking') {
           // Blocos de thinking costumam vir vazios (só assinatura) quando o modelo
           // não expõe o raciocínio — só emitimos quando há texto de fato.
           const t = typeof item.thinking === 'string' ? item.thinking.trim() : ''
-          if (t) out.push({ kind: 'thinking', text: t })
+          if (t) push({ kind: 'thinking', text: t })
         } else if (item?.type === 'redacted_thinking') {
-          out.push({ kind: 'thinking', text: '(raciocínio oculto)' })
+          push({ kind: 'thinking', text: '(raciocínio oculto)' })
         } else if (item?.type === 'tool_use' && typeof item.name === 'string') {
           const id = typeof item.id === 'string' ? item.id : ''
           const sub = id ? subagents?.get(id) : undefined
           if (sub) {
             if (id) subIds.add(id)
-            out.push({
+            push({
               kind: 'subagent',
               id,
               name: sub.name,
@@ -303,17 +390,17 @@ export function parseChatMessages(
             })
           } else if (item.name === 'AskUserQuestion') {
             if (id) askIds.add(id)
-            out.push({ kind: 'ask_user_question', id, questions: parseQuestions(item.input) })
+            push({ kind: 'ask_user_question', id, questions: parseQuestions(item.input) })
           } else if (item.name === 'ExitPlanMode') {
             if (id) planIds.add(id)
-            out.push({ kind: 'exit_plan_mode', id, ...parsePlan(item.input) })
+            push({ kind: 'exit_plan_mode', id, ...parsePlan(item.input) })
           } else {
-            out.push({ kind: 'tool_use', id, name: item.name, input: item.input })
+            push({ kind: 'tool_use', id, name: item.name, input: item.input })
           }
         }
       }
     } else if (typeof content === 'string' && content.trim()) {
-      out.push({ kind: 'assistant', text: content })
+      pushAssistantText(content, msgId)
     }
   }
   return out

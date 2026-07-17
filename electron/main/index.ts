@@ -136,7 +136,33 @@ async function autoCloneMissingOnBoot(): Promise<void> {
   }
 }
 
+// Log de diagnóstico de GPU no boot: 1 linha com vendor/device/driver (quando o
+// Chromium expõe) + o estado efetivo da aceleração. É o que permite correlacionar
+// relatos de corrupção de atlas (ex: NVIDIA/Wayland) com o driver da máquina.
+function logGpuInfo(): void {
+  app
+    .getGPUInfo('basic')
+    .then((info) => {
+      const { gpuDevice, driverVendor, driverVersion } = info as {
+        gpuDevice?: Array<{ vendorId?: number; deviceId?: number; active?: boolean }>
+        driverVendor?: string
+        driverVersion?: string
+      }
+      const devices = (gpuDevice ?? [])
+        .map(
+          (d) =>
+            `${d.active ? '*' : ''}${(d.vendorId ?? 0).toString(16)}:${(d.deviceId ?? 0).toString(16)}`,
+        )
+        .join(', ')
+      console.log(
+        `[gpu] devices=[${devices}] driver=${driverVendor ?? '?'} ${driverVersion ?? '?'} hwAccelDisabled=${gpuOff}`,
+      )
+    })
+    .catch((err) => console.warn('[gpu] getGPUInfo falhou:', String(err)))
+}
+
 app.whenReady().then(async () => {
+  logGpuInfo()
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
   // textarea do xterm — resultado é colar 2x. Campos de input normais continuam

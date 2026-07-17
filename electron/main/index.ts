@@ -13,7 +13,7 @@ import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc, cloneMissingWithToasts } from './ipc/git'
 import { backfillRepoRemotes } from './services/git-remote'
 import { listMissingRepos } from './services/repo-clone'
-import { getPref } from './services/prefs-store'
+import { getPref, setPref } from './services/prefs-store'
 import { setGpuState } from './services/gpu-state'
 import { rescheduleAutoPull, runAutoPullNow, stopAutoPull } from './services/repo-pull-scheduler'
 import { registerFsIpc } from './ipc/fs'
@@ -47,7 +47,7 @@ import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { calendarWatcher } from './services/calendar/calendar-watcher'
 import { jobScheduler } from './services/job-scheduler'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
-import { setMainWindow } from './services/notifications'
+import { setMainWindow, emitToast } from './services/notifications'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -245,10 +245,32 @@ app.whenReady().then(async () => {
     broadcast('gpu:resumed', { at: Date.now() })
   })
 
+  // Auto-fallback em crash do processo de GPU (driver instável, ex: NVIDIA/
+  // Wayland): avisa os renderers pra largarem o WebGL (seguem em DOM na mesma
+  // sessão). No 2º crash do processo, desliga a aceleração pro PRÓXIMO boot
+  // (a flag só vale antes do ready) e avisa o usuário via toast.
+  app.on('child-process-gone', (_e, details) => {
+    if (details.type !== 'GPU') return
+    if (!['crashed', 'oom', 'launch-failed'].includes(details.reason)) return
+    gpuCrashCount += 1
+    console.warn(`[gpu] processo de GPU morreu (${details.reason}) — crash #${gpuCrashCount}`)
+    broadcast('gpu:crashed', { reason: details.reason, count: gpuCrashCount })
+    if (gpuCrashCount === 2) {
+      setPref('gpu.disabled', true)
+      emitToast(
+        'Aceleração de GPU desativada',
+        'Aceleração de GPU instável neste driver — desativada. Reinicie o app pra aplicar totalmente.',
+      )
+    }
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })
+
+// Crashes do processo de GPU nesta execução (ver child-process-gone no whenReady).
+let gpuCrashCount = 0
 
 // Self-heal de handoffs órfãos a cada 5min (ver app.whenReady).
 const HANDOFF_RECONCILE_INTERVAL_MS = 5 * 60 * 1000

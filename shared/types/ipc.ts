@@ -2007,6 +2007,8 @@ export interface Api {
     relaunch(): Promise<void>
     /** Sistema voltou de suspend (powerMonitor.resume) — terminais devem se curar. */
     onResumed(handler: () => void): () => void
+    /** Processo de GPU crashou — terminais devem largar o WebGL (fallback DOM). */
+    onCrashed(handler: () => void): () => void
   }
   dialog: {
     openDirectory(): Promise<string | null>

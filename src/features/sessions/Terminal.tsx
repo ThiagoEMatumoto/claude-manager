@@ -877,6 +877,18 @@ export function Terminal({
     }
   }, [])
 
+  // Crash do processo de GPU (broadcast do main): o contexto WebGL morreu por
+  // baixo — larga o addon e segue em DOM renderer NA MESMA sessão, sem recriar
+  // WebGL neste mount (o driver acabou de provar que não aguenta).
+  useEffect(() => {
+    const off = gpuApi.onCrashed(() => {
+      webglFailedRef.current = true
+      detachWebgl()
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <div className="flex h-full flex-col">
       <SessionHeader

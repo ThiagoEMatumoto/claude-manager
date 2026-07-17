@@ -686,6 +686,36 @@ export function Terminal({
     term.options.scrollback = scrollback
   }, [scrollback])
 
+  // Mudança de devicePixelRatio (janela movida entre monitores com escalas
+  // diferentes, zoom do SO): refaz o atlas de glifos e re-mede — sem isso o
+  // texto fica borrado no monitor novo. matchMedia de resolução dispara UMA vez
+  // por mudança, então o listener é re-registrado pro dpr novo a cada disparo.
+  useEffect(() => {
+    let disposed = false
+    let mql: MediaQueryList
+    let onChange: () => void
+    const subscribe = () => {
+      mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+      onChange = () => {
+        if (disposed) return
+        const term = xtermRef.current
+        const fit = fitRef.current
+        if (term && fit) {
+          term.clearTextureAtlas()
+          fit.fit()
+          resize(term.cols, term.rows)
+        }
+        subscribe()
+      }
+      mql.addEventListener('change', onChange, { once: true })
+    }
+    subscribe()
+    return () => {
+      disposed = true
+      mql.removeEventListener('change', onChange)
+    }
+  }, [resize])
+
   return (
     <div className="flex h-full flex-col">
       <SessionHeader

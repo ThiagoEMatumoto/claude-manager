@@ -6,7 +6,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
-import { sessionsApi } from '@/lib/ipc'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { gpuApi, sessionsApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore, type PaneMode } from '@/store/appStore'
@@ -26,7 +27,15 @@ import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
 import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
-import type { PermissionMode, Session, SessionActivity } from '../../../shared/types/ipc'
+import type { GpuStatus, PermissionMode, Session, SessionActivity } from '../../../shared/types/ipc'
+
+// Cache módulo-level: o status de GPU é imutável durante o processo (decidido no
+// boot do main), então 1 IPC atende todos os panes/remounts.
+let gpuStatusPromise: Promise<GpuStatus> | null = null
+function getGpuStatus(): Promise<GpuStatus> {
+  gpuStatusPromise ??= gpuApi.status()
+  return gpuStatusPromise
+}
 
 interface Props {
   session: Session
@@ -463,6 +472,26 @@ export function Terminal({
     xtermRef.current = term
     fitRef.current = fit
 
+    // Renderer WebGL: glifos nítidos e scroll mais fluido que o DOM renderer.
+    // Só tenta com a GPU ligada; qualquer falha (driver, context loss) volta pro
+    // DOM renderer sem quebrar o terminal.
+    let webgl: WebglAddon | null = null
+    void getGpuStatus().then((status) => {
+      if (xtermRef.current !== term || status.hwAccelDisabled) return
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM.
+          addon.dispose()
+          webgl = null
+        })
+        term.loadAddon(addon)
+        webgl = addon
+      } catch (err) {
+        console.warn('[terminal] WebGL indisponível, seguindo com DOM renderer:', err)
+      }
+    })
+
     // O processo já foi spawnado no clique, então pode já ter emitido bytes.
     // Para o replay: acumulamos a saída live num buffer (`liveTotal`) e buscamos
     // o backlog (snapshot do histórico no main). O backlog é prefixo do que vimos
@@ -583,6 +612,8 @@ export function Terminal({
       offTheme()
       linkProvider.dispose()
       setDataHandler(null)
+      webgl?.dispose()
+      webgl = null
       term.dispose()
       xtermRef.current = null
       fitRef.current = null

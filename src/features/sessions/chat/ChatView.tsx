@@ -14,6 +14,7 @@ import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { CommandCard, CommandOutputCard } from './CommandCard'
 import { MessageBubble } from './MessageBubble'
 import { MetaCard } from './MetaCard'
+import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
 import { SubagentCard } from './SubagentCard'
@@ -207,6 +208,11 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   const manualApproveIndex =
     tuiMenu && tuiMenu.kind === 'plan' ? findManualApproveIndex(tuiMenu) : null
 
+  // Prompt TTY-only (permissão de tool / trust de diretório) espelhado do buffer:
+  // as opções vão inteiras pro card (não há sentinelas nesses menus).
+  const tuiPermission =
+    tuiMenu && (tuiMenu.kind === 'permission' || tuiMenu.kind === 'trust') ? tuiMenu : null
+
   // Conteúdo do plano pro card PENDENTE: o tool_use do ExitPlanMode ainda não
   // está no JSONL, mas o plan file foi escrito durante o plan mode — lemos ele
   // pelo path do último Write/Edit em ~/.claude/plans/. Sem path ou leitura
@@ -222,7 +228,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     status === 'waiting' &&
     pendingPrompt == null &&
     menuFp !== consumedFp &&
-    (tuiMenu.kind === 'plan' || tuiQuestion != null)
+    (tuiMenu.kind === 'plan' || tuiQuestion != null || tuiPermission != null)
   const canRespondTui = onRespond != null && showTuiCard && tuiSent == null
 
   // Guard de clique: RE-PARSE fresco do buffer imediatamente antes de digitar.
@@ -237,6 +243,18 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   function respondTuiQuestion(clickIndex: number, label: string) {
     if (!canRespondTui || !tuiQuestion || menuFp == null) return
     const target = tuiQuestion.clickable[clickIndex]
+    if (!target || !freshMenuMatches()) return
+    const keys = buildDigitKey(target.index)
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, label, resolvedCount })
+    onRespond?.(keys)
+  }
+
+  // Permissão/trust: mesmo caminho da F3b — re-parse fresco + dígito da opção.
+  // Diferente do respondTuiQuestion, os índices são diretos (sem sentinelas).
+  function respondTuiPermission(clickIndex: number, label: string) {
+    if (!canRespondTui || !tuiPermission || menuFp == null) return
+    const target = tuiPermission.options[clickIndex]
     if (!target || !freshMenuMatches()) return
     const keys = buildDigitKey(target.index)
     if (keys.length === 0) return
@@ -370,6 +388,18 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             onDecide={canRespondTui ? respondTuiPlan : undefined}
             sent={tuiSent != null && tuiSent.fp === menuFp}
             canApprove={manualApproveIndex != null}
+          />
+        )}
+        {/* Prompt TTY-only (permissão de tool / trust de diretório): nunca chega
+            ao JSONL — o card é 100% sintetizado do buffer. Clique = dígito. */}
+        {showTuiCard && tuiPermission && (
+          <PermissionCard
+            kind={tuiPermission.kind === 'trust' ? 'trust' : 'permission'}
+            question={tuiPermission.question}
+            context={tuiPermission.context}
+            options={tuiPermission.options}
+            onRespond={canRespondTui ? respondTuiPermission : undefined}
+            sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
           />
         )}
         {pendingPrompt && (

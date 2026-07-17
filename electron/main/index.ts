@@ -18,6 +18,7 @@ import { setGpuState } from './services/gpu-state'
 import { rescheduleAutoPull, runAutoPullNow, stopAutoPull } from './services/repo-pull-scheduler'
 import { registerFsIpc } from './ipc/fs'
 import { registerPrefsIpc } from './ipc/prefs'
+import { registerGpuIpc } from './ipc/gpu'
 import { registerClaudeConfigsIpc } from './ipc/claude-configs'
 import { registerClaudePluginsIpc } from './ipc/claude-plugins'
 import { registerClaudeSettingsIpc } from './ipc/claude-settings'
@@ -170,6 +171,7 @@ app.whenReady().then(async () => {
   registerGitIpc()
   registerFsIpc()
   registerPrefsIpc()
+  registerGpuIpc()
   registerWorkspaceIpc()
   registerClaudeConfigsIpc()
   registerClaudePluginsIpc()

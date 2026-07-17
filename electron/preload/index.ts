@@ -144,6 +144,12 @@ const api: Api = {
   app: {
     getInfo: () => invoke('app:get-info'),
   },
+  gpu: {
+    status: () => invoke('gpu:status'),
+    setDisabled: (disabled: boolean) => invoke('gpu:set-disabled', disabled),
+    setOzone: (ozone: boolean) => invoke('gpu:set-ozone', ozone),
+    relaunch: () => invoke('app:relaunch'),
+  },
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),
   },

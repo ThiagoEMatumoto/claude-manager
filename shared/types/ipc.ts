@@ -1831,6 +1831,16 @@ export interface AppInfo {
   arch: string
 }
 
+// Status de GPU: o que está EM VIGOR neste processo (decidido no boot, imutável)
+// vs as prefs atuais — que só aplicam no próximo relaunch. A UI mostra "requer
+// reiniciar" quando os pares divergem.
+export interface GpuStatus {
+  hwAccelDisabled: boolean
+  ozoneWayland: boolean
+  prefDisabled: boolean
+  prefOzone: boolean
+}
+
 // Status read-only do MCP server embutido (Settings → Geral). addCommand é o
 // `claude mcp add ...` pronto (inclui o bearer token) pra sessões externas.
 export interface McpStatus {
@@ -1976,6 +1986,13 @@ export interface Api {
   }
   app: {
     getInfo(): Promise<AppInfo>
+  }
+  gpu: {
+    status(): Promise<GpuStatus>
+    setDisabled(disabled: boolean): Promise<void>
+    setOzone(ozone: boolean): Promise<void>
+    /** Reinicia o app (aplica mudanças de GPU, que só valem antes do ready). */
+    relaunch(): Promise<void>
   }
   dialog: {
     openDirectory(): Promise<string | null>

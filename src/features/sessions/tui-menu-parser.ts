@@ -204,6 +204,27 @@ export function parseTuiMenu(text: string): TuiMenu | null {
   }
 }
 
+// Gate PURO de status × kind: em qual status de sessão um menu parseado pode
+// virar card no chat. 'waiting' aceita qualquer kind (comportamento F3b). O
+// trust prompt aparece ANTES do 1º flush do JSONL — nesse momento a fonte de
+// status (~/.claude/sessions/<pid>.json) ou não existe/está sem status
+// (mapStatus → 'starting') ou reporta 'idle'; aceitamos os dois SÓ pra
+// permission/trust (question/plan continuam exigindo 'waiting' — regressão
+// zero). Qualquer outro status → null (fail-closed).
+export function gateMenuByStatus(
+  menu: TuiMenu | null,
+  status: string | undefined,
+): TuiMenu | null {
+  if (!menu) return null
+  if (status === 'waiting') return menu
+  if (
+    (status === 'starting' || status === 'idle') &&
+    (menu.kind === 'permission' || menu.kind === 'trust')
+  )
+    return menu
+  return null
+}
+
 // Identidade estável de um menu parseado (pergunta + labels na ordem). Usada pra:
 // (a) não re-renderizar quando o re-parse produz o mesmo menu; (b) guard de
 // clique — re-parse fresco divergente do menu clicado → NÃO digitar no PTY.

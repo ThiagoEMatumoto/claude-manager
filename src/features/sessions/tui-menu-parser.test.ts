@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { menuFingerprint, parseTuiMenu } from './tui-menu-parser'
+import { gateMenuByStatus, menuFingerprint, parseTuiMenu } from './tui-menu-parser'
 
 // Fixtures espelham o desenho REAL da TUI do claude 2.1.212 (validação live +
 // strings do binário) — ver header do tui-menu-parser.
@@ -314,6 +314,33 @@ que segue depois da lista.
 
   it('rejeita run de uma opção só', () => {
     expect(parseTuiMenu('Pergunta?\n\n❯ 1. Única\n')).toBeNull()
+  })
+})
+
+describe('gateMenuByStatus — card pré-transcript', () => {
+  const question = parseTuiMenu(FRUIT_MENU)!
+  const permission = parseTuiMenu(EDIT_PERMISSION_MENU)!
+  const trust = parseTuiMenu(TRUST_MENU)!
+
+  it("em 'waiting' qualquer kind passa (comportamento F3b)", () => {
+    expect(gateMenuByStatus(question, 'waiting')).toBe(question)
+    expect(gateMenuByStatus(permission, 'waiting')).toBe(permission)
+    expect(gateMenuByStatus(trust, 'waiting')).toBe(trust)
+  })
+
+  it("pré-transcript ('starting'/'idle') só permission/trust passam", () => {
+    for (const status of ['starting', 'idle'] as const) {
+      expect(gateMenuByStatus(trust, status)).toBe(trust)
+      expect(gateMenuByStatus(permission, status)).toBe(permission)
+      expect(gateMenuByStatus(question, status)).toBeNull()
+    }
+  })
+
+  it('fail-closed em qualquer outro status e sem menu', () => {
+    expect(gateMenuByStatus(trust, 'working')).toBeNull()
+    expect(gateMenuByStatus(trust, 'ended')).toBeNull()
+    expect(gateMenuByStatus(trust, undefined)).toBeNull()
+    expect(gateMenuByStatus(null, 'waiting')).toBeNull()
   })
 })
 

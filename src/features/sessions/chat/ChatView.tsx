@@ -23,7 +23,7 @@ import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript, usePlanFile } from './useChatTranscript'
 import { buildDigitKey, buildPlanKeys, findManualApproveIndex } from './respond-keys'
-import { menuFingerprint, type TuiMenu } from '../tui-menu-parser'
+import { gateMenuByStatus, menuFingerprint, type TuiMenu } from '../tui-menu-parser'
 import {
   countUserMessages,
   isAtBottom,
@@ -221,11 +221,14 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     tuiMenu?.kind === 'plan' ? lastPlanFilePath : null,
   )
 
-  // Card sintetizado só quando: menu íntegro + sessão 'waiting' + o transcript
-  // não tem momento pendente próprio (nunca duplicar) + o menu não foi consumido.
+  // Card sintetizado só quando: menu íntegro + status elegível pro kind
+  // ('waiting' pra qualquer um; 'starting'/'idle' pré-transcript só pra
+  // permission/trust — mesmo gate do Terminal, defesa em profundidade) + o
+  // transcript não tem momento pendente próprio (nunca duplicar) + o menu não
+  // foi consumido.
   const showTuiCard =
     tuiMenu != null &&
-    status === 'waiting' &&
+    gateMenuByStatus(tuiMenu, status) != null &&
     pendingPrompt == null &&
     menuFp !== consumedFp &&
     (tuiMenu.kind === 'plan' || tuiQuestion != null || tuiPermission != null)
@@ -286,17 +289,59 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     messageCount: rendered.length,
   })
 
+  /* Card pendente sintetizado do menu TUI parseado do buffer (o transcript não
+     expõe o momento pendente — a CLI só grava após a resposta; permission/trust
+     nunca chegam ao JSONL). O clique envia o DÍGITO da opção, que seleciona e
+     submete na TUI. Extraído em variável porque renderiza TAMBÉM no estado
+     pré-transcript (loading/waiting/empty) — o trust prompt aparece antes de
+     existir qualquer mensagem. */
+  const tuiCardNode = showTuiCard ? (
+    <>
+      {tuiMenu?.kind === 'question' && tuiQuestion && (
+        <QuestionCard
+          questions={tuiQuestion.questions}
+          onRespond={canRespondTui ? respondTuiQuestion : undefined}
+          sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
+        />
+      )}
+      {tuiMenu?.kind === 'plan' && (
+        <PlanCard
+          plan={pendingPlanText ?? PLAN_PLACEHOLDER}
+          onDecide={canRespondTui ? respondTuiPlan : undefined}
+          sent={tuiSent != null && tuiSent.fp === menuFp}
+          canApprove={manualApproveIndex != null}
+        />
+      )}
+      {tuiPermission && (
+        <PermissionCard
+          kind={tuiPermission.kind === 'trust' ? 'trust' : 'permission'}
+          question={tuiPermission.question}
+          context={tuiPermission.context}
+          options={tuiPermission.options}
+          onRespond={canRespondTui ? respondTuiPermission : undefined}
+          sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
+        />
+      )}
+    </>
+  ) : null
+
   if (viewState !== 'ready') {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--color-bg)] p-6 text-center text-sm text-[var(--color-text-dim)]">
-        {(viewState === 'loading' || viewState === 'waiting') && (
-          <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
-        )}
-        {viewState === 'loading' && 'Carregando conversa…'}
-        {viewState === 'waiting' &&
-          'Aguardando transcript… a conversa aparece assim que o claude responder.'}
-        {viewState === 'empty' &&
-          'Sem mensagens ainda. Envie um prompt pelo compositor abaixo — a conversa aparece aqui assim que o claude responder.'}
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-y-auto bg-[var(--color-bg)] p-6">
+        <div className="flex flex-col items-center gap-2 text-center text-sm text-[var(--color-text-dim)]">
+          {(viewState === 'loading' || viewState === 'waiting') && (
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
+          )}
+          {viewState === 'loading' && 'Carregando conversa…'}
+          {viewState === 'waiting' &&
+            'Aguardando transcript… a conversa aparece assim que o claude responder.'}
+          {viewState === 'empty' &&
+            'Sem mensagens ainda. Envie um prompt pelo compositor abaixo — a conversa aparece aqui assim que o claude responder.'}
+        </div>
+        {/* Prompt TTY-only pré-transcript (ex.: trust de diretório): o card
+            precisa aparecer MESMO sem nenhuma mensagem — é o que destrava a
+            sessão pra própria conversa nascer. */}
+        {tuiCardNode && <div className="w-full max-w-3xl text-left">{tuiCardNode}</div>}
       </div>
     )
   }
@@ -372,36 +417,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return null
           }
         })}
-        {/* Card pendente sintetizado do menu TUI parseado do buffer (o transcript
-            não expõe o momento pendente — a CLI só grava após a resposta). O
-            clique envia o DÍGITO da opção, que seleciona e submete na TUI. */}
-        {showTuiCard && tuiMenu?.kind === 'question' && tuiQuestion && (
-          <QuestionCard
-            questions={tuiQuestion.questions}
-            onRespond={canRespondTui ? respondTuiQuestion : undefined}
-            sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
-          />
-        )}
-        {showTuiCard && tuiMenu?.kind === 'plan' && (
-          <PlanCard
-            plan={pendingPlanText ?? PLAN_PLACEHOLDER}
-            onDecide={canRespondTui ? respondTuiPlan : undefined}
-            sent={tuiSent != null && tuiSent.fp === menuFp}
-            canApprove={manualApproveIndex != null}
-          />
-        )}
-        {/* Prompt TTY-only (permissão de tool / trust de diretório): nunca chega
-            ao JSONL — o card é 100% sintetizado do buffer. Clique = dígito. */}
-        {showTuiCard && tuiPermission && (
-          <PermissionCard
-            kind={tuiPermission.kind === 'trust' ? 'trust' : 'permission'}
-            question={tuiPermission.question}
-            context={tuiPermission.context}
-            options={tuiPermission.options}
-            onRespond={canRespondTui ? respondTuiPermission : undefined}
-            sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
-          />
-        )}
+        {tuiCardNode}
         {pendingPrompt && (
           <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-accent)]/50 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
             <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />

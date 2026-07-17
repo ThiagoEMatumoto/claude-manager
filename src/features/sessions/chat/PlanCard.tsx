@@ -12,6 +12,10 @@ interface Props {
   onDecide?: (d: 'approve' | 'reject') => void
   // Decisão já clicada, aguardando a decision real chegar no JSONL (forId).
   sent?: boolean
+  // Falso quando a opção de aprovação MANUAL não foi achada no menu TUI parseado:
+  // sem dígito seguro pra aprovar (Enter cego acertaria "auto-accept edits"), o
+  // botão de aprovar não é oferecido — só rejeitar (Esc) + dica de ir ao terminal.
+  canApprove?: boolean
 }
 
 // Planos longos começam colapsados pra não tomar a conversa inteira.
@@ -21,7 +25,7 @@ const COLLAPSE_THRESHOLD = 1200
 // plano em markdown (colapsável) + o estado de aprovação derivado do tool_result.
 // Com onDecide presente e decisão pendente, expõe botões de aprovar/rejeitar que
 // enviam a decisão ao PTY; a decision real do JSONL substitui o estado otimista.
-export function PlanCard({ plan, decision, onDecide, sent }: Props) {
+export function PlanCard({ plan, decision, onDecide, sent, canApprove = true }: Props) {
   const [open, setOpen] = useState(plan.length <= COLLAPSE_THRESHOLD)
 
   const status =
@@ -69,14 +73,20 @@ export function PlanCard({ plan, decision, onDecide, sent }: Props) {
           botões visíveis porém desabilitados até o JSONL confirmar. */}
       {decision === undefined && (onDecide != null || sent) && (
         <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-3 py-2">
-          <button
-            type="button"
-            disabled={sent || onDecide == null}
-            onClick={() => onDecide?.('approve')}
-            className="rounded border border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-accent)]/25 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-[var(--color-accent)]/10"
-          >
-            Aprovar plano
-          </button>
+          {canApprove ? (
+            <button
+              type="button"
+              disabled={sent || onDecide == null}
+              onClick={() => onDecide?.('approve')}
+              className="rounded border border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-accent)]/25 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-[var(--color-accent)]/10"
+            >
+              Aprovar plano
+            </button>
+          ) : (
+            <span className="text-xs text-[var(--color-text-dim)]">
+              Pra aprovar, use o terminal.
+            </span>
+          )}
           <button
             type="button"
             disabled={sent || onDecide == null}

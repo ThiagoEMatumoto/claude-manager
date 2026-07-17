@@ -83,19 +83,27 @@ function resolvePath(raw: string, cwd: string | null): string | null {
   return '/' + out.join('/')
 }
 
-// Lê as últimas linhas do viewport do xterm (input box / rodapé da TUI do claude) como
-// texto plano, pra detectar o modo de permissão ATUAL (inclusive 'default', que não tem
-// indicador) sem depender de bytes acumulados do PTY.
-function readFooterText(term: Xterm): string {
+// Lê as últimas `n` linhas do buffer do xterm como texto plano (uma linha por \n,
+// trim à direita). IBuffer.length = total de linhas (scrollback + viewport), com
+// getLine 0-based — o tail são as linhas [length - n, length). É a fonte de texto
+// pra detectar o modo de permissão E pra parsear o menu TUI pendente (a TUI
+// desenha pergunta + opções no fundo do buffer).
+function readTailText(term: Xterm, n = 40): string {
   const buf = term.buffer.active
-  const rows = term.rows
-  const startY = buf.baseY + Math.max(0, rows - 10)
   let text = ''
-  for (let y = startY; y < buf.baseY + rows; y++) {
+  for (let y = Math.max(0, buf.length - n); y < buf.length; y++) {
     const line = buf.getLine(y)
     if (line) text += line.translateToString(true) + '\n'
   }
   return text
+}
+
+// Rodapé da TUI (input box / status lines): as últimas linhas do VIEWPORT, pra
+// detectar o modo de permissão ATUAL (inclusive 'default', sem indicador) sem
+// depender de bytes acumulados do PTY. min(rows, 10) preserva a semântica antiga
+// (nunca lê acima do viewport quando o terminal tem menos de 10 rows).
+function readFooterText(term: Xterm): string {
+  return readTailText(term, Math.min(term.rows, 10))
 }
 
 export function Terminal({

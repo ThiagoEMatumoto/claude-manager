@@ -13,6 +13,7 @@ import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { CommandCard, CommandOutputCard } from './CommandCard'
 import { MessageBubble } from './MessageBubble'
+import { MetaCard } from './MetaCard'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
 import { SubagentCard } from './SubagentCard'
@@ -277,6 +278,8 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return <CommandCard key={i} name={m.name} args={m.args} />
             case 'command_output':
               return <CommandOutputCard key={i} text={m.text} />
+            case 'meta':
+              return <MetaCard key={i} text={m.text} label={m.label} />
             case 'tool_use':
               return <ToolUseCard key={i} name={m.name} input={m.input} />
             case 'subagent':

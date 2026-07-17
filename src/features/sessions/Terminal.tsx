@@ -24,6 +24,7 @@ import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { TERMINAL_FONT_FAMILY } from '@/lib/terminal-font'
 import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
 import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
@@ -416,9 +417,15 @@ export function Terminal({
     const term = new Xterm({
       // Tema derivado dos tokens do app (Ember reproduz o antigo hardcoded).
       theme: xtermTheme(getCurrentThemeTokens()),
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
+      fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: useTerminalPrefsStore.getState().fontSize,
       scrollback: useTerminalPrefsStore.getState().scrollback,
+      // Nitidez: sem espaçamento fracionário entre células, glifos de box-drawing
+      // desenhados pelo próprio xterm (bordas de TUI contínuas) e re-escala de
+      // glifos que estouram a célula (powerline/nerd font não recortam).
+      letterSpacing: 0,
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
       cursorBlink: true,
       allowProposedApi: true,
       // O xterm é INTERATIVO: digitar aqui flui via onData→write (abaixo) direto pro PTY.

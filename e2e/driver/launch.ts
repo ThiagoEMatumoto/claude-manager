@@ -1,7 +1,7 @@
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright'
-import { cpSync, existsSync, mkdtempSync, readdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -29,6 +29,20 @@ export function resolveRealUserData(): string {
   return preferred
 }
 
+// Caches do Chromium são regenerados no launch — copiá-los só custa I/O e RAM
+// (a cópia vai pra /tmp, que é tmpfs). Excluídos por nome de topo: um `Cache/`
+// aninhado dentro de um dir de dados legítimo continua sendo copiado.
+const SKIP_TOPLEVEL = new Set([
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'ShaderCache',
+  'blob_storage',
+  'Crashpad',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+])
+
 export interface LaunchResult {
   app: ElectronApplication
   page: Page
@@ -46,8 +60,29 @@ export async function launchApp(): Promise<LaunchResult> {
   }
   const real = resolveRealUserData()
   const copy = mkdtempSync(join(tmpdir(), 'cm-drive-userdata-'))
+
+  // tmpdir() é tmpfs nesta máquina: cada cópia deixada pra trás fica residente em
+  // RAM até o reboot. Sem isto, cada run vazava ~334MB permanentes.
+  process.once('exit', () => {
+    try {
+      rmSync(copy, { recursive: true, force: true })
+    } catch {
+      // best-effort: não mascarar o erro real que causou a saída
+    }
+  })
+  // Handlers de sinal só redirecionam pro 'exit' acima (Ctrl-C não o dispara sozinho).
+  process.once('SIGINT', () => process.exit(130))
+  process.once('SIGTERM', () => process.exit(143))
+
   if (existsSync(real)) {
-    cpSync(real, copy, { recursive: true })
+    cpSync(real, copy, {
+      recursive: true,
+      filter: (src) => {
+        const rel = relative(real, src)
+        if (!rel) return true
+        return !SKIP_TOPLEVEL.has(rel.split(sep)[0])
+      },
+    })
   }
   const app = await electron.launch({
     args: [MAIN_ENTRY, '--no-sandbox', `--user-data-dir=${copy}`],

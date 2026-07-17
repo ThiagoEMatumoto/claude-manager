@@ -18,11 +18,13 @@ import { ComposerToolbar } from './ComposerToolbar'
 import { SessionHeader } from './SessionHeader'
 import { AgentHud } from './AgentHud'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
+import { playKeys } from './chat/respond-keys'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
+import { menuFingerprint, parseTuiMenu, type TuiMenu } from './tui-menu-parser'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { TERMINAL_FONT_FAMILY } from '@/lib/terminal-font'
@@ -82,19 +84,27 @@ function resolvePath(raw: string, cwd: string | null): string | null {
   return '/' + out.join('/')
 }
 
-// Lê as últimas linhas do viewport do xterm (input box / rodapé da TUI do claude) como
-// texto plano, pra detectar o modo de permissão ATUAL (inclusive 'default', que não tem
-// indicador) sem depender de bytes acumulados do PTY.
-function readFooterText(term: Xterm): string {
+// Lê as últimas `n` linhas do buffer do xterm como texto plano (uma linha por \n,
+// trim à direita). IBuffer.length = total de linhas (scrollback + viewport), com
+// getLine 0-based — o tail são as linhas [length - n, length). É a fonte de texto
+// pra detectar o modo de permissão E pra parsear o menu TUI pendente (a TUI
+// desenha pergunta + opções no fundo do buffer).
+function readTailText(term: Xterm, n = 40): string {
   const buf = term.buffer.active
-  const rows = term.rows
-  const startY = buf.baseY + Math.max(0, rows - 10)
   let text = ''
-  for (let y = startY; y < buf.baseY + rows; y++) {
+  for (let y = Math.max(0, buf.length - n); y < buf.length; y++) {
     const line = buf.getLine(y)
     if (line) text += line.translateToString(true) + '\n'
   }
   return text
+}
+
+// Rodapé da TUI (input box / status lines): as últimas linhas do VIEWPORT, pra
+// detectar o modo de permissão ATUAL (inclusive 'default', sem indicador) sem
+// depender de bytes acumulados do PTY. min(rows, 10) preserva a semântica antiga
+// (nunca lê acima do viewport quando o terminal tem menos de 10 rows).
+function readFooterText(term: Xterm): string {
+  return readTailText(term, Math.min(term.rows, 10))
 }
 
 export function Terminal({
@@ -142,6 +152,10 @@ export function Terminal({
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   // Modo de permissão ativo (lido do rodapé do xterm via detectFooterMode).
   const [currentMode, setCurrentMode] = useState<PermissionMode | null>(null)
+  // Menu TUI pendente (AskUserQuestion/aprovação de plano) parseado do tail do
+  // buffer do xterm — a fonte do card clicável no modo chat. Só existe com a
+  // sessão em 'waiting'; null = sem menu íntegro (fail-closed no parser).
+  const [pendingTuiMenu, setPendingTuiMenu] = useState<TuiMenu | null>(null)
   // Esforço ativo e ultracode são rastreados localmente — não há campo no transcript
   // pra eles. Refletem o último valor que ESTE app injetou (null = ainda não definido).
   const [activeEffort, setActiveEffort] = useState<EffortLevel | null>(null)
@@ -157,6 +171,33 @@ export function Terminal({
   // o link provider ler o valor atual sem recriar o xterm.
   const cwdRef = useRef(repoPath)
   cwdRef.current = repoPath
+
+  // Parse fresco do menu TUI direto do buffer (também exposto ao ChatView como
+  // guard de clique — re-parse imediatamente antes de digitar).
+  function readTuiMenu(): TuiMenu | null {
+    const t = xtermRef.current
+    return t ? parseTuiMenu(readTailText(t)) : null
+  }
+
+  // Aplica um parse novo preservando a referência quando o menu não mudou
+  // (fingerprint igual) — evita re-render/reset do card a cada burst do PTY.
+  function applyTuiMenu(menu: TuiMenu | null) {
+    setPendingTuiMenu((prev) =>
+      prev && menu && menuFingerprint(prev) === menuFingerprint(menu) ? prev : menu,
+    )
+  }
+
+  // Menu TUI: parse na TRANSIÇÃO de status. Entrou em 'waiting' → tenta parsear
+  // o que já está desenhado (o debounce do PTY cobre desenhos posteriores);
+  // saiu de 'waiting' → limpa (menu não existe fora dessa espera).
+  useEffect(() => {
+    if (exited || activity?.status !== 'waiting') {
+      setPendingTuiMenu(null)
+      return
+    }
+    applyTuiMenu(readTuiMenu())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity?.status, exited])
 
   useEffect(() => {
     setTitle(session.title ?? null)
@@ -552,6 +593,10 @@ export function Terminal({
       permTimerRef.current = window.setTimeout(() => {
         const t = xtermRef.current
         if (!t) return
+        // Menu TUI pendente: só existe em 'waiting'. O parse roda no MESMO
+        // debounce (a saída assentou); fora de 'waiting' o menu é limpo.
+        if (statusRef.current === 'waiting') applyTuiMenu(parseTuiMenu(readTailText(t)))
+        else applyTuiMenu(null)
         if (statusRef.current === 'working' || statusRef.current === 'starting') return
         setCurrentMode(detectFooterMode(readFooterText(t)))
       }, 150)
@@ -811,6 +856,14 @@ export function Terminal({
             sessionId={session.id}
             status={activity?.status}
             onToggleMode={onToggleMode}
+            // Cliques nos cards interativos → teclas no PTY vivo, mesmo write()
+            // do onForwardKey do composer (ver respond-keys).
+            onRespond={(seqs) => void playKeys(seqs, write)}
+            // Momento pendente clicável: menu TUI parseado do buffer do xterm
+            // (o transcript não expõe perguntas pendentes). reparseMenu é o
+            // guard de clique — re-parse fresco antes de digitar.
+            tuiMenu={pendingTuiMenu}
+            reparseMenu={readTuiMenu}
           />
         )}
 

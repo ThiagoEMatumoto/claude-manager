@@ -19,6 +19,8 @@ import { SystemCard } from './SystemCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
+import { buildDigitKey, buildPlanKeys, findManualApproveIndex } from './respond-keys'
+import { menuFingerprint, type TuiMenu } from '../tui-menu-parser'
 import {
   countUserMessages,
   isAtBottom,
@@ -44,12 +46,24 @@ interface Props {
   // Alterna pro modo terminal. Usado pelo banner de espera genérica (ex.: prompt
   // de permissão y/n, TTY-only) pra levar o usuário ao único lugar que o renderiza.
   onToggleMode?: () => void
+  // Reproduz sequências de teclas no PTY vivo (mesmo write() do onForwardKey do
+  // composer). Vem do Terminal; ausente = cards ficam read-only. Consumido pelo
+  // caminho de clique baseado no menu TUI parseado (não pelo transcript: a CLI
+  // não grava o tool_use pendente no JSONL, então cards de transcript nunca
+  // estão pendentes — só pós-resposta).
+  onRespond?: (seqs: string[]) => void
+  // Menu TUI pendente parseado do buffer do xterm (Terminal, debounced). É a
+  // FONTE do momento pendente clicável. null = sem menu íntegro parseado.
+  tuiMenu?: TuiMenu | null
+  // Re-parse FRESCO do buffer, chamado imediatamente antes de digitar (guard de
+  // clique: o menu pode ter fechado/mudado desde o último debounce).
+  reparseMenu?: () => TuiMenu | null
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode, onRespond, tuiMenu, reparseMenu }, ref) {
   const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -116,9 +130,107 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   // mensagens de disco: ecos otimistas são só texto do usuário.
   const interactive = useMemo(() => resolveInteractive(messages), [messages])
   const pendingPrompt = useMemo(() => pendingInteractive(messages), [messages])
+
+  // ── Momento pendente vindo do menu TUI parseado do buffer ──────────────────
+  const menuFp = tuiMenu ? menuFingerprint(tuiMenu) : null
+  // Clique já enviado pro menu atual (identificado por fingerprint) + contagem
+  // de respostas resolvidas no momento do envio, pra detectar a resposta real.
+  const [tuiSent, setTuiSent] = useState<{
+    fp: string
+    label?: string
+    resolvedCount: number
+  } | null>(null)
+  // Fingerprint do menu cuja resposta JÁ chegou no JSONL: enquanto o menu
+  // (idêntico) ainda não sumiu do buffer, o card sintetizado não renderiza —
+  // senão duplicaria com o card respondido que o transcript acabou de trazer.
+  const [consumedFp, setConsumedFp] = useState<string | null>(null)
+  const resolvedCount = interactive.answers.size + interactive.plans.size
+
+  useEffect(() => {
+    if (menuFp == null) setConsumedFp(null)
+  }, [menuFp])
+
+  // Reconciliação do clique otimista: resposta real chegou (contagem avançou) →
+  // menu consumido; menu mudou/sumiu sem resposta (ex.: Esc no terminal) → limpa
+  // o sent pra não bloquear cliques num menu novo.
+  useEffect(() => {
+    if (!tuiSent) return
+    if (resolvedCount > tuiSent.resolvedCount) {
+      setConsumedFp(tuiSent.fp)
+      setTuiSent(null)
+    } else if (menuFp !== tuiSent.fp) {
+      setTuiSent(null)
+    }
+  }, [tuiSent, resolvedCount, menuFp])
+
+  // Dados sintetizados pro QuestionCard: sentinelas (Type something./Chat about
+  // this) ficam fora das opções clicáveis — free-text segue pelo compositor.
+  const tuiQuestion = useMemo(() => {
+    if (!tuiMenu || tuiMenu.kind !== 'question') return null
+    const clickable = tuiMenu.options.filter((o) => o.sentinel == null)
+    if (clickable.length === 0) return null
+    return {
+      clickable,
+      questions: [
+        {
+          question: tuiMenu.question ?? 'Claude fez uma pergunta (veja o terminal).',
+          header: '',
+          multiSelect: tuiMenu.multiSelect,
+          options: clickable.map((o) => ({ label: o.label, description: o.description ?? '' })),
+        },
+      ],
+    }
+  }, [tuiMenu])
+
+  const manualApproveIndex =
+    tuiMenu && tuiMenu.kind === 'plan' ? findManualApproveIndex(tuiMenu) : null
+
+  // Card sintetizado só quando: menu íntegro + sessão 'waiting' + o transcript
+  // não tem momento pendente próprio (nunca duplicar) + o menu não foi consumido.
+  const showTuiCard =
+    tuiMenu != null &&
+    status === 'waiting' &&
+    pendingPrompt == null &&
+    menuFp !== consumedFp &&
+    (tuiMenu.kind === 'plan' || tuiQuestion != null)
+  const canRespondTui = onRespond != null && showTuiCard && tuiSent == null
+
+  // Guard de clique: RE-PARSE fresco do buffer imediatamente antes de digitar.
+  // Menu fechou/mudou (respondido pelo terminal, resize) → fingerprint diverge →
+  // NÃO digita nada no PTY.
+  function freshMenuMatches(): TuiMenu | null {
+    const fresh = reparseMenu?.() ?? null
+    if (!fresh || menuFp == null || menuFingerprint(fresh) !== menuFp) return null
+    return fresh
+  }
+
+  function respondTuiQuestion(clickIndex: number, label: string) {
+    if (!canRespondTui || !tuiQuestion || menuFp == null) return
+    const target = tuiQuestion.clickable[clickIndex]
+    if (!target || !freshMenuMatches()) return
+    const keys = buildDigitKey(target.index)
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, label, resolvedCount })
+    onRespond?.(keys)
+  }
+
+  function respondTuiPlan(d: 'approve' | 'reject') {
+    if (!canRespondTui || menuFp == null) return
+    const fresh = freshMenuMatches()
+    if (!fresh) return
+    // O dígito de aprovação vem do RE-PARSE (não do menu do estado): se a opção
+    // manual sumiu/mudou de posição, buildPlanKeys devolve [] e nada é enviado.
+    const keys = buildPlanKeys(d, findManualApproveIndex(fresh))
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, resolvedCount })
+    onRespond?.(keys)
+  }
+
   // Espera que o chat não consegue representar (provável prompt de permissão
-  // y/n / menu TTY): status 'waiting' sem um card de pergunta/plano conhecido.
-  const waitInTerminal = showTerminalWaitBanner({ status, pending: pendingPrompt })
+  // y/n / menu TTY): status 'waiting' sem card conhecido — nem do transcript,
+  // nem sintetizado do menu TUI (que tem precedência sobre o banner).
+  const waitInTerminal =
+    showTerminalWaitBanner({ status, pending: pendingPrompt }) && !showTuiCard
 
   const viewState = resolveChatViewState({
     loading,
@@ -181,10 +293,16 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               )
             case 'tool_result':
               return <ToolResultCard key={i} content={m.content} isError={m.isError} />
+            // Cards de transcript são PÓS-resposta por natureza: a CLI só grava o
+            // tool_use no JSONL junto com a resposta, então nunca estão pendentes.
+            // O momento pendente (clicável) vem do menu TUI parseado do buffer.
             case 'ask_user_question':
-              return <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
+              return (
+                <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
+              )
             case 'exit_plan_mode':
               return <PlanCard key={i} plan={m.plan} decision={interactive.plans.get(m.id)} />
+
             // Resposta/decisão/status são fundidos no card acima (por forId) — não
             // renderizam sozinhos.
             case 'ask_user_question_answered':
@@ -193,11 +311,29 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
               return null
           }
         })}
+        {/* Card pendente sintetizado do menu TUI parseado do buffer (o transcript
+            não expõe o momento pendente — a CLI só grava após a resposta). O
+            clique envia o DÍGITO da opção, que seleciona e submete na TUI. */}
+        {showTuiCard && tuiMenu?.kind === 'question' && tuiQuestion && (
+          <QuestionCard
+            questions={tuiQuestion.questions}
+            onRespond={canRespondTui ? respondTuiQuestion : undefined}
+            sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
+          />
+        )}
+        {showTuiCard && tuiMenu?.kind === 'plan' && (
+          <PlanCard
+            plan={'_O plano está na conversa acima — revise antes de decidir._'}
+            onDecide={canRespondTui ? respondTuiPlan : undefined}
+            sent={tuiSent != null && tuiSent.fp === menuFp}
+            canApprove={manualApproveIndex != null}
+          />
+        )}
         {pendingPrompt && (
           <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-accent)]/50 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
             <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
             <Icon as={Clock} size={14} className="shrink-0 text-[var(--color-accent)]" />
-            {pendingPrompt === 'plan'
+            {pendingPrompt.kind === 'plan'
               ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
               : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
           </div>

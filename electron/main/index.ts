@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, powerMonitor, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
@@ -13,7 +13,7 @@ import { registerDialogIpc } from './ipc/dialog'
 import { registerGitIpc, cloneMissingWithToasts } from './ipc/git'
 import { backfillRepoRemotes } from './services/git-remote'
 import { listMissingRepos } from './services/repo-clone'
-import { getPref } from './services/prefs-store'
+import { getPref, setPref } from './services/prefs-store'
 import { setGpuState } from './services/gpu-state'
 import { rescheduleAutoPull, runAutoPullNow, stopAutoPull } from './services/repo-pull-scheduler'
 import { registerFsIpc } from './ipc/fs'
@@ -47,7 +47,7 @@ import { startUsageMonitor, stopUsageMonitor } from './services/usage-monitor'
 import { calendarWatcher } from './services/calendar/calendar-watcher'
 import { jobScheduler } from './services/job-scheduler'
 import { registerWindowIpc, wireWindowMaximizeBroadcast } from './ipc/window'
-import { setMainWindow } from './services/notifications'
+import { setMainWindow, emitToast } from './services/notifications'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -136,7 +136,33 @@ async function autoCloneMissingOnBoot(): Promise<void> {
   }
 }
 
+// Log de diagnóstico de GPU no boot: 1 linha com vendor/device/driver (quando o
+// Chromium expõe) + o estado efetivo da aceleração. É o que permite correlacionar
+// relatos de corrupção de atlas (ex: NVIDIA/Wayland) com o driver da máquina.
+function logGpuInfo(): void {
+  app
+    .getGPUInfo('basic')
+    .then((info) => {
+      const { gpuDevice, driverVendor, driverVersion } = info as {
+        gpuDevice?: Array<{ vendorId?: number; deviceId?: number; active?: boolean }>
+        driverVendor?: string
+        driverVersion?: string
+      }
+      const devices = (gpuDevice ?? [])
+        .map(
+          (d) =>
+            `${d.active ? '*' : ''}${(d.vendorId ?? 0).toString(16)}:${(d.deviceId ?? 0).toString(16)}`,
+        )
+        .join(', ')
+      console.log(
+        `[gpu] devices=[${devices}] driver=${driverVendor ?? '?'} ${driverVersion ?? '?'} hwAccelDisabled=${gpuOff}`,
+      )
+    })
+    .catch((err) => console.warn('[gpu] getGPUInfo falhou:', String(err)))
+}
+
 app.whenReady().then(async () => {
+  logGpuInfo()
   // Sem menu de aplicação: o menu default do Electron traz um item Edit→Paste com
   // acelerador Ctrl+V que dispara webContents.paste() ALÉM do paste nativo do
   // textarea do xterm — resultado é colar 2x. Campos de input normais continuam
@@ -238,10 +264,39 @@ app.whenReady().then(async () => {
     // trazido registros novos de outra máquina). Best-effort e não-bloqueante.
     .finally(() => void autoCloneMissingOnBoot())
 
+  // Pós-suspend o contexto WebGL pode morrer SEM disparar onContextLoss no
+  // renderer — avisamos as janelas pra cada terminal se curar (clearTextureAtlas
+  // + refresh). powerMonitor só existe depois do ready.
+  powerMonitor.on('resume', () => {
+    broadcast('gpu:resumed', { at: Date.now() })
+  })
+
+  // Auto-fallback em crash do processo de GPU (driver instável, ex: NVIDIA/
+  // Wayland): avisa os renderers pra largarem o WebGL (seguem em DOM na mesma
+  // sessão). No 2º crash do processo, desliga a aceleração pro PRÓXIMO boot
+  // (a flag só vale antes do ready) e avisa o usuário via toast.
+  app.on('child-process-gone', (_e, details) => {
+    if (details.type !== 'GPU') return
+    if (!['crashed', 'oom', 'launch-failed', 'killed'].includes(details.reason)) return
+    gpuCrashCount += 1
+    console.warn(`[gpu] processo de GPU morreu (${details.reason}) — crash #${gpuCrashCount}`)
+    broadcast('gpu:crashed', { reason: details.reason, count: gpuCrashCount })
+    if (gpuCrashCount === 2) {
+      setPref('gpu.disabled', true)
+      emitToast(
+        'Aceleração de GPU desativada',
+        'Aceleração de GPU instável neste driver — desativada. Reinicie o app pra aplicar totalmente.',
+      )
+    }
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })
+
+// Crashes do processo de GPU nesta execução (ver child-process-gone no whenReady).
+let gpuCrashCount = 0
 
 // Self-heal de handoffs órfãos a cada 5min (ver app.whenReady).
 const HANDOFF_RECONCILE_INTERVAL_MS = 5 * 60 * 1000

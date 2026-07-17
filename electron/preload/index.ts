@@ -149,6 +149,8 @@ const api: Api = {
     setDisabled: (disabled: boolean) => invoke('gpu:set-disabled', disabled),
     setOzone: (ozone: boolean) => invoke('gpu:set-ozone', ozone),
     relaunch: () => invoke('app:relaunch'),
+    onResumed: (handler) => subscribe('gpu:resumed', handler),
+    onCrashed: (handler) => subscribe('gpu:crashed', handler),
   },
   dialog: {
     openDirectory: () => invoke('dialog:open-directory'),

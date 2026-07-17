@@ -2005,6 +2005,8 @@ export interface Api {
     setOzone(ozone: boolean): Promise<void>
     /** Reinicia o app (aplica mudanças de GPU, que só valem antes do ready). */
     relaunch(): Promise<void>
+    /** Sistema voltou de suspend (powerMonitor.resume) — terminais devem se curar. */
+    onResumed(handler: () => void): () => void
   }
   dialog: {
     openDirectory(): Promise<string | null>

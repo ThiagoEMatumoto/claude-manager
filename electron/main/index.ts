@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell } from 'electron'
+import { app, BrowserWindow, Menu, powerMonitor, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { getDb, closeDb } from './services/db'
@@ -237,6 +237,13 @@ app.whenReady().then(async () => {
     // Auto-clone dos repos faltantes DEPOIS do import do boot (o sync pode ter
     // trazido registros novos de outra máquina). Best-effort e não-bloqueante.
     .finally(() => void autoCloneMissingOnBoot())
+
+  // Pós-suspend o contexto WebGL pode morrer SEM disparar onContextLoss no
+  // renderer — avisamos as janelas pra cada terminal se curar (clearTextureAtlas
+  // + refresh). powerMonitor só existe depois do ready.
+  powerMonitor.on('resume', () => {
+    broadcast('gpu:resumed', { at: Date.now() })
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

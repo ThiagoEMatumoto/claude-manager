@@ -793,6 +793,30 @@ export function Terminal({
     }
   }, [resize])
 
+  // Cura pós-suspend/focus: no NVIDIA/Wayland o contexto WebGL pode acordar com
+  // o glyph atlas corrompido SEM disparar onContextLoss. Em gpu:resumed (main,
+  // powerMonitor) e no focus da janela: com WebGL vivo refaz o atlas + repinta;
+  // sem WebGL só repinta. Throttle de 5s — focus dispara em rajada e o heal
+  // completo (atlas + refresh full) não é de graça.
+  useEffect(() => {
+    let lastHealAt = 0
+    const heal = () => {
+      const now = Date.now()
+      if (now - lastHealAt < 5000) return
+      lastHealAt = now
+      const term = xtermRef.current
+      if (!term) return
+      if (webglRef.current) term.clearTextureAtlas()
+      term.refresh(0, term.rows - 1)
+    }
+    const offResumed = gpuApi.onResumed(heal)
+    window.addEventListener('focus', heal)
+    return () => {
+      offResumed()
+      window.removeEventListener('focus', heal)
+    }
+  }, [])
+
   return (
     <div className="flex h-full flex-col">
       <SessionHeader

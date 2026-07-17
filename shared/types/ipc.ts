@@ -1407,6 +1407,15 @@ export interface PtyExitEvent {
   signal: number | null
 }
 
+// Subagente (Task tool) visível no tail do transcript da sessão. 'running' =
+// tool_use visto sem tool_result; 'ok'/'error' = tool_result chegou (is_error).
+// Subagentes fora do tail (antigos) são omitidos da lista.
+export interface SubagentActivity {
+  name: string
+  description: string
+  state: 'running' | 'ok' | 'error'
+}
+
 export interface SessionActivity {
   ccSessionId: string
   status: 'starting' | 'working' | 'waiting' | 'idle' | 'ended'
@@ -1418,6 +1427,9 @@ export interface SessionActivity {
   // Model id da última msg assistant do transcript (ex: 'claude-opus-4-...').
   // Null até a primeira resposta — fonte de verdade pro ModelPill do Terminal.
   model: string | null
+  // Subagentes ativos/recentes derivados do tail (só no watch per-sessão; o
+  // batch global e a lista Agents não carregam isso).
+  subagents?: SubagentActivity[]
 }
 
 // Snapshot de uma sessão viva (PTY rodando neste app) para a lista global "Agents".

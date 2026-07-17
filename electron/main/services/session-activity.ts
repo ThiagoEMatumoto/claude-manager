@@ -14,11 +14,13 @@ import {
   close as closeCb,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import chokidar, { FSWatcher } from 'chokidar'
 import type { SessionActivity, GlobalActivityBatch } from '../../../shared/types/ipc'
 import { notifyUsageConsumption } from './usage-monitor'
 import { getNotifPrefs, getMainWindow, getRendererFocusedSession, notify } from './notifications'
+import { deriveSubagentActivity } from './subagent-activity'
+import { readSubagentMetas } from './subagent-turns'
 
 export const PROJECTS_ROOT = join(homedir(), '.claude', 'projects')
 const SESSIONS_ROOT = join(homedir(), '.claude', 'sessions')
@@ -321,6 +323,14 @@ export function getActivityFor(ccSessionId: string): ActivitySnapshot | null {
 interface WatchEntry {
   transcriptPath: string | null
   enrichment: TranscriptEnrichment
+  // Watcher POR SESSÃO no transcript (+ dir subagents/): o dirWatcher global só
+  // observa ~/.claude/sessions e pode não tickar durante um turno busy longo —
+  // este garante broadcasts enquanto o JSONL cresce. null até o transcript existir.
+  fileWatcher: FSWatcher | null
+  fileTimer: NodeJS.Timeout | null
+  // O dir subagents/ pode nascer DEPOIS do watcher (primeiro Task do turno);
+  // flag pra adicioná-lo ao watcher quando aparecer, sem re-add a cada emit.
+  subagentsWatched: boolean
 }
 
 class SessionActivityService extends EventEmitter {
@@ -338,19 +348,61 @@ class SessionActivityService extends EventEmitter {
 
   watch(ccSessionId: string): void {
     if (this.watched.has(ccSessionId)) return
-    this.watched.set(ccSessionId, {
+    const entry: WatchEntry = {
       transcriptPath: findTranscriptPath(ccSessionId),
       enrichment: { title: null, lastText: null, tokens: undefined, model: null },
-    })
+      fileWatcher: null,
+      fileTimer: null,
+      subagentsWatched: false,
+    }
+    this.watched.set(ccSessionId, entry)
     this.ensureDirWatcher()
+    this.ensureFileWatcher(ccSessionId, entry)
     // Estado inicial imediato (índice já pode estar populado).
     this.rebuildIndex()
     void this.emitFor(ccSessionId)
   }
 
   unwatch(ccSessionId: string): void {
+    const entry = this.watched.get(ccSessionId)
+    if (entry) {
+      if (entry.fileTimer) clearTimeout(entry.fileTimer)
+      if (entry.fileWatcher) void entry.fileWatcher.close()
+      entry.fileTimer = null
+      entry.fileWatcher = null
+    }
     this.watched.delete(ccSessionId)
     this.maybeCloseDirWatcher()
+  }
+
+  // Watcher chokidar por sessão assinada: transcript + (quando existir) o dir
+  // subagents/ irmão. Debounce próprio (mesmo DEBOUNCE_MS) chamando emitFor —
+  // independente do dirWatcher de ~/.claude/sessions, que não vê o JSONL crescer.
+  // Idempotente: chamado de novo só pra anexar o subagents/ quando ele nascer.
+  private ensureFileWatcher(ccSessionId: string, entry: WatchEntry): void {
+    if (!entry.transcriptPath) return
+    if (!entry.fileWatcher) {
+      const watcher = chokidar.watch(entry.transcriptPath, {
+        ignoreInitial: true,
+        depth: 1,
+        awaitWriteFinish: false,
+      })
+      const schedule = () => {
+        if (entry.fileTimer) clearTimeout(entry.fileTimer)
+        entry.fileTimer = setTimeout(() => void this.emitFor(ccSessionId), DEBOUNCE_MS)
+      }
+      watcher.on('add', schedule)
+      watcher.on('change', schedule)
+      watcher.on('unlink', schedule)
+      entry.fileWatcher = watcher
+    }
+    if (!entry.subagentsWatched) {
+      const subagentsDir = join(dirname(entry.transcriptPath), ccSessionId, 'subagents')
+      if (existsSync(subagentsDir)) {
+        entry.fileWatcher.add(subagentsDir)
+        entry.subagentsWatched = true
+      }
+    }
   }
 
   // Modo global: espelha o padrão watch/unwatch per-ccSessionId, mas observa
@@ -515,9 +567,17 @@ class SessionActivityService extends EventEmitter {
 
     // Enriquecimento secundário do JSONL (lastText/tokens/title) sob demanda.
     if (!entry.transcriptPath) entry.transcriptPath = findTranscriptPath(ccSessionId)
+    // Transcript pode ter nascido depois do watch(); garante o watcher per-sessão
+    // (e anexa o dir subagents/ quando ele aparecer).
+    this.ensureFileWatcher(ccSessionId, entry)
+    let subagents: SessionActivity['subagents']
     if (entry.transcriptPath) {
       const tail = await readTail(entry.transcriptPath)
-      if (tail) entry.enrichment = deriveEnrichment(tail)
+      if (tail) {
+        entry.enrichment = deriveEnrichment(tail)
+        const metas = readSubagentMetas(dirname(entry.transcriptPath), ccSessionId)
+        if (metas.length > 0) subagents = deriveSubagentActivity(metas, tail)
+      }
     }
 
     const activity: SessionActivity = {
@@ -529,6 +589,7 @@ class SessionActivityService extends EventEmitter {
       lastActivityAt,
       tokens: entry.enrichment.tokens,
       model: entry.enrichment.model,
+      subagents,
     }
     broadcast('session:activity', activity)
   }

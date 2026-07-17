@@ -49,6 +49,45 @@ interface SubagentMeta {
   toolUseId?: string
 }
 
+export interface SubagentMetaInfo {
+  toolUseId: string
+  name: string
+  description: string
+}
+
+// Versão LEVE de readSubagentInfos: lê SÓ os agent-*.meta.json (~100B cada), sem
+// parsear os .jsonl. Pro session-activity derivar o estado dos subagentes a cada
+// broadcast sem custo — o estado vem do tail do transcript principal, não dos
+// turnos. Degrada pra lista vazia quando a pasta não existe.
+export function readSubagentMetas(dir: string, sessionId: string): SubagentMetaInfo[] {
+  const out: SubagentMetaInfo[] = []
+  const subDir = join(dir, sessionId, 'subagents')
+  if (!existsSync(subDir)) return out
+
+  let files: string[]
+  try {
+    files = readdirSync(subDir).filter((f) => f.endsWith('.meta.json'))
+  } catch {
+    return out
+  }
+
+  for (const metaFile of files) {
+    let meta: SubagentMeta
+    try {
+      meta = JSON.parse(readFileSync(join(subDir, metaFile), 'utf8')) as SubagentMeta
+    } catch {
+      continue // meta ilegível/malformada — pula este subagente.
+    }
+    if (!meta.toolUseId) continue
+    out.push({
+      toolUseId: meta.toolUseId,
+      name: meta.agentType ?? 'subagente',
+      description: meta.description ?? '',
+    })
+  }
+  return out
+}
+
 // Lê os subagentes de uma sessão e indexa por toolUseId, pro parser do chat trocar
 // o tool_use genérico pelo card de subagente. Cada subagente são dois arquivos
 // irmãos na pasta subagents/: agent-<hash>.meta.json (associação + nome) e

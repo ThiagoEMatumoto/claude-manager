@@ -6,7 +6,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
-import { sessionsApi } from '@/lib/ipc'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { gpuApi, sessionsApi } from '@/lib/ipc'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
 import { useAppStore, type PaneMode } from '@/store/appStore'
@@ -23,10 +24,23 @@ import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { TERMINAL_FONT_FAMILY } from '@/lib/terminal-font'
 import { useFilesStore } from '@/lib/files-store'
 import { xtermTheme } from '@/lib/themes'
 import { getCurrentThemeTokens, onThemeChange } from '@/app/useTheme'
-import type { PermissionMode, Session, SessionActivity } from '../../../shared/types/ipc'
+import type { GpuStatus, PermissionMode, Session, SessionActivity } from '../../../shared/types/ipc'
+
+// Cache módulo-level: o status de GPU é imutável durante o processo (decidido no
+// boot do main), então 1 IPC atende todos os panes/remounts.
+let gpuStatusPromise: Promise<GpuStatus> | null = null
+function getGpuStatus(): Promise<GpuStatus> {
+  gpuStatusPromise ??= gpuApi.status()
+  return gpuStatusPromise
+}
+
+// Espera máxima pela woff2 no gate de open do Terminal — vencido o timeout, abre
+// com a fallback e o safety net (document.fonts.ready) re-mede quando ela chegar.
+const FONT_LOAD_TIMEOUT_MS = 800
 
 interface Props {
   session: Session
@@ -403,9 +417,15 @@ export function Terminal({
     const term = new Xterm({
       // Tema derivado dos tokens do app (Ember reproduz o antigo hardcoded).
       theme: xtermTheme(getCurrentThemeTokens()),
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", monospace',
+      fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: useTerminalPrefsStore.getState().fontSize,
       scrollback: useTerminalPrefsStore.getState().scrollback,
+      // Nitidez: sem espaçamento fracionário entre células, glifos de box-drawing
+      // desenhados pelo próprio xterm (bordas de TUI contínuas) e re-escala de
+      // glifos que estouram a célula (powerline/nerd font não recortam).
+      letterSpacing: 0,
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
       cursorBlink: true,
       allowProposedApi: true,
       // O xterm é INTERATIVO: digitar aqui flui via onData→write (abaixo) direto pro PTY.
@@ -457,11 +477,59 @@ export function Terminal({
       },
     })
 
-    term.open(host)
-    fit.fit()
-
     xtermRef.current = term
     fitRef.current = fit
+
+    let webgl: WebglAddon | null = null
+    // Gate do open: espera a JetBrains Mono (bounded) pra medição de célula e o
+    // atlas de glifos nascerem com a fonte certa — sem isso o grid mede a
+    // fallback e o texto troca/borra depois. `cancelled` cobre o double-mount do
+    // StrictMode (o cleanup roda antes da promise resolver). Escrever no term
+    // antes do open é seguro: o xterm bufferiza e renderiza ao abrir.
+    let cancelled = false
+    const fontPx = useTerminalPrefsStore.getState().fontSize
+    void Promise.race([
+      Promise.all([
+        document.fonts.load(`${fontPx}px "JetBrains Mono"`),
+        document.fonts.load(`bold ${fontPx}px "JetBrains Mono"`),
+      ]),
+      new Promise((resolve) => setTimeout(resolve, FONT_LOAD_TIMEOUT_MS)),
+    ]).then(() => {
+      if (cancelled) return
+      term.open(host)
+      fit.fit()
+      resize(term.cols, term.rows)
+      observer.observe(host)
+
+      // Renderer WebGL: glifos nítidos e scroll mais fluido que o DOM renderer.
+      // Carrega DEPOIS do open (o addon exige o elemento montado). Só tenta com a
+      // GPU ligada; qualquer falha (driver, context loss) volta pro DOM renderer
+      // sem quebrar o terminal.
+      void getGpuStatus().then((status) => {
+        if (cancelled || status.hwAccelDisabled) return
+        try {
+          const addon = new WebglAddon()
+          addon.onContextLoss(() => {
+            // Perda de contexto (driver reset/GPU suspensa): dispose devolve ao DOM.
+            addon.dispose()
+            webgl = null
+          })
+          term.loadAddon(addon)
+          webgl = addon
+        } catch (err) {
+          console.warn('[terminal] WebGL indisponível, seguindo com DOM renderer:', err)
+        }
+      })
+
+      // Safety net: se o timeout venceu a corrida (fonte ainda baixando), refaz
+      // atlas e medidas quando todas as fonts do documento assentarem.
+      void document.fonts.ready.then(() => {
+        if (cancelled) return
+        term.clearTextureAtlas()
+        fit.fit()
+        resize(term.cols, term.rows)
+      })
+    })
 
     // O processo já foi spawnado no clique, então pode já ter emitido bytes.
     // Para o replay: acumulamos a saída live num buffer (`liveTotal`) e buscamos
@@ -554,20 +622,19 @@ export function Terminal({
       return true
     })
 
-    resize(term.cols, term.rows)
-
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
       setMenu({ x: e.clientX, y: e.clientY, hasSelection: term.hasSelection() })
     }
     host.addEventListener('contextmenu', onContextMenu)
 
+    // Criado aqui, mas só observa o host DEPOIS do open (no gate acima) — fit
+    // num terminal ainda não aberto não tem o que medir.
     const observer = new ResizeObserver(() => {
       if (!xtermRef.current || !fitRef.current) return
       fitRef.current.fit()
       resize(xtermRef.current.cols, xtermRef.current.rows)
     })
-    observer.observe(host)
 
     // Tema ao vivo: quando o tema do app muda (Configurações), re-deriva o
     // tema do xterm sem recriar o terminal.
@@ -578,11 +645,14 @@ export function Terminal({
     // O cleanup NÃO mata a sessão — só desfaz o xterm e os listeners. A sessão
     // morre quando a pane é fechada (App.closePane → sessions:kill) ou via botão kill.
     return () => {
+      cancelled = true
       host.removeEventListener('contextmenu', onContextMenu)
       observer.disconnect()
       offTheme()
       linkProvider.dispose()
       setDataHandler(null)
+      webgl?.dispose()
+      webgl = null
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
@@ -615,6 +685,36 @@ export function Terminal({
     if (!term) return
     term.options.scrollback = scrollback
   }, [scrollback])
+
+  // Mudança de devicePixelRatio (janela movida entre monitores com escalas
+  // diferentes, zoom do SO): refaz o atlas de glifos e re-mede — sem isso o
+  // texto fica borrado no monitor novo. matchMedia de resolução dispara UMA vez
+  // por mudança, então o listener é re-registrado pro dpr novo a cada disparo.
+  useEffect(() => {
+    let disposed = false
+    let mql: MediaQueryList
+    let onChange: () => void
+    const subscribe = () => {
+      mql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+      onChange = () => {
+        if (disposed) return
+        const term = xtermRef.current
+        const fit = fitRef.current
+        if (term && fit) {
+          term.clearTextureAtlas()
+          fit.fit()
+          resize(term.cols, term.rows)
+        }
+        subscribe()
+      }
+      mql.addEventListener('change', onChange, { once: true })
+    }
+    subscribe()
+    return () => {
+      disposed = true
+      mql.removeEventListener('change', onChange)
+    }
+  }, [resize])
 
   return (
     <div className="flex h-full flex-col">

@@ -17,7 +17,7 @@ import {
   type ShortcutContext,
 } from '@/lib/keybindings'
 import { useKeybindingsStore } from '@/lib/keybindings-store'
-import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
+import { TerminalSection } from './TerminalSection'
 import { useProjectsPrefsStore } from '@/lib/projects-prefs-store'
 import { useSessionPrefsStore, type KeyboardSendMode } from '@/lib/session-prefs-store'
 import { MODEL_OPTIONS, EFFORT_OPTIONS, ADVISOR_OPTIONS } from '@/features/sessions/spawn-options'
@@ -109,10 +109,6 @@ function GeneralTab({ open }: { open: boolean }) {
   const [scratchDir, setScratchDir] = useState('')
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null)
   const [mcpCopied, setMcpCopied] = useState(false)
-  const scrollback = useTerminalPrefsStore((s) => s.scrollback)
-  const setScrollback = useTerminalPrefsStore((s) => s.setScrollback)
-  const visualLineNav = useTerminalPrefsStore((s) => s.visualLineNav)
-  const setVisualLineNav = useTerminalPrefsStore((s) => s.setVisualLineNav)
   const showHandoffsInline = useProjectsPrefsStore((s) => s.showHandoffsInline)
   const setShowHandoffsInline = useProjectsPrefsStore((s) => s.setShowHandoffsInline)
   const [autoCloneMissing, setAutoCloneMissing] = useState(true)
@@ -153,7 +149,6 @@ function GeneralTab({ open }: { open: boolean }) {
       .then((v) => setCalendarIcsUrl(v ?? ''))
     void mcpApi.status().then(setMcpStatus)
     setMcpCopied(false)
-    void useTerminalPrefsStore.getState().load()
     void useProjectsPrefsStore.getState().load()
   }, [open])
 
@@ -315,48 +310,7 @@ function GeneralTab({ open }: { open: boolean }) {
         />
       </div>
 
-      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
-        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
-          Terminal
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm text-[var(--color-text)]">Linhas de histórico (scrollback)</div>
-            <div className="text-xs text-[var(--color-text-dim)]">
-              Quantas linhas o terminal mantém roláveis (200–50000).
-            </div>
-          </div>
-          <input
-            type="number"
-            min={200}
-            max={50000}
-            step={500}
-            value={scrollback}
-            onChange={(e) => {
-              const n = Number(e.target.value)
-              if (Number.isFinite(n)) void setScrollback(n)
-            }}
-            className="w-24 shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-          />
-        </div>
-
-        <label className="mt-3 flex items-start justify-between gap-3 border-t border-[var(--color-border)] pt-3">
-          <div className="min-w-0">
-            <div className="text-sm text-[var(--color-text)]">Navegação por linha visual (↑/↓ no prompt)</div>
-            <div className="text-xs text-[var(--color-text-dim)]">
-              ↑/↓ movem o cursor pelas linhas do prompt em vez de ir pro histórico. Pode
-              interferir no histórico e em menus de seleção do claude. Para compor prompts
-              longos sem isso, use o editor de prompt (Ctrl+Shift+E).
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={visualLineNav}
-            onChange={(e) => void setVisualLineNav(e.target.checked)}
-            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
-          />
-        </label>
-      </div>
+      <TerminalSection open={open} />
 
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">

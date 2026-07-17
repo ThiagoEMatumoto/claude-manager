@@ -1,5 +1,31 @@
 @import "tailwindcss";
 
+/* Fonte mono bundlada do terminal — renderização idêntica em qualquer SO (o
+   fontFamily antigo listava fontes de macOS e caía em fallback ruim no Linux).
+   font-display: block — o Terminal gateia o open na fonte; nunca queremos medir
+   células com a fallback e trocar depois. Licença: OFL.txt ao lado das woff2. */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/JetBrainsMono-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+}
+
 @theme {
   --color-bg: #0b0b0f;
   --color-surface: #14141b;

@@ -19,6 +19,7 @@ import { SystemCard } from './SystemCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript } from './useChatTranscript'
+import { buildPlanKeys, buildQuestionKeys } from './respond-keys'
 import {
   countUserMessages,
   isAtBottom,
@@ -44,14 +45,20 @@ interface Props {
   // Alterna pro modo terminal. Usado pelo banner de espera genérica (ex.: prompt
   // de permissão y/n, TTY-only) pra levar o usuário ao único lugar que o renderiza.
   onToggleMode?: () => void
+  // Reproduz sequências de teclas no PTY vivo (mesmo write() do onForwardKey do
+  // composer). Vem do Terminal; ausente = cards ficam read-only.
+  onRespond?: (seqs: string[]) => void
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
 // Terminal); esta view só LÊ o transcript e adiciona ecos otimistas das mensagens
 // recém-enviadas até o disco alcançar.
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode, onRespond }, ref) {
   const { messages, loading, transcriptExists } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
+  // Eco otimista de um clique num card interativo: teclas já enviadas ao PTY, mas a
+  // resposta/decisão real ainda não chegou no JSONL. Bloqueia novos cliques.
+  const [sent, setSent] = useState<{ id: string; label?: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Só auto-scrollamos se o usuário já estava colado no fim (não roubamos a
   // rolagem de quem subiu pra reler).
@@ -120,6 +127,33 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   // y/n / menu TTY): status 'waiting' sem um card de pergunta/plano conhecido.
   const waitInTerminal = showTerminalWaitBanner({ status, pending: pendingPrompt })
 
+  // Reconciliação do clique otimista: a resposta/decisão REAL do JSONL prevalece.
+  // Limpa quando ela chega (via forId) ou quando o momento pendente mudou (ex.:
+  // prompt dispensado pelo terminal) — senão o sent velho bloquearia cliques novos.
+  useEffect(() => {
+    if (!sent) return
+    const resolved = interactive.answers.has(sent.id) || interactive.plans.has(sent.id)
+    if (resolved || pendingPrompt?.id !== sent.id) setSent(null)
+  }, [sent, interactive, pendingPrompt])
+
+  // Guard duplo: os cards só recebem onRespond/onDecide quando são o momento
+  // pendente com a sessão 'waiting', E o handler re-checa tudo na hora do clique —
+  // nunca digitar no PTY fora de hora.
+  const canRespond = (id: string): boolean =>
+    onRespond != null && status === 'waiting' && pendingPrompt?.id === id && sent == null
+
+  function respondQuestion(id: string, optionIndex: number, label: string) {
+    if (!canRespond(id)) return
+    setSent({ id, label })
+    onRespond?.(buildQuestionKeys(optionIndex))
+  }
+
+  function respondPlan(id: string, d: 'approve' | 'reject') {
+    if (!canRespond(id)) return
+    setSent({ id })
+    onRespond?.(buildPlanKeys(d))
+  }
+
   const viewState = resolveChatViewState({
     loading,
     transcriptExists,
@@ -182,9 +216,29 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             case 'tool_result':
               return <ToolResultCard key={i} content={m.content} isError={m.isError} />
             case 'ask_user_question':
-              return <QuestionCard key={i} questions={m.questions} answers={interactive.answers.get(m.id)} />
+              return (
+                <QuestionCard
+                  key={i}
+                  questions={m.questions}
+                  answers={interactive.answers.get(m.id)}
+                  onRespond={
+                    canRespond(m.id)
+                      ? (oi, label) => respondQuestion(m.id, oi, label)
+                      : undefined
+                  }
+                  sentLabel={sent?.id === m.id ? sent.label : undefined}
+                />
+              )
             case 'exit_plan_mode':
-              return <PlanCard key={i} plan={m.plan} decision={interactive.plans.get(m.id)} />
+              return (
+                <PlanCard
+                  key={i}
+                  plan={m.plan}
+                  decision={interactive.plans.get(m.id)}
+                  onDecide={canRespond(m.id) ? (d) => respondPlan(m.id, d) : undefined}
+                  sent={sent?.id === m.id}
+                />
+              )
             // Resposta/decisão/status são fundidos no card acima (por forId) — não
             // renderizam sozinhos.
             case 'ask_user_question_answered':
@@ -197,9 +251,11 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-accent)]/50 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
             <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
             <Icon as={Clock} size={14} className="shrink-0 text-[var(--color-accent)]" />
-            {pendingPrompt.kind === 'plan'
-              ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
-              : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
+            {sent
+              ? 'Resposta enviada — aguardando confirmação…'
+              : pendingPrompt.kind === 'plan'
+                ? 'Claude está aguardando sua aprovação do plano — responda no compositor ou no terminal.'
+                : 'Claude está aguardando sua resposta — responda no compositor ou no terminal.'}
           </div>
         )}
         {/* Espera genérica (TTY-only): o chat não tem card pra mostrar. Direciona ao

@@ -18,6 +18,7 @@ import { ComposerToolbar } from './ComposerToolbar'
 import { SessionHeader } from './SessionHeader'
 import { AgentHud } from './AgentHud'
 import { ChatView, type ChatViewHandle } from './chat/ChatView'
+import { playKeys } from './chat/respond-keys'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
@@ -811,6 +812,9 @@ export function Terminal({
             sessionId={session.id}
             status={activity?.status}
             onToggleMode={onToggleMode}
+            // Cliques nos cards interativos → teclas no PTY vivo, mesmo write()
+            // do onForwardKey do composer (ver respond-keys).
+            onRespond={(seqs) => void playKeys(seqs, write)}
           />
         )}
 

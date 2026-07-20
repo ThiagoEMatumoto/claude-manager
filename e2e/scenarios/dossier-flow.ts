@@ -4,6 +4,13 @@ import { waitReady } from '../driver/nav'
 
 // Exercita a feature Research Dossier de ponta a ponta (pipeline stub):
 // nav → criar dossiê → iniciar → Gate A → Gate B → síntese + proveniência.
+//
+// Sem TAVILY_API_KEY a busca web cai no StubSourceProvider (esperado). E com
+// CM_E2E_STUB_PIPELINE=1 as etapas de extração/verificação/síntese usam stubs
+// determinísticos em vez de `claude -p` real — o E2E fica rápido e reprodutível
+// (a lógica de produto de roteamento/agrupamento continua real).
+process.env.CM_E2E_STUB_PIPELINE = '1'
+
 const { app, page } = await launchApp()
 const { stop } = captureLogs(app, page)
 
@@ -36,7 +43,7 @@ try {
   await screenshot(page, 'dossier-05-gate-a')
   await gateA.click()
 
-  // Gate A → busca Tavily real + fetch Jina de várias URLs: pode levar dezenas de s.
+  // Gate A → busca + extração (stub determinístico): rápido, mas mantém folga.
   const gateB = page.getByRole('button', { name: /Aprovar Gate B/ })
   await gateB.waitFor({ timeout: 90_000 })
   await screenshot(page, 'dossier-06-gate-b')

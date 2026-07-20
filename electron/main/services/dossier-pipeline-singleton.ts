@@ -1,12 +1,17 @@
 import * as store from './dossier-store'
 import { DossierPipeline } from './dossier-pipeline'
-import { StubSourceProvider } from './dossier-pipeline-stubs'
+import {
+  StubSourceProvider,
+  StubExtractor,
+  StubVerifier,
+  StubSynthesizer,
+} from './dossier-pipeline-stubs'
 import { ClaudeExtractor } from './dossier/claude-extractor'
 import { ClaudeSynthesizer } from './dossier/claude-synthesizer'
 import { ClaudeVerifier } from './dossier/claude-verifier'
 import { TavilySourceProvider } from './ingest/tavily-source-provider'
 import { getEnvVar } from './custom-env'
-import type { SourceProvider } from './dossier-pipeline-types'
+import type { Extractor, SourceProvider, Synthesizer, Verifier } from './dossier-pipeline-types'
 
 // Instância única do motor do funil no main. A BUSCA web é real (Tavily + Jina)
 // quando há TAVILY_API_KEY; senão cai no provedor stub (app segue funcional, só
@@ -28,13 +33,35 @@ function resolveSourceProvider(): SourceProvider {
   return new StubSourceProvider()
 }
 
+// Seam de E2E: com CM_E2E_STUB_PIPELINE=1, as etapas que chamam `claude -p`
+// (extração/verificação/síntese) são substituídas por stubs determinísticos.
+// Sem isto, o fluxo E2E invocaria o CLI real — lento e não-determinístico.
+// A lógica de produto (roteamento por trust tier, agrupamento) continua real.
+function resolveStageServices(): {
+  extractor: Extractor
+  verifier: Verifier
+  synthesizer: Synthesizer
+} {
+  if (process.env.CM_E2E_STUB_PIPELINE === '1') {
+    console.warn('[dossier] CM_E2E_STUB_PIPELINE=1 — etapas claude -p substituídas por stubs')
+    return {
+      extractor: new StubExtractor(),
+      verifier: new StubVerifier(),
+      synthesizer: new StubSynthesizer(),
+    }
+  }
+  return {
+    extractor: new ClaudeExtractor(),
+    verifier: new ClaudeVerifier(),
+    synthesizer: new ClaudeSynthesizer(),
+  }
+}
+
 export function getDossierPipeline(): DossierPipeline {
   if (!pipeline) {
     pipeline = new DossierPipeline(store, {
       sourceProvider: resolveSourceProvider(),
-      extractor: new ClaudeExtractor(),
-      verifier: new ClaudeVerifier(),
-      synthesizer: new ClaudeSynthesizer(),
+      ...resolveStageServices(),
     })
   }
   return pipeline

@@ -2,12 +2,14 @@ import { create } from 'zustand'
 import { prefsApi } from '@/lib/ipc'
 import type { AdvisorModel, EffortLevel, PermissionMode } from '../../shared/types/ipc'
 import { SPAWNABLE_MODEL_ALIASES, type ModelAlias } from '../../shared/models'
+import { setDefaultPaneModeFallback, type PaneMode } from '@/store/appStore'
 
 const DEFAULT_MODEL_KEY = 'session.defaultModel'
 const DEFAULT_EFFORT_KEY = 'session.defaultEffort'
 const DEFAULT_PERMISSION_KEY = 'session.defaultPermission'
 const DEFAULT_ADVISOR_KEY = 'session.defaultAdvisor'
 const KEYBOARD_MODE_KEY = 'session.keyboardMode'
+const DEFAULT_PANE_MODE_KEY = 'session.defaultPaneMode'
 
 // Preferência de teclado do composer (consumida pela Fase 2). 'enter-sends' =
 // Enter envia / Shift+Enter quebra; 'enter-newline' inverte (Enter quebra /
@@ -27,6 +29,17 @@ const PERMISSION_WHITELIST = new Set<PermissionMode>([
   'dontAsk',
 ])
 const ADVISOR_WHITELIST = new Set(['opus', 'sonnet', 'fable'])
+const PANE_MODE_WHITELIST = new Set<PaneMode>(['terminal', 'chat'])
+
+// Como uma sessão nova abre o painel. 'terminal' preserva o comportamento
+// histórico (readPaneMode devolvia 'terminal' fixo).
+export const DEFAULT_PANE_MODE: PaneMode = 'terminal'
+
+function sanitizePaneMode(raw: unknown): PaneMode {
+  return typeof raw === 'string' && PANE_MODE_WHITELIST.has(raw as PaneMode)
+    ? (raw as PaneMode)
+    : DEFAULT_PANE_MODE
+}
 
 // '' = sem default (spawn usa o default do claude, sem flag).
 type ModelDefault = '' | ModelAlias
@@ -42,6 +55,7 @@ interface SessionPrefsState {
   defaultPermission: PermissionMode
   defaultAdvisor: AdvisorDefault
   keyboardMode: KeyboardSendMode
+  defaultPaneMode: PaneMode
   loaded: boolean
   load: () => Promise<void>
   setDefaultModel: (m: ModelDefault) => Promise<void>
@@ -49,6 +63,7 @@ interface SessionPrefsState {
   setDefaultPermission: (p: PermissionMode) => Promise<void>
   setDefaultAdvisor: (a: AdvisorDefault) => Promise<void>
   setKeyboardMode: (k: KeyboardSendMode) => Promise<void>
+  setDefaultPaneMode: (m: PaneMode) => Promise<void>
 }
 
 // Defaults de criação de sessão (modelo + effort) e preferência de teclado do
@@ -60,16 +75,18 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
   defaultPermission: DEFAULT_PERMISSION,
   defaultAdvisor: '',
   keyboardMode: DEFAULT_KEYBOARD_MODE,
+  defaultPaneMode: DEFAULT_PANE_MODE,
   loaded: false,
 
   load: async () => {
     if (get().loaded) return
-    const [model, effort, permission, advisor, keyboard] = await Promise.all([
+    const [model, effort, permission, advisor, keyboard, paneMode] = await Promise.all([
       prefsApi.get<string>(DEFAULT_MODEL_KEY),
       prefsApi.get<string>(DEFAULT_EFFORT_KEY),
       prefsApi.get<string>(DEFAULT_PERMISSION_KEY),
       prefsApi.get<string>(DEFAULT_ADVISOR_KEY),
       prefsApi.get<string>(KEYBOARD_MODE_KEY),
+      prefsApi.get<string>(DEFAULT_PANE_MODE_KEY),
     ])
     set({
       defaultModel: model && MODEL_WHITELIST.has(model) ? (model as ModelDefault) : '',
@@ -80,6 +97,7 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
           : DEFAULT_PERMISSION,
       defaultAdvisor: advisor && ADVISOR_WHITELIST.has(advisor) ? (advisor as AdvisorDefault) : '',
       keyboardMode: keyboard === 'enter-newline' ? 'enter-newline' : DEFAULT_KEYBOARD_MODE,
+      defaultPaneMode: sanitizePaneMode(paneMode),
       loaded: true,
     })
   },
@@ -108,6 +126,13 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
     set({ keyboardMode: k })
     await prefsApi.set(KEYBOARD_MODE_KEY, k)
   },
+
+  setDefaultPaneMode: async (m) => {
+    set({ defaultPaneMode: m })
+    // Espelha no appStore pra valer já na próxima sessão, sem esperar reboot.
+    setDefaultPaneModeFallback(m)
+    await prefsApi.set(DEFAULT_PANE_MODE_KEY, m)
+  },
 }))
 
 // ---- Defaults por repo (override dos defaults globais acima) ----
@@ -119,6 +144,7 @@ export interface RepoSessionDefaults {
   effort: EffortDefault
   permission: PermissionMode
   advisor: AdvisorDefault
+  paneMode: PaneMode
 }
 
 const repoDefaultsKey = (repoId: string) => `session.defaults.${repoId}`
@@ -145,6 +171,8 @@ export function sanitizeRepoDefaults(raw: unknown): RepoSessionDefaults | null {
       typeof r.advisor === 'string' && ADVISOR_WHITELIST.has(r.advisor)
         ? (r.advisor as AdvisorDefault)
         : '',
+    // Prefs gravadas antes desta pref não têm o campo: caem no default.
+    paneMode: sanitizePaneMode(r.paneMode),
   }
 }
 

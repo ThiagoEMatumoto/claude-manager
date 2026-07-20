@@ -31,7 +31,8 @@ import { SessionSwitcher } from '@/features/session-switcher/SessionSwitcher'
 import { NewSessionFlow } from '@/features/sessions/NewSessionFlow'
 import { UpdateToast } from '@/features/updates/UpdateToast'
 import { NotificationToast } from '@/features/notifications/NotificationToast'
-import { useAppStore, type ActivePane } from '@/store/appStore'
+import { useAppStore, setDefaultPaneModeFallback, type ActivePane } from '@/store/appStore'
+import { useSessionPrefsStore } from '@/lib/session-prefs-store'
 import { meetingsApi, projectsApi, sessionsApi, workspaceApi } from '@/lib/ipc'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import { matchCombo, resolveCombo } from '@/lib/keybindings'
@@ -434,6 +435,12 @@ export function AppShell() {
   useEffect(() => {
     void loadKeybindings()
     void useTerminalPrefsStore.getState().load()
+    // Carga única das prefs de sessão. O modo padrão do painel precisa estar no
+    // cache síncrono do appStore antes do primeiro spawn/restore de pane.
+    void useSessionPrefsStore
+      .getState()
+      .load()
+      .then(() => setDefaultPaneModeFallback(useSessionPrefsStore.getState().defaultPaneMode))
   }, [loadKeybindings])
 
   useEffect(() => {

@@ -21,6 +21,7 @@ import { ChatView, type ChatViewHandle } from './chat/ChatView'
 import { playKeys } from './chat/respond-keys'
 import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
+import { MODEL_LABELS } from '../../../shared/models'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
 import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
@@ -334,8 +335,15 @@ export function Terminal({
   // Injeção sanitizada: os valores vêm EXCLUSIVAMENTE das whitelists literais
   // do ModelPill — nunca texto livre. \x15 (Ctrl+U) limpa a linha do prompt
   // antes, pra não concatenar com algo já digitado (mesmo padrão do /rename).
+  // Ponto único de injeção de /model (troca imediata e flush da fila de
+  // pendências abaixo passam por aqui) — o toast dispara pros dois casos.
   function injectModel(alias: ModelAlias) {
-    if (MODEL_ALIASES.includes(alias)) write('\x15/model ' + alias + '\r')
+    if (!MODEL_ALIASES.includes(alias)) return
+    write('\x15/model ' + alias + '\r')
+    showToast({
+      title: `Trocando para ${MODEL_LABELS[alias]}`,
+      body: 'A troca de modelo pode disparar um /compact automático da conversa.',
+    })
   }
   function injectEffort(level: EffortLevel) {
     if (EFFORT_LEVELS.includes(level)) write('\x15/effort ' + level + '\r')

@@ -12,6 +12,7 @@ import {
   useSessionPrefsStore,
   type RepoSessionDefaults,
 } from '@/lib/session-prefs-store'
+import { setNextPaneMode, type PaneMode } from '@/store/appStore'
 import { PERMISSION_OPTIONS } from './permission-modes'
 import { MODEL_OPTIONS, EFFORT_OPTIONS, ADVISOR_OPTIONS } from './spawn-options'
 import { WORK_MODE_PRESETS } from './work-mode-presets'
@@ -22,6 +23,11 @@ import type {
   PermissionMode,
   Repo,
 } from '../../../shared/types/ipc'
+
+const PANE_MODE_OPTIONS = [
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'chat', label: 'Chat' },
+] as const satisfies readonly { value: PaneMode; label: string }[]
 
 interface Props {
   open: boolean
@@ -55,6 +61,8 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   const [permission, setPermission] = useState<PermissionMode>('default')
   // Advisor tool inicial. '' = desligado (não passa --advisor).
   const [advisorModel, setAdvisorModel] = useState<'' | AdvisorModel>('')
+  // Display inicial do painel da sessão (terminal cru ou chat renderizado).
+  const [paneMode, setPaneMode] = useState<PaneMode>('terminal')
   // Slash command a injetar no boot — só preenchido por um preset (ex. Ultracode).
   const [initialCommand, setInitialCommand] = useState('')
   // Só pra destacar o botão do preset escolhido; ajustes manuais depois não o desmarcam.
@@ -73,6 +81,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     setEffort(d.effort)
     setPermission(d.permission)
     setAdvisorModel(d.advisor)
+    setPaneMode(d.paneMode)
   }
 
   // Aplica os overrides do preset aos controles — o usuário ainda pode ajustar
@@ -85,7 +94,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
     const preset = WORK_MODE_PRESETS.find((p) => p.id === id)
     if (!preset) return
     if (id === 'default') {
-      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
+      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor, defaultPaneMode } =
         useSessionPrefsStore.getState()
       applyDefaults(
         effectiveDefaults ?? {
@@ -93,6 +102,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
           effort: defaultEffort,
           permission: defaultPermission,
           advisor: defaultAdvisor,
+          paneMode: defaultPaneMode,
         },
       )
       setInitialCommand('')
@@ -120,13 +130,14 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
       useSessionPrefsStore.getState().load(),
       loadRepoSessionDefaults(repo.id),
     ]).then(([, repoDefaults]) => {
-      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
+      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor, defaultPaneMode } =
         useSessionPrefsStore.getState()
       const effective = repoDefaults ?? {
         model: defaultModel,
         effort: defaultEffort,
         permission: defaultPermission,
         advisor: defaultAdvisor,
+        paneMode: defaultPaneMode,
       }
       setEffectiveDefaults(effective)
       setHasRepoDefaults(repoDefaults !== null)
@@ -142,13 +153,14 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
   function clearRepoDefaults() {
     void clearRepoSessionDefaults(repo.id).then(() => {
       setHasRepoDefaults(false)
-      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor } =
+      const { defaultModel, defaultEffort, defaultPermission, defaultAdvisor, defaultPaneMode } =
         useSessionPrefsStore.getState()
       const globals: RepoSessionDefaults = {
         model: defaultModel,
         effort: defaultEffort,
         permission: defaultPermission,
         advisor: defaultAdvisor,
+        paneMode: defaultPaneMode,
       }
       setEffectiveDefaults(globals)
       applyDefaults(globals)
@@ -182,8 +194,12 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
         effort,
         permission,
         advisor: advisorModel,
+        paneMode,
       })
     }
+    // O diálogo não conhece o paneId (quem spawna é o caller); o appStore consome
+    // esta escolha no próximo openSession.
+    setNextPaneMode(paneMode)
     onConfirm(
       name.trim() || undefined,
       featureId,
@@ -310,6 +326,26 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
               </div>
             )}
           </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-[var(--color-text-dim)]">Abrir em</label>
+            <div className="inline-flex overflow-hidden rounded-md border border-[var(--color-border)]">
+              {PANE_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setPaneMode(opt.value)}
+                  className={`px-3 py-1.5 text-xs transition ${
+                    paneMode === opt.value
+                      ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                      : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div>
@@ -346,7 +382,7 @@ export function SpawnSessionDialog({ open, onClose, repo, onConfirm }: Props) {
               onChange={(e) => setSaveAsRepoDefault(e.target.checked)}
               className="size-3.5 accent-[var(--color-accent)]"
             />
-            Salvar como padrão deste repo (modelo/esforço/permissão/advisor)
+            Salvar como padrão deste repo (modelo/esforço/permissão/advisor/painel)
           </label>
           {hasRepoDefaults && (
             <button

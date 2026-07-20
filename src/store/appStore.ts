@@ -65,6 +65,29 @@ export interface ActivePane {
 // DB — o modo é preferência de visualização, não estado de sessão.
 const PANE_MODE_KEY = 'cm:pane-modes'
 
+// Espelho síncrono do default global (`session.defaultPaneMode`, em app_prefs).
+// readPaneMode roda em caminhos síncronos (criação de pane), mas a pref vem de
+// SQLite via IPC — o AppShell carrega no boot e empurra o valor pra cá.
+let defaultPaneMode: PaneMode = 'terminal'
+
+export function setDefaultPaneModeFallback(mode: PaneMode): void {
+  defaultPaneMode = mode
+}
+
+// Escolha pontual do SpawnSessionDialog ("Abrir em"), consumida pelo próximo
+// openSession. One-shot: o diálogo não conhece o paneId (quem spawna é o caller).
+let nextPaneMode: PaneMode | null = null
+
+export function setNextPaneMode(mode: PaneMode): void {
+  nextPaneMode = mode
+}
+
+function takeNextPaneMode(): PaneMode | null {
+  const m = nextPaneMode
+  nextPaneMode = null
+  return m
+}
+
 function readPaneModes(): Record<string, PaneMode> {
   try {
     const raw = localStorage.getItem(PANE_MODE_KEY)
@@ -75,8 +98,8 @@ function readPaneModes(): Record<string, PaneMode> {
 }
 
 function readPaneMode(ccSessionId: string | null): PaneMode {
-  if (!ccSessionId) return 'terminal'
-  return readPaneModes()[ccSessionId] ?? 'terminal'
+  if (!ccSessionId) return defaultPaneMode
+  return readPaneModes()[ccSessionId] ?? defaultPaneMode
 }
 
 function writePaneMode(ccSessionId: string | null, mode: PaneMode): void {
@@ -408,6 +431,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     permissionMode,
     advisorModel,
   ) => {
+    // Consome ANTES do await: se dois spawns dispararem em sequência, cada um
+    // leva (no máximo) a escolha do seu próprio diálogo.
+    const chosenMode = takeNextPaneMode()
     // O spawn do processo acontece aqui, no clique — não no mount do Terminal.
     // Assim StrictMode (mount duplo do effect) não dispara dois processos claude.
     const session = await sessionsApi.spawn({
@@ -431,10 +457,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           projectName,
           projectIcon,
           projectColor,
-          mode: readPaneMode(session.ccSessionId ?? null),
+          mode: chosenMode ?? readPaneMode(session.ccSessionId ?? null),
         },
       ],
     }))
+    if (chosenMode) writePaneMode(session.ccSessionId ?? null, chosenMode)
     schedulePersist(get().panes)
     void get().refreshLiveSessions()
     return session.id

@@ -466,6 +466,11 @@ const SESSION_PERMISSION_OPTIONS = [
   { value: 'dontAsk', label: 'Não perguntar' },
 ] as const
 
+const PANE_MODE_OPTIONS = [
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'chat', label: 'Chat' },
+] as const
+
 const KEYBOARD_OPTIONS: { value: KeyboardSendMode; label: string; hint: string }[] = [
   { value: 'enter-sends', label: 'Enter envia', hint: 'Shift+Enter quebra linha' },
   { value: 'enter-newline', label: 'Enter quebra linha', hint: 'Cmd/Ctrl+Enter envia' },
@@ -506,6 +511,8 @@ function SessionTab({ open }: { open: boolean }) {
   const defaultPermission = useSessionPrefsStore((s) => s.defaultPermission)
   const defaultAdvisor = useSessionPrefsStore((s) => s.defaultAdvisor)
   const keyboardMode = useSessionPrefsStore((s) => s.keyboardMode)
+  const defaultPaneMode = useSessionPrefsStore((s) => s.defaultPaneMode)
+  const setDefaultPaneMode = useSessionPrefsStore((s) => s.setDefaultPaneMode)
   const setDefaultModel = useSessionPrefsStore((s) => s.setDefaultModel)
   const setDefaultEffort = useSessionPrefsStore((s) => s.setDefaultEffort)
   const setDefaultPermission = useSessionPrefsStore((s) => s.setDefaultPermission)
@@ -577,6 +584,21 @@ function SessionTab({ open }: { open: boolean }) {
             options={ADVISOR_OPTIONS}
             value={defaultAdvisor}
             onChange={(v) => void setDefaultAdvisor(v)}
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Modo padrão do painel</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Como cada sessão abre. Sessões que você já alternou manualmente mantêm a
+              escolha.
+            </div>
+          </div>
+          <Segmented
+            options={PANE_MODE_OPTIONS}
+            value={defaultPaneMode}
+            onChange={(v) => void setDefaultPaneMode(v)}
           />
         </div>
       </div>

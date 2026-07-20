@@ -12,6 +12,7 @@ import { Clock, Loader, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { CommandCard, CommandOutputCard } from './CommandCard'
+import { ChatEmptyState } from './ChatEmptyState'
 import { CompactSummaryCard } from './CompactSummaryCard'
 import { ConfigCard } from './ConfigCard'
 import { HistorySearchCard } from './HistorySearchCard'
@@ -591,23 +592,13 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
 
   if (viewState !== 'ready') {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-y-auto bg-[var(--color-bg)] p-6">
-        <div className="flex flex-col items-center gap-2 text-center text-sm text-[var(--color-text-dim)]">
-          {(viewState === 'loading' || viewState === 'waiting') && (
-            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
-          )}
-          {viewState === 'loading' && 'Carregando conversa…'}
-          {viewState === 'waiting' &&
-            'Aguardando transcript… a conversa aparece assim que o claude responder.'}
-          {viewState === 'empty' &&
-            'Sem mensagens ainda. Envie um prompt pelo compositor abaixo — a conversa aparece aqui assim que o claude responder.'}
-        </div>
+      <ChatEmptyState viewState={viewState}>
         {/* Prompt TTY-only pré-transcript (ex.: trust de diretório): o card
             precisa aparecer MESMO sem nenhuma mensagem — é o que destrava a
             sessão pra própria conversa nascer. */}
         {tuiCardNode && <div className="w-full max-w-3xl text-left">{tuiCardNode}</div>}
         {tuiPickerCardNode && <div className="w-full max-w-3xl text-left">{tuiPickerCardNode}</div>}
-      </div>
+      </ChatEmptyState>
     )
   }
 

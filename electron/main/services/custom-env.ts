@@ -38,6 +38,13 @@ export function mergeCustomEnv(
   return { ...base, ...custom }
 }
 
+// Leitura pontual de UMA var por código que roda dentro do main (não spawna
+// processo): a pref do usuário tem precedência, com fallback pro ambiente do
+// processo. Valor vazio conta como ausente.
+export function getEnvVar(key: string): string | undefined {
+  return readCustomEnv()[key] || process.env[key] || undefined
+}
+
 // Atalho usado nos spawns: base process.env + pref custom (lida agora).
 export function spawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return mergeCustomEnv(base, readCustomEnv())

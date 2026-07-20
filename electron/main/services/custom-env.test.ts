@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { sanitizeCustomEnv, mergeCustomEnv } from './custom-env'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { sanitizeCustomEnv, mergeCustomEnv, getEnvVar } from './custom-env'
+import { getPref } from './prefs-store'
+
+vi.mock('./prefs-store', () => ({ getPref: vi.fn() }))
+
+const getPrefMock = vi.mocked(getPref)
 
 describe('sanitizeCustomEnv', () => {
   it('mapa válido passa intacto', () => {
@@ -43,5 +48,39 @@ describe('mergeCustomEnv', () => {
     const merged = mergeCustomEnv(base, { BAR: 'x' })
     expect(merged).not.toBe(base)
     expect(base).toEqual({ FOO: 'base' })
+  })
+})
+
+describe('getEnvVar', () => {
+  beforeEach(() => {
+    getPrefMock.mockReset()
+    delete process.env.CM_TEST_KEY
+  })
+
+  afterEach(() => {
+    delete process.env.CM_TEST_KEY
+  })
+
+  it('pref tem precedência sobre process.env', () => {
+    getPrefMock.mockReturnValue({ CM_TEST_KEY: 'from-pref' })
+    process.env.CM_TEST_KEY = 'from-env'
+    expect(getEnvVar('CM_TEST_KEY')).toBe('from-pref')
+  })
+
+  it('cai para process.env quando a pref não tem a chave', () => {
+    getPrefMock.mockReturnValue({})
+    process.env.CM_TEST_KEY = 'from-env'
+    expect(getEnvVar('CM_TEST_KEY')).toBe('from-env')
+  })
+
+  it('valor vazio na pref não mascara o process.env', () => {
+    getPrefMock.mockReturnValue({ CM_TEST_KEY: '' })
+    process.env.CM_TEST_KEY = 'from-env'
+    expect(getEnvVar('CM_TEST_KEY')).toBe('from-env')
+  })
+
+  it('ausente nos dois → undefined', () => {
+    getPrefMock.mockReturnValue(null)
+    expect(getEnvVar('CM_TEST_KEY')).toBeUndefined()
   })
 })

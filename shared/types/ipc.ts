@@ -2166,6 +2166,8 @@ export interface Api {
     getRun(runId: string): Promise<DossierRun | null>
     listEvidence(runId: string): Promise<EvidenceRecord[]>
     listSources(runId: string): Promise<Source[]>
+    // false = sem TAVILY_API_KEY: a busca web cai no provedor stub e a UI avisa.
+    isWebSearchEnabled(): Promise<boolean>
     // Payload é a DossierRun atualizada; o renderer trata como sinal de recarga.
     onRunUpdated(handler: (payload: unknown) => void): () => void
     onUpdated(handler: (payload: unknown) => void): () => void

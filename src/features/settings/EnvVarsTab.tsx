@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2, Eye, EyeOff } from 'lucide-react'
 import { prefsApi } from '@/lib/ipc'
+import { KNOWN_ENV_VARS } from '@shared/known-env-vars'
 
 // Aba "Variáveis de ambiente": editor key=value das vars customizadas do usuário
 // (pref `custom_env_vars`), injetadas nos spawns de processos externos (sidecar
@@ -27,13 +28,17 @@ function toMap(rows: Row[]): Record<string, string> {
   return out
 }
 
+const KNOWN_KEYS = new Set(KNOWN_ENV_VARS.map((v) => v.envKey))
+
 export function EnvVarsTab({ open }: { open: boolean }) {
   const [rows, setRows] = useState<Row[]>([])
   const [revealed, setRevealed] = useState<Set<number>>(new Set())
+  const [revealedKnown, setRevealedKnown] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!open) return
     setRevealed(new Set())
+    setRevealedKnown(new Set())
     void prefsApi.get<Record<string, string>>(CUSTOM_ENV_VARS_KEY).then((map) => {
       setRows(toRows(map ?? {}))
     })
@@ -64,6 +69,23 @@ export function EnvVarsTab({ open }: { open: boolean }) {
     persist(rows.filter((_, i) => i !== index))
   }
 
+  // A integração escreve no MESMO mapa da lista livre: atualiza a linha da chave
+  // se ela já existe, senão anexa uma nova.
+  function setKnownValue(envKey: string, value: string) {
+    const index = rows.findIndex((r) => r.key.trim() === envKey)
+    if (index === -1) persist([...rows, { key: envKey, value }])
+    else persist(rows.map((r, i) => (i === index ? { ...r, value } : r)))
+  }
+
+  function toggleRevealKnown(envKey: string) {
+    setRevealedKnown((prev) => {
+      const next = new Set(prev)
+      if (next.has(envKey)) next.delete(envKey)
+      else next.add(envKey)
+      return next
+    })
+  }
+
   function toggleReveal(index: number) {
     setRevealed((prev) => {
       const next = new Set(prev)
@@ -73,8 +95,87 @@ export function EnvVarsTab({ open }: { open: boolean }) {
     })
   }
 
+  // As chaves de integração são editadas na seção própria — fora da lista livre,
+  // pra não aparecerem duas vezes. O índice original é preservado (revealed/remove).
+  const customRows = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !KNOWN_KEYS.has(row.key.trim()))
+
   return (
     <div className="space-y-4">
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Integrações
+        </div>
+        <p className="mb-3 text-xs text-[var(--color-text-dim)]">
+          Credenciais que o app sabe usar. Sem elas, a funcionalidade correspondente fica
+          desligada.
+        </p>
+
+        <div className="space-y-3">
+          {KNOWN_ENV_VARS.map((integration) => {
+            const value = rows.find((r) => r.key.trim() === integration.envKey)?.value ?? ''
+            const isRevealed = revealedKnown.has(integration.envKey)
+            const configured = value.trim().length > 0
+            return (
+              <div key={integration.envKey} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-[var(--color-text)]">
+                    {integration.label}
+                  </span>
+                  <span
+                    className="rounded-full border px-1.5 py-0.5 text-[10px]"
+                    style={{
+                      color: configured
+                        ? 'var(--color-success, #22c55e)'
+                        : 'var(--color-text-dim)',
+                      borderColor: configured
+                        ? 'var(--color-success, #22c55e)'
+                        : 'var(--color-border)',
+                    }}
+                  >
+                    {configured ? 'configurada' : 'não configurada'}
+                  </span>
+                  <span className="truncate text-[11px] text-[var(--color-text-dim)]">
+                    {integration.unlocks}
+                  </span>
+                  <a
+                    href={integration.docsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-auto shrink-0 text-[11px] text-[var(--color-accent)] hover:underline"
+                  >
+                    Obter chave
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-40 shrink-0 truncate font-mono text-xs text-[var(--color-text-dim)]">
+                    {integration.envKey}
+                  </span>
+                  <input
+                    type={isRevealed ? 'text' : 'password'}
+                    value={value}
+                    onChange={(e) => setKnownValue(integration.envKey, e.target.value)}
+                    placeholder="valor"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1 font-mono text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleRevealKnown(integration.envKey)}
+                    title={isRevealed ? 'Ocultar valor' : 'Mostrar valor'}
+                    className="shrink-0 rounded p-1 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
+                  >
+                    {isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
           Variáveis de ambiente
@@ -85,13 +186,13 @@ export function EnvVarsTab({ open }: { open: boolean }) {
           conter segredos — ficam mascarados até você revelar.
         </p>
 
-        {rows.length === 0 ? (
+        {customRows.length === 0 ? (
           <div className="py-4 text-center text-xs text-[var(--color-text-dim)]">
             Nenhuma variável definida.
           </div>
         ) : (
           <div className="space-y-2">
-            {rows.map((row, index) => {
+            {customRows.map(({ row, index }) => {
               const isRevealed = revealed.has(index)
               return (
                 <div key={index} className="flex items-center gap-2">

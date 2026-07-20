@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import * as store from '../services/dossier-store'
 import { broadcast } from '../services/notify'
-import { getDossierPipeline } from '../services/dossier-pipeline-singleton'
+import { getDossierPipeline, isWebSearchEnabled } from '../services/dossier-pipeline-singleton'
 import type {
   Dossier,
   DossierRun,
@@ -139,5 +139,9 @@ export function registerDossiersIpc(): void {
 
   ipcMain.handle('dossiers:listSources', (_e, runId: string): Source[] => {
     return store.listSources(runId)
+  })
+
+  ipcMain.handle('dossiers:isWebSearchEnabled', (): boolean => {
+    return isWebSearchEnabled()
   })
 }

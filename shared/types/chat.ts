@@ -41,8 +41,25 @@ export type ChatMessage =
     }
   // Linha type:'system' do transcript, CURADA: só subtypes úteis (compactação,
   // erro de API, info) viram um chip discreto colapsado. O ruído de alto volume
-  // (stop_hook_summary, turn_duration, …) é descartado no parser.
-  | { kind: 'system'; label: string; detail: string; level: 'info' | 'warning' | 'error' }
+  // (stop_hook_summary, turn_duration, …) é descartado no parser. trigger/
+  // preTokens/postTokens só vêm preenchidos no compact_boundary (compactMetadata
+  // do transcript); ausentes nos demais subtypes.
+  | {
+      kind: 'system'
+      label: string
+      detail: string
+      level: 'info' | 'warning' | 'error'
+      trigger?: string
+      preTokens?: number
+      postTokens?: number
+    }
+  // Resumo de compact gravado pela CLI como turno de usuário (isCompactSummary:
+  // true) — NUNCA o humano digitou isso. Card colapsado, não bolha de usuário.
+  | { kind: 'compact_summary'; text: string }
+  // Marcador sintético: message.model mudou entre duas linhas assistant
+  // consecutivas (troca de modelo mid-session). Emitido antes da mensagem
+  // assistant que já usa o novo modelo.
+  | { kind: 'model_change'; from: string; to: string }
   // Slash command do usuário (/goal, /model, …). A CLI grava como content string
   // com <command-name>/<command-args> (formato atual, type:'user') ou como linha
   // type:'system'/local_command (formato antigo) — ambos viram este kind. name SEM

@@ -515,6 +515,14 @@ describe('parseChatMessages — fail-safe user classification', () => {
     )
     expect(m).toEqual([{ kind: 'user', text: 'please fix the bug' }])
   })
+
+  it('turns isCompactSummary:true into compact_summary, never a user bubble', () => {
+    const summary = 'This session is being continued from a previous conversation…'
+    const m = parseChatMessages(
+      line({ type: 'user', isCompactSummary: true, message: { role: 'user', content: summary } }),
+    )
+    expect(m).toEqual([{ kind: 'compact_summary', text: summary }])
+  })
 })
 
 describe('stripAnsi', () => {
@@ -582,6 +590,43 @@ describe('parseChatMessages — assistant text grouping', () => {
       ].join('\n'),
     )
     expect(m).toHaveLength(2)
+  })
+})
+
+// Troca de modelo mid-session: message.model muda entre linhas assistant.
+// Marcador só entre ocorrências reais — 1ª ocorrência e <synthetic> não contam.
+describe('parseChatMessages — model change', () => {
+  const asstModel = (id: string, model: string, text: string) =>
+    JSON.stringify({
+      type: 'assistant',
+      message: { id, role: 'assistant', model, content: [{ type: 'text', text }] },
+    })
+
+  it('emits model_change when message.model differs from the previous assistant turn', () => {
+    const m = parseChatMessages(
+      [asstModel('m1', 'claude-fable-5', 'first'), asstModel('m2', 'claude-opus-4-8', 'second')].join('\n'),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['assistant', 'model_change', 'assistant'])
+    expect(m[1]).toEqual({ kind: 'model_change', from: 'claude-fable-5', to: 'claude-opus-4-8' })
+  })
+
+  it('emits no marker for the first occurrence or a repeated model', () => {
+    const m = parseChatMessages(
+      [asstModel('m1', 'claude-sonnet-5', 'a'), asstModel('m2', 'claude-sonnet-5', 'b')].join('\n'),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['assistant', 'assistant'])
+  })
+
+  it('ignores <synthetic> model values (no marker, no lastModel update)', () => {
+    const m = parseChatMessages(
+      [
+        asstModel('m1', 'claude-sonnet-5', 'a'),
+        asstModel('m2', '<synthetic>', 'b'),
+        asstModel('m3', 'claude-opus-4-8', 'c'),
+      ].join('\n'),
+    )
+    expect(m.map((x) => x.kind)).toEqual(['assistant', 'assistant', 'model_change', 'assistant'])
+    expect(m[2]).toEqual({ kind: 'model_change', from: 'claude-sonnet-5', to: 'claude-opus-4-8' })
   })
 })
 
@@ -686,6 +731,29 @@ describe('parseChatMessages — system context (curated)', () => {
       ].join('\n'),
     )
     expect(current).toEqual(old)
+  })
+
+  it('propagates compactMetadata (trigger/preTokens/postTokens) on compact_boundary', () => {
+    const m2 = parseChatMessages(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'compact_boundary',
+        level: 'info',
+        content: 'Conversation compacted',
+        compactMetadata: { trigger: 'auto', preTokens: 355910, postTokens: 19363 },
+      }),
+    )
+    expect(m2).toEqual([
+      {
+        kind: 'system',
+        label: 'Conversa compactada',
+        detail: 'Conversation compacted',
+        level: 'info',
+        trigger: 'auto',
+        preTokens: 355910,
+        postTokens: 19363,
+      },
+    ])
   })
 })
 

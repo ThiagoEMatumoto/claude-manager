@@ -48,8 +48,8 @@ export function sectionForRecord(record: SynthRecord): SynthSection {
   }
 }
 
-// Evidência já identificada e roteada. O id é posicional e local à síntese —
-// SynthRecord não carrega o id do EvidenceRecord.
+// Evidência roteada para a sua seção. O id citado é o do EvidenceRecord — é ele
+// que amarra a afirmação da síntese à proveniência guardada no banco.
 export interface IdentifiedRecord {
   id: string
   section: SynthSection
@@ -57,8 +57,8 @@ export interface IdentifiedRecord {
 }
 
 export function identifyRecords(records: readonly SynthRecord[]): IdentifiedRecord[] {
-  return records.map((record, i) => ({
-    id: `E${i + 1}`,
+  return records.map((record) => ({
+    id: record.id,
     section: sectionForRecord(record),
     record,
   }))
@@ -75,10 +75,10 @@ function formatRecord(item: IdentifiedRecord): string {
 
 const SCHEMA_BLOCK = `{
   "sections": {
-    "confirmed":    [{ "text": "string — afirmação em pt-BR", "evidence_ids": ["E1"] }],
-    "contested":    [{ "text": "string", "evidence_ids": ["E2", "E3"] }],
-    "singleSource": [{ "text": "string", "evidence_ids": ["E4"] }],
-    "marketSignal": [{ "text": "string", "evidence_ids": ["E5"] }],
+    "confirmed":    [{ "text": "string — afirmação em pt-BR", "evidence_ids": ["<id da entrada>"] }],
+    "contested":    [{ "text": "string", "evidence_ids": ["<id>", "<id>"] }],
+    "singleSource": [{ "text": "string", "evidence_ids": ["<id>"] }],
+    "marketSignal": [{ "text": "string", "evidence_ids": ["<id>"] }],
     "gaps":         [{ "text": "string — o que ficou sem resposta", "evidence_ids": [] }]
   }
 }`

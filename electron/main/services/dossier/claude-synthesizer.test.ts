@@ -5,18 +5,21 @@ import { ClaudeSynthesizer } from './claude-synthesizer'
 
 const RECORDS: SynthRecord[] = [
   {
+    id: 'ev-1',
     claim: 'O programa reduziu o abandono.',
     verbatimQuote: 'the dropout rate fell by 12%',
     state: 'primary_accepted',
     sourceClass: 'primary_official',
   },
   {
+    id: 'ev-2',
     claim: 'O efeito não se sustenta no longo prazo.',
     verbatimQuote: 'the effect faded after 18 months',
     state: 'contested',
     sourceClass: 'academic',
   },
   {
+    id: 'ev-3',
     claim: 'A solução do fornecedor resolve o problema.',
     verbatimQuote: 'our platform eliminates dropout',
     state: 'single_source',
@@ -32,10 +35,10 @@ describe('ClaudeSynthesizer', () => {
   it('chama claude -p em text-mode e renderiza as 5 seções com as citações', async () => {
     const modelJson = {
       sections: {
-        confirmed: [{ text: 'O programa reduziu o abandono.', evidence_ids: ['E1'] }],
-        contested: [{ text: 'O efeito de longo prazo é disputado.', evidence_ids: ['E2'] }],
+        confirmed: [{ text: 'O programa reduziu o abandono.', evidence_ids: ['ev-1'] }],
+        contested: [{ text: 'O efeito de longo prazo é disputado.', evidence_ids: ['ev-2'] }],
         singleSource: [],
-        marketSignal: [{ text: 'O fornecedor promete eliminar o abandono.', evidence_ids: ['E3'] }],
+        marketSignal: [{ text: 'O fornecedor promete eliminar o abandono.', evidence_ids: ['ev-3'] }],
         gaps: [{ text: 'Nenhuma evidência sobre custo por beneficiário.', evidence_ids: [] }],
       },
     }
@@ -55,15 +58,15 @@ describe('ClaudeSynthesizer', () => {
       'text',
     ])
 
-    expect(summary).toContain('## ✅ Confirmado\n- O programa reduziu o abandono. [E1]')
-    expect(summary).toContain('## ⚖️ Contestado\n- O efeito de longo prazo é disputado. [E2]')
+    expect(summary).toContain('## ✅ Confirmado\n- O programa reduziu o abandono. [ev-1]')
+    expect(summary).toContain('## ⚖️ Contestado\n- O efeito de longo prazo é disputado. [ev-2]')
     expect(summary).toContain('## • Fonte-única\n_nenhum_')
     expect(summary).toContain('## 📣 Sinal de mercado')
     expect(summary).toContain('## 🕳️ Lacunas\n- Nenhuma evidência sobre custo por beneficiário.')
 
     // o vendor_marketing é roteado (regra de produto) e citado no prompt
     const prompt = runClaude.mock.calls[0]?.[0]?.[1] ?? ''
-    expect(prompt).toContain('E3 [seção: 📣 Sinal de mercado]')
+    expect(prompt).toContain('ev-3 [seção: 📣 Sinal de mercado]')
     expect(prompt).toContain('O programa funciona?')
   })
 
@@ -71,8 +74,8 @@ describe('ClaudeSynthesizer', () => {
     const modelJson = {
       sections: {
         confirmed: [
-          { text: 'Válida', evidence_ids: ['E1', 'E99'] },
-          { text: 'Fabricada', evidence_ids: ['E42'] },
+          { text: 'Válida', evidence_ids: ['ev-1', 'ev-99'] },
+          { text: 'Fabricada', evidence_ids: ['ev-42'] },
         ],
         contested: [],
         singleSource: [],
@@ -84,14 +87,14 @@ describe('ClaudeSynthesizer', () => {
 
     const summary = await new ClaudeSynthesizer({ runClaude }).synthesize(RECORDS)
 
-    expect(summary).toContain('- Válida [E1]')
-    expect(summary).not.toContain('E99')
+    expect(summary).toContain('- Válida [ev-1]')
+    expect(summary).not.toContain('ev-99')
     expect(summary).not.toContain('Fabricada')
   })
 
   it('faz retry 1x com bloco "## Correção" quando o schema não bate', async () => {
     const good = {
-      sections: { confirmed: [{ text: 'ok', evidence_ids: ['E1'] }], contested: [], singleSource: [], marketSignal: [], gaps: [] },
+      sections: { confirmed: [{ text: 'ok', evidence_ids: ['ev-1'] }], contested: [], singleSource: [], marketSignal: [], gaps: [] },
     }
     const runClaude = vi
       .fn<(args: string[], opts?: { timeoutMs?: number }) => Promise<RunResult>>()
@@ -104,6 +107,6 @@ describe('ClaudeSynthesizer', () => {
     const retryPrompt = runClaude.mock.calls[1]?.[0]?.[1] ?? ''
     expect(retryPrompt).toContain('## Correção')
     expect(retryPrompt).toContain('schema inválido')
-    expect(summary).toContain('- ok [E1]')
+    expect(summary).toContain('- ok [ev-1]')
   })
 })

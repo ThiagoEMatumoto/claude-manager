@@ -48,13 +48,47 @@ export interface Extractor {
   extract(doc: FetchedDocument, sourceId: string): Promise<ExtractedClaim[]>
 }
 
+// Claim candidato à verificação. O lote inteiro vai junto porque corroboração e
+// contradição são relações ENTRE claims de fontes distintas — não dá pra julgar
+// um record isolado.
+export interface VerifyCandidate {
+  id: string
+  claim: string
+  verbatimQuote: string
+  sourceId: string
+  trustTier: TrustTier
+}
+
+export interface VerifyVerdict {
+  state: EvidenceState
+  // Ids de outros candidatos do MESMO lote (nunca da mesma fonte).
+  corroboratedBy: string[]
+  contradictedBy: string[]
+}
+
 export interface Verifier {
-  // Roteia o estado a partir da confiança da fonte e do nº de records corroborantes.
-  verify(claim: string, trustTier: TrustTier, corroborating: number): Promise<EvidenceState>
+  // Julga o lote de uma vez e devolve o veredito por id de candidato.
+  verify(candidates: readonly VerifyCandidate[]): Promise<Map<string, VerifyVerdict>>
+}
+
+// Roteamento por confiança da fonte + relações encontradas (regra de produto,
+// compartilhada pelos verifiers). Contradição vence: um claim disputado é
+// 'contested' mesmo vindo de fonte primária.
+export function routeEvidenceState(
+  trustTier: TrustTier,
+  corroboratedBy: readonly string[],
+  contradictedBy: readonly string[],
+): EvidenceState {
+  if (contradictedBy.length > 0) return 'contested'
+  if (trustTier === 'high') return 'primary_accepted'
+  if (corroboratedBy.length > 0) return 'corroborated'
+  return 'single_source'
 }
 
 // Registro mínimo que a síntese consome (independe do shape de persistência).
 export interface SynthRecord {
+  // Id do EvidenceRecord — é ele que a síntese cita (proveniência rastreável).
+  id: string
   claim: string
   verbatimQuote: string
   state: EvidenceState

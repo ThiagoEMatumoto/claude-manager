@@ -1,4 +1,4 @@
-import type { DossierRun, EvidenceRecord, Source } from '../../../shared/types/ipc'
+import type { DossierRun, Source } from '../../../shared/types/ipc'
 import { mapWithConcurrency } from './concurrency'
 import * as store from './dossier-store'
 import {
@@ -8,6 +8,7 @@ import {
   type PipelineCheckpoint,
   type PipelineStage,
   type SynthRecord,
+  type VerifyCandidate,
   trustTierForClass,
 } from './dossier-pipeline-types'
 
@@ -15,6 +16,8 @@ import {
 // fetch sob demanda em vez de baixar tudo.
 const DEFAULT_FETCH_TOP_K = 3
 const DEFAULT_CONCURRENCY = 6
+// Teto de claims por chamada de verificação — o lote inteiro entra num prompt só.
+const VERIFY_BATCH_SIZE = 40
 
 // Status que só são alcançados DEPOIS do Gate B humano. Um resume que encontra a
 // run num destes deve completar verify/synth; caso contrário, parar no Gate B.
@@ -207,18 +210,37 @@ export class DossierPipeline {
     this.commitStage(runId, 'extracting')
   }
 
+  // Verificação em LOTE: corroboração/contradição são relações entre claims de
+  // fontes distintas, então o verifier recebe o conjunto junto. Lotes maiores que
+  // VERIFY_BATCH_SIZE são fatiados na ordem de extração (claims de um mesmo doc
+  // ficam vizinhos, então a fatia preserva a diversidade de fontes) — claims em
+  // lotes diferentes não são comparados entre si.
   private async runVerify(runId: string): Promise<void> {
     this.storeApi.updateRun(runId, { status: 'verifying', stage: 'verifying' })
     const records = this.storeApi.listEvidence(runId)
     const sourcesById = this.indexSources(runId)
 
-    await mapWithConcurrency(records, this.concurrency, async (record) => {
+    const candidates: VerifyCandidate[] = records.map((record) => {
       const source = sourcesById.get(record.sourceId)
       if (!source) throw new Error(`evidence ${record.id} references missing source`)
-      const corroborating = this.countCorroborating(record, records, sourcesById)
-      const state = await this.verifier.verify(record.claim, source.trustTier, corroborating)
-      this.storeApi.updateEvidenceState(record.id, state)
+      return {
+        id: record.id,
+        claim: record.claim,
+        verbatimQuote: record.verbatimQuote,
+        sourceId: record.sourceId,
+        trustTier: source.trustTier,
+      }
     })
+
+    for (let i = 0; i < candidates.length; i += VERIFY_BATCH_SIZE) {
+      const batch = candidates.slice(i, i + VERIFY_BATCH_SIZE)
+      const verdicts = await this.verifier.verify(batch)
+      for (const candidate of batch) {
+        const verdict = verdicts.get(candidate.id)
+        if (!verdict) throw new Error(`verifier omitiu o veredito de ${candidate.id}`)
+        this.storeApi.updateEvidenceVerdict(candidate.id, verdict)
+      }
+    }
     this.commitStage(runId, 'verifying')
   }
 
@@ -231,6 +253,7 @@ export class DossierPipeline {
       const source = sourcesById.get(r.sourceId)
       if (!source) throw new Error(`evidence ${r.id} references missing source`)
       return {
+        id: r.id,
         claim: r.claim,
         verbatimQuote: r.verbatimQuote,
         state: r.state,
@@ -246,23 +269,6 @@ export class DossierPipeline {
   }
 
   // ---- helpers ----
-
-  // Conta records corroborantes: outros records de fonte NÃO-enviesada e de fonte
-  // distinta. >=1 sinaliza confirmação independente (regra de produto).
-  private countCorroborating(
-    record: EvidenceRecord,
-    all: readonly EvidenceRecord[],
-    sourcesById: Map<string, Source>,
-  ): number {
-    let count = 0
-    for (const other of all) {
-      if (other.id === record.id) continue
-      if (other.sourceId === record.sourceId) continue
-      const otherSource = sourcesById.get(other.sourceId)
-      if (otherSource && otherSource.trustTier !== 'biased') count++
-    }
-    return count
-  }
 
   private indexSources(runId: string): Map<string, Source> {
     const map = new Map<string, Source>()

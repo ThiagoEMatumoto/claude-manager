@@ -1,18 +1,17 @@
 import * as store from './dossier-store'
 import { DossierPipeline } from './dossier-pipeline'
-import { StubSourceProvider, StubVerifier } from './dossier-pipeline-stubs'
+import { StubSourceProvider } from './dossier-pipeline-stubs'
 import { ClaudeExtractor } from './dossier/claude-extractor'
 import { ClaudeSynthesizer } from './dossier/claude-synthesizer'
+import { ClaudeVerifier } from './dossier/claude-verifier'
 import { TavilySourceProvider } from './ingest/tavily-source-provider'
 import { getEnvVar } from './custom-env'
 import type { SourceProvider } from './dossier-pipeline-types'
 
 // Instância única do motor do funil no main. A BUSCA web é real (Tavily + Jina)
 // quando há TAVILY_API_KEY; senão cai no provedor stub (app segue funcional, só
-// sem web). Extração e síntese são reais via `claude -p`. O verifier segue no
-// stub — o roteamento por trust tier dele já é a regra de produto real; o
-// julgamento semântico de corroboração/contradição exige que a interface
-// `Verifier` receba os claims das outras fontes (hoje recebe só uma contagem).
+// sem web). Extração, verificação cruzada e síntese são reais via `claude -p`;
+// o roteamento por trust tier segue determinístico (routeEvidenceState).
 let pipeline: DossierPipeline | null = null
 
 export const TAVILY_API_KEY = 'TAVILY_API_KEY'
@@ -34,7 +33,7 @@ export function getDossierPipeline(): DossierPipeline {
     pipeline = new DossierPipeline(store, {
       sourceProvider: resolveSourceProvider(),
       extractor: new ClaudeExtractor(),
-      verifier: new StubVerifier(),
+      verifier: new ClaudeVerifier(),
       synthesizer: new ClaudeSynthesizer(),
     })
   }

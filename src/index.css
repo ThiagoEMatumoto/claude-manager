@@ -68,6 +68,36 @@ html, body, #root {
   animation-delay: calc(var(--i, 0) * 45ms);
 }
 
+/* Boas-vindas do chat: entrada em stagger + pulso lento no ícone. O pulso é bem
+   mais lento que o animate-pulse do Tailwind de propósito — na velocidade dele
+   o hero é lido como spinner de loading. */
+@keyframes chat-welcome-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.chat-welcome-rise {
+  animation: chat-welcome-rise 0.4s ease-out both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+@keyframes chat-welcome-glow {
+  0%, 100% { opacity: 0.75; filter: drop-shadow(0 0 2px var(--color-accent-dim)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 10px var(--color-accent-dim)); }
+}
+
+.chat-welcome-glow {
+  animation: chat-welcome-rise 0.4s ease-out both,
+             chat-welcome-glow 3s ease-in-out 0.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-welcome-rise,
+  .chat-welcome-glow {
+    animation: none;
+  }
+}
+
 /* Tipografia do markdown renderizado (MarkdownViewer). O Preflight do Tailwind
    zera margens de p/h/ul/ol e remove bullets — sem estas regras o texto colapsa
    num bloco "grudado". Escala contida: o conteúdo vive dentro de bolhas text-sm.

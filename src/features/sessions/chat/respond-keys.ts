@@ -107,6 +107,59 @@ export function buildPlanKeys(
   return manualApproveIndex == null ? [] : buildDigitKey(manualApproveIndex)
 }
 
+// --- Pickers de /model, /theme, /config e busca de histórico (Ctrl+R) — Fase 2 ---
+// Mesmas primitivas ANSI já usadas acima (setas, Enter, Esc); os pickers só
+// compõem elas de um jeito diferente (navegação por seta em vez de dígito).
+
+// Navegação validada ao vivo (claude 2.1.215): /model down×2 move o highlight
+// 2 opções; /theme up×2 idem. Repete a MESMA sequência de buildTabKeys N vezes
+// — nunca dígito (não testado nesses pickers).
+export function buildArrowKeys(direction: 'up' | 'down' | 'left' | 'right', times = 1): string[] {
+  if (!Number.isInteger(times) || times <= 0) return []
+  const seq = { up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' }[direction]
+  return Array(times).fill(seq)
+}
+
+// Enter aplica o picker de /model ou /theme (validado: seleciona o destacado).
+export function buildEnterKey(): string[] {
+  return ['\r']
+}
+
+// Esc cancela qualquer picker desta fase (/model: "Kept model as X"; /theme:
+// "Theme picker dismissed"; /config: 1 estágio por clique, ver ChatView; Ctrl+R:
+// único caminho validado além de abrir).
+export function buildEscKey(): string[] {
+  return ['\x1b']
+}
+
+// Ctrl+T alterna o preview de sintaxe no picker de /theme — validado ao vivo.
+export function buildCtrlTKey(): string[] {
+  return ['\x14']
+}
+
+// Space alterna um boolean na lista do /config — validado ao vivo. Enums
+// (valores que não são "true"/"false") não têm toggle validado — fail-closed,
+// não oferecido pelo card (ver tui-picker-parser).
+export function buildSpaceKey(): string[] {
+  return [' ']
+}
+
+// Filtro de busca do /config: texto literal — validado ao vivo (filtra a
+// lista em tempo real, sem precisar de Enter nem de apertar "/" antes).
+export function buildFilterKeys(text: string): string[] {
+  return text === '' ? [] : [text]
+}
+
+// Clique numa opção do picker de /model ou /theme: navega do highlight ATUAL
+// (vindo do RE-PARSE fresco, nunca do estado antigo — mesma cautela de
+// findManualApproveIndex) até o índice clicado via setas, depois Enter aplica.
+// Composição de duas primitivas validadas — não é uma tecla nova.
+export function buildPickerSelectKeys(currentIndex: number, targetIndex: number): string[] {
+  const delta = targetIndex - currentIndex
+  if (delta === 0) return buildEnterKey()
+  return [...buildArrowKeys(delta > 0 ? 'down' : 'up', Math.abs(delta)), ...buildEnterKey()]
+}
+
 // Reproduz as sequências no PTY com um respiro entre elas: a TUI (Ink) processa
 // chunks sequencialmente e escapes colados num chunk só podem colapsar num único
 // evento de tecla. `sleep` injetável mantém o módulo puro e o teste síncrono.

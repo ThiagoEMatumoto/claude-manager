@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildArrowKeys,
+  buildCtrlTKey,
   buildDigitKey,
+  buildEnterKey,
+  buildEscKey,
+  buildFilterKeys,
   buildOtherKeys,
+  buildPickerSelectKeys,
   buildPlanKeys,
   buildReviewKeys,
   buildSelectKeys,
+  buildSpaceKey,
   buildTabKeys,
   buildToggleKeys,
   findManualApproveIndex,
@@ -188,6 +195,53 @@ describe('buildOtherKeys — "Other" (texto livre)', () => {
 
   it('fail-closed fora do range de dígito', () => {
     expect(buildOtherKeys(9, 'algo')).toEqual([])
+  })
+})
+
+describe('buildArrowKeys — navegação dos pickers de /model e /theme', () => {
+  it('repete a sequência validada N vezes (down/up/left/right)', () => {
+    expect(buildArrowKeys('down', 2)).toEqual(['\x1b[B', '\x1b[B'])
+    expect(buildArrowKeys('up', 1)).toEqual(['\x1b[A'])
+    expect(buildArrowKeys('right')).toEqual(['\x1b[C'])
+    expect(buildArrowKeys('left', 3)).toEqual(['\x1b[D', '\x1b[D', '\x1b[D'])
+  })
+
+  it('fail-closed pra times <= 0', () => {
+    expect(buildArrowKeys('down', 0)).toEqual([])
+    expect(buildArrowKeys('up', -1)).toEqual([])
+  })
+})
+
+describe('buildEnterKey / buildEscKey / buildCtrlTKey / buildSpaceKey', () => {
+  it('cada builder devolve exatamente a sequência validada', () => {
+    expect(buildEnterKey()).toEqual(['\r'])
+    expect(buildEscKey()).toEqual(['\x1b'])
+    expect(buildCtrlTKey()).toEqual(['\x14'])
+    expect(buildSpaceKey()).toEqual([' '])
+  })
+})
+
+describe('buildFilterKeys — filtro de /config', () => {
+  it('texto literal digitado (a TUI filtra ao vivo, sem Enter)', () => {
+    expect(buildFilterKeys('verbose')).toEqual(['verbose'])
+  })
+
+  it('fail-closed pra texto vazio (nada a digitar)', () => {
+    expect(buildFilterKeys('')).toEqual([])
+  })
+})
+
+describe('buildPickerSelectKeys — clique numa opção de /model ou /theme', () => {
+  it('navega do highlight atual até o alvo (down) + Enter aplica', () => {
+    expect(buildPickerSelectKeys(0, 2)).toEqual(['\x1b[B', '\x1b[B', '\r'])
+  })
+
+  it('navega pra trás (up) quando o alvo está antes do highlight', () => {
+    expect(buildPickerSelectKeys(3, 1)).toEqual(['\x1b[A', '\x1b[A', '\r'])
+  })
+
+  it('já destacada: só Enter, sem navegar', () => {
+    expect(buildPickerSelectKeys(1, 1)).toEqual(['\r'])
   })
 })
 

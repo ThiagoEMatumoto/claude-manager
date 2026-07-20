@@ -1,4 +1,5 @@
-import { Check, MessageCircleQuestion } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, ArrowRight, Check, MessageCircleQuestion, Square, SquareCheck } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatQuestion } from '../../../../shared/types/ipc'
 
@@ -7,11 +8,21 @@ interface Props {
   // Mapa pergunta→opção(ões) escolhida(s); ausente = ainda não respondido. Em
   // multiSelect o valor vem como "Opção A, Opção B" (labels juntos por ", ").
   answers?: Record<string, string>
-  // Clique-pra-responder: presente = o ChatView liberou o clique (card é o momento
-  // pendente + sessão 'waiting'). O handler de lá re-checa os guards no clique.
+  // Clique-pra-responder single-select (com ou sem preview — quem decide a
+  // sequência de teclas certa é o ChatView via buildSelectKeys). Presente =
+  // liberado (card é o momento pendente + sessão 'waiting').
   onRespond?: (optionIndex: number, label: string) => void
+  // Clique num checkbox de multi-select: dígito faz TOGGLE, nunca submete —
+  // submeter de fato é só na tela de revisão (QuestionReviewCard).
+  onToggle?: (optionIndex: number, label: string) => void
+  // Envio do campo "Other" (texto livre): dígito + texto + Enter.
+  onOtherSubmit?: (optionIndex: number, text: string) => void
   // Label da opção clicada, enquanto a resposta real não chega no JSONL (forId).
   sentLabel?: string
+  // Barra de abas (multi-pergunta/multi-select) — a pergunta atual já vem em
+  // `questions[0]`; os botões só navegam (nunca submetem).
+  tabs?: { label: string; done: boolean }[]
+  onTabNav?: (direction: 'next' | 'prev') => void
 }
 
 // Uma opção foi escolhida se bate exata (single) ou aparece na lista juntada
@@ -21,17 +32,72 @@ function isSelected(answer: string | undefined, label: string): boolean {
   return answer === label || answer.split(', ').includes(label) || answer.includes(label)
 }
 
+// Campo inline pra "Other" (texto livre): dígito já selecionou a linha (o
+// clique inicial), o texto aqui vira a resposta digitada. Enter vazio NUNCA
+// envia — na TUI real isso é lido como "declinou responder".
+function OtherField({
+  onSubmit,
+  disabled,
+}: {
+  onSubmit: (text: string) => void
+  disabled?: boolean
+}) {
+  const [text, setText] = useState('')
+  const canSubmit = !disabled && text.trim() !== ''
+  function submit() {
+    if (canSubmit) onSubmit(text)
+  }
+  return (
+    <div className="flex items-center gap-2 rounded border border-[var(--color-border)] px-2 py-1.5">
+      <input
+        type="text"
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+        }}
+        placeholder="Digite sua resposta…"
+        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)]"
+      />
+      <button
+        type="button"
+        onClick={submit}
+        disabled={!canSubmit}
+        className="shrink-0 rounded border border-[var(--color-border)] px-2 py-0.5 text-xs font-medium transition hover:border-[var(--color-accent)]/60 disabled:opacity-40"
+      >
+        Enviar
+      </button>
+    </div>
+  )
+}
+
 // Render dedicado de um AskUserQuestion (substitui o tool card genérico). Mostra
 // header + pergunta + opções (label em destaque, description abaixo). Quando
-// respondido, marca a(s) opção(ões) escolhida(s). Com onRespond presente, as opções
-// viram botões que enviam a escolha ao PTY — V1 só pra pergunta ÚNICA sem
-// multiSelect (multi-pergunta tem tabs + "Review your answers" na TUI; multiSelect
-// exige espaço+Enter). Free-text/"Other" segue pelo compositor.
-export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props) {
+// respondido, marca a(s) opção(ões) escolhida(s). Interatividade V1 só pra
+// pergunta ÚNICA (multi-pergunta = tabs, ver `tabs`/`onTabNav`):
+// - single-select: clique = onRespond (o ChatView decide dígito-só ou
+//   dígito+Enter, conforme `submitOnDigit` do menu parseado).
+// - multiSelect: clique = onToggle (checkbox, nunca submete sozinho).
+// - "Other" (single-select apenas — sem evidência validada pro caso
+//   multi+Other): campo de texto inline via onOtherSubmit.
+export function QuestionCard({
+  questions,
+  answers,
+  onRespond,
+  onToggle,
+  onOtherSubmit,
+  sentLabel,
+  tabs,
+  onTabNav,
+}: Props) {
   const answered = answers != null
   const sent = sentLabel != null && !answered
-  const clickable =
-    onRespond != null && !answered && !sent && questions.length === 1 && !questions[0].multiSelect
+  const q = questions.length === 1 ? questions[0] : null
+  const selectClickable = onRespond != null && !answered && !sent && q != null && !q.multiSelect
+  const toggleClickable = onToggle != null && !answered && !sent && q != null && q.multiSelect
+  const preview = q?.options.find((o) => o.preview != null)?.preview
+
   return (
     <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)]/60 text-sm">
       <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2">
@@ -40,30 +106,119 @@ export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props
           {answered ? 'Pergunta respondida' : 'Claude perguntou'}
         </span>
       </div>
+      {tabs && tabs.length > 0 && (
+        <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => onTabNav?.('prev')}
+            disabled={onTabNav == null}
+            className="shrink-0 rounded p-0.5 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-30"
+            aria-label="Aba anterior"
+          >
+            <Icon as={ArrowLeft} size={13} />
+          </button>
+          <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+            {tabs.map((t, ti) => (
+              <span
+                key={ti}
+                className={`rounded px-1.5 py-0.5 ${
+                  t.done
+                    ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                    : 'text-[var(--color-text-dim)]'
+                }`}
+              >
+                {t.label}
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onTabNav?.('next')}
+            disabled={onTabNav == null}
+            className="shrink-0 rounded p-0.5 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-30"
+            aria-label="Próxima aba"
+          >
+            <Icon as={ArrowRight} size={13} />
+          </button>
+        </div>
+      )}
       <div className="flex flex-col gap-3 px-3 py-2.5">
-        {questions.map((q, qi) => {
-          const answer = answers?.[q.question]
+        {questions.map((qq, qi) => {
+          const answer = answers?.[qq.question]
           return (
             <div key={qi} className="flex flex-col gap-1.5">
               <div className="flex items-baseline gap-2">
-                {q.header && (
+                {qq.header && (
                   <span className="shrink-0 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-text-dim)]">
-                    {q.header}
+                    {qq.header}
                   </span>
                 )}
-                <span className="text-[var(--color-text)]">{q.question}</span>
-                {q.multiSelect && (
+                <span className="text-[var(--color-text)]">{qq.question}</span>
+                {qq.multiSelect && (
                   <span className="shrink-0 text-[10px] text-[var(--color-text-dim)]">
                     (múltipla)
                   </span>
                 )}
               </div>
               <div className="flex flex-col gap-1">
-                {q.options.map((opt, oi) => {
+                {qq.options.map((opt, oi) => {
                   const selected = isSelected(answer, opt.label)
                   // Eco otimista do clique: check em tom dim até a resposta real
                   // chegar no transcript e virar `selected`.
                   const sentSelected = sent && opt.label === sentLabel
+
+                  if (opt.sentinel === 'other' && qq === q) {
+                    return (
+                      <OtherField
+                        key={oi}
+                        disabled={onOtherSubmit == null || answered || sent}
+                        onSubmit={(text) => onOtherSubmit?.(oi, text)}
+                      />
+                    )
+                  }
+
+                  if (qq.multiSelect) {
+                    const content = (
+                      <>
+                        <Icon
+                          as={opt.checked ? SquareCheck : Square}
+                          size={13}
+                          className={`mt-0.5 shrink-0 ${
+                            opt.checked ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-dim)]'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <div className="font-medium text-[var(--color-text)]/90">{opt.label}</div>
+                          {opt.description && (
+                            <div className="text-xs text-[var(--color-text-dim)]">
+                              {opt.description}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )
+                    if (toggleClickable) {
+                      return (
+                        <button
+                          key={oi}
+                          type="button"
+                          onClick={() => onToggle?.(oi, opt.label)}
+                          className="flex w-full items-start gap-2 rounded border border-[var(--color-border)] px-2 py-1.5 text-left transition hover:border-[var(--color-accent)]/60 hover:bg-[var(--color-accent)]/10"
+                        >
+                          {content}
+                        </button>
+                      )
+                    }
+                    return (
+                      <div
+                        key={oi}
+                        className="flex items-start gap-2 rounded border border-[var(--color-border)] px-2 py-1.5"
+                      >
+                        {content}
+                      </div>
+                    )
+                  }
+
                   const content = (
                     <>
                       <Icon
@@ -91,12 +246,12 @@ export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props
                       </div>
                     </>
                   )
-                  if (clickable) {
+                  if (selectClickable && qq === q) {
                     return (
                       <button
                         key={oi}
                         type="button"
-                        onClick={() => onRespond(oi, opt.label)}
+                        onClick={() => onRespond?.(oi, opt.label)}
                         className="flex w-full items-start gap-2 rounded border border-[var(--color-border)] px-2 py-1.5 text-left transition hover:border-[var(--color-accent)]/60 hover:bg-[var(--color-accent)]/10"
                       >
                         {content}
@@ -119,6 +274,11 @@ export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props
                   )
                 })}
               </div>
+              {qq === q && preview && (
+                <pre className="max-h-48 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-[var(--color-text)]/90">
+                  {preview}
+                </pre>
+              )}
             </div>
           )
         })}
@@ -126,9 +286,11 @@ export function QuestionCard({ questions, answers, onRespond, sentLabel }: Props
           <div className="text-xs text-[var(--color-text-dim)]">
             {sent
               ? 'Resposta enviada…'
-              : clickable
+              : selectClickable
                 ? 'Clique numa opção pra responder — ou use o compositor/terminal.'
-                : 'Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.'}
+                : toggleClickable
+                  ? 'Marque as opções e use a barra de abas pra avançar até enviar.'
+                  : 'Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.'}
           </div>
         )}
       </div>

@@ -81,6 +81,11 @@ export function resolveForwardKey(e: ForwardKeyEvent, textareaEmpty: boolean): F
   // Ctrl+D → EOF.
   if (e.ctrl && !e.meta && !e.shift && (key === 'd' || key === 'D')) return { seq: '\x04' }
 
+  // Ctrl+R → busca de histórico de prompts (DC2, 0x12 — controle ASCII padrão,
+  // mesma categoria de certeza de \x03/\x04 acima). Fase 2: o card reconhece o
+  // estado resultante (tui-picker-parser) e só oferece cancelar (Esc).
+  if (e.ctrl && !e.meta && !e.shift && (key === 'r' || key === 'R')) return { seq: '\x12' }
+
   // Esc → cancela prompts/menus do claude.
   if (key === 'Escape') return { seq: '\x1b' }
 

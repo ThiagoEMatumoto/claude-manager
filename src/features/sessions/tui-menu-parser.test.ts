@@ -279,20 +279,6 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     ).toBeNull()
   })
 
-  it('rejeita multi-pergunta (tela Review your answers)', () => {
-    expect(
-      parseTuiMenu(`Fruta  Cor  Review your answers
-
-Qual fruta?
-
-❯ 1. Maçã
-  2. Banana
-
-Enter to select · ↑/↓ to navigate · Esc to cancel
-`),
-    ).toBeNull()
-  })
-
   it('rejeita lista numerada de markdown que não termina perto do fim', () => {
     expect(
       parseTuiMenu(`Plano:
@@ -314,6 +300,178 @@ que segue depois da lista.
 
   it('rejeita run de uma opção só', () => {
     expect(parseTuiMenu('Pergunta?\n\n❯ 1. Única\n')).toBeNull()
+  })
+})
+
+// Fixtures desta seção espelham buffer REAL capturado ao vivo contra claude
+// 2.1.215 (harness node-pty isolado, ver tui-menu-parser header) — não são
+// suposição. Inclui o fluxo completo de abas + "Review your answers".
+
+// Multi-select de UMA pergunta só (≤4 opções, sem split) — validado ao vivo:
+// SEMPRE tem barra de abas (pergunta + "Submit"), mesmo com uma única pergunta.
+const SINGLE_QUESTION_MULTI_SELECT = `Me pergunte, usando multipla escolha (multiSelect) com exatamente 3 opcoes marcaveis, quais destes bancos de dados eu ja usei: Postgres, MySQL, SQLite. Uma unica pergunta, nao precisa dividir. Nao faca mais nada.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Bancos  ✔ Submit  →
+
+Quais destes bancos de dados você já usou?
+
+❯ 1. [ ] Postgres
+  Banco relacional open source, com recursos avançados (JSONB, extensões, replicação).
+  2. [ ] MySQL
+  Banco relacional open source amplamente usado em aplicações web.
+  3. [ ] SQLite
+  Banco relacional embarcado, em arquivo único, sem servidor.
+  4. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`
+
+// Multi-pergunta (>4 opções → CLI quebra em abas). Segunda pergunta ("Ruby"),
+// já com a primeira ("Linguagens") marcada.
+const MULTI_QUESTION_TAB_2 = `Preciso que voce me pergunte, usando multipla escolha com pelo menos 3 opcoes marcaveis, quais das seguintes linguagens eu ja uso: Python, Go, Rust, TypeScript, Ruby. Use o formato de pergunta com multipla selecao
+  (multiSelect). Nao faca nada alem de fazer a pergunta.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Linguagens  ☐ Ruby  ✔ Submit  →
+
+E Ruby — você já usa?
+
+❯ 1. [ ] Ruby
+  Já uso Ruby no dia a dia ou em projetos
+  2. [ ] Não uso Ruby
+  Nunca usei ou não uso atualmente
+  3. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+`
+
+// Tela de revisão final (aba "Submit"): resumo das respostas + 1/2.
+const REVIEW_SCREEN = `Preciso que voce me pergunte, usando multipla escolha com pelo menos 3 opcoes marcaveis, quais das seguintes linguagens eu ja uso: Python, Go, Rust, TypeScript, Ruby. Use o formato de pergunta com multipla selecao
+  (multiSelect). Nao faca nada alem de fazer a pergunta.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Linguagens  ☒ Ruby  ✔ Submit  →
+
+Review your answers
+
+ ● Quais das seguintes linguagens você já usa?
+   → Python, Rust
+ ● E Ruby — você já usa?
+   → Ruby
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+`
+
+// Single-select com preview/exemplo por opção (bloco ┌─...─┐ + "Notes: press n
+// to add notes") — hoje falha fail-closed (:129-135); precisa parsear.
+const PREVIEW_MENU = `Me pergunte, em uma pergunta de escolha unica (nao multiSelect), qual estilo de aspas eu prefiro para strings em TypeScript: aspas simples ou aspas duplas. Para cada opcao, inclua um bloco de exemplo de codigo
+  mostrando a diferenca (um preview/exemplo de 2-3 linhas de codigo por opcao). Nao faca mais nada.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Aspas
+
+Qual estilo de aspas você prefere para strings em TypeScript?
+
+❯ 1. Aspas simples                ┌──────────────────────────────────────────┐
+  2. Aspas duplas                 │ const name = 'Thiago';                   │
+                                   │ const greeting = 'Olá, mundo';           │
+                                   │ import { parse } from 'node:path';       │
+                                   └──────────────────────────────────────────┘
+
+                                   Notes: press n to add notes
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+`
+
+describe('parseTuiMenu — multi-select (checkboxes + barra de abas)', () => {
+  it('parseia multi-select de pergunta única com barra de abas (sempre tem "Submit", mesmo sem split)', () => {
+    const menu = parseTuiMenu(SINGLE_QUESTION_MULTI_SELECT)
+    expect(menu).not.toBeNull()
+    expect(menu!.kind).toBe('question')
+    expect(menu!.multiSelect).toBe(true)
+    expect(menu!.question).toBe('Quais destes bancos de dados você já usou?')
+    expect(menu!.options[0]).toMatchObject({ index: 0, label: 'Postgres', checked: false })
+    expect(menu!.options[1]).toMatchObject({ index: 1, label: 'MySQL', checked: false })
+    expect(menu!.options[2]).toMatchObject({ index: 2, label: 'SQLite', checked: false })
+    expect(menu!.options[3]).toMatchObject({ index: 3, sentinel: 'other' })
+    expect(menu!.options[4]).toMatchObject({ index: 4, sentinel: 'chat' })
+    expect(menu!.tabs).toEqual([
+      { label: 'Bancos', done: false },
+      { label: 'Submit', done: true },
+    ])
+    expect(menu!.submitOnDigit).toBe(true)
+  })
+
+  it('lê o glyph [✔]/[ ] como checked/unchecked', () => {
+    const checkedFixture = SINGLE_QUESTION_MULTI_SELECT.replace('1. [ ] Postgres', '1. [✔] Postgres')
+    const menu = parseTuiMenu(checkedFixture)
+    expect(menu!.options[0].checked).toBe(true)
+    expect(menu!.options[1].checked).toBe(false)
+  })
+
+  it('parseia a segunda pergunta de uma multi-pergunta (abas: uma já marcada ☒)', () => {
+    const menu = parseTuiMenu(MULTI_QUESTION_TAB_2)
+    expect(menu).not.toBeNull()
+    expect(menu!.kind).toBe('question')
+    expect(menu!.multiSelect).toBe(true)
+    expect(menu!.question).toBe('E Ruby — você já usa?')
+    expect(menu!.tabs).toEqual([
+      { label: 'Linguagens', done: true },
+      { label: 'Ruby', done: false },
+      { label: 'Submit', done: true },
+    ])
+  })
+})
+
+describe('parseTuiMenu — question_review (tela "Review your answers")', () => {
+  it('reconhece a tela de revisão como kind próprio, com Submit answers/Cancel numerados', () => {
+    const menu = parseTuiMenu(REVIEW_SCREEN)
+    expect(menu).not.toBeNull()
+    expect(menu!.kind).toBe('question_review')
+    expect(menu!.options).toHaveLength(2)
+    expect(menu!.options[0].label).toBe('Submit answers')
+    expect(menu!.options[1].label).toBe('Cancel')
+    expect(menu!.context).toContain('Python, Rust')
+    expect(menu!.context).toContain('Ruby')
+  })
+})
+
+describe('parseTuiMenu — preview/exemplo por opção (não fail-closa mais)', () => {
+  it('parseia o menu com preview em vez de rejeitar (fail-closed antigo)', () => {
+    const menu = parseTuiMenu(PREVIEW_MENU)
+    expect(menu).not.toBeNull()
+    expect(menu!.kind).toBe('question')
+    expect(menu!.options[0].label).toBe('Aspas simples')
+    expect(menu!.options[1].label).toBe('Aspas duplas')
+  })
+
+  it('captura o conteúdo do preview (sem os caracteres de moldura) e desliga submitOnDigit', () => {
+    const menu = parseTuiMenu(PREVIEW_MENU)
+    expect(menu!.submitOnDigit).toBe(false)
+    const preview = menu!.options.map((o) => o.preview).find((p) => p != null)
+    expect(preview).toContain("const name = 'Thiago';")
+    expect(preview).not.toContain('│')
+    expect(preview).not.toContain('┌')
+  })
+})
+
+describe('parseTuiMenu — regressão: single-select sem preview continua submetendo direto', () => {
+  it('submitOnDigit é true e não há tabs/checked quando não há preview nem multiSelect', () => {
+    const menu = parseTuiMenu(FRUIT_MENU)!
+    expect(menu.submitOnDigit).toBe(true)
+    expect(menu.tabs).toBeUndefined()
+    expect(menu.options[0].checked).toBeUndefined()
   })
 })
 

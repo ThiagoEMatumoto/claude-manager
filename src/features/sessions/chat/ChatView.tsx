@@ -13,29 +13,41 @@ import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { CommandCard, CommandOutputCard } from './CommandCard'
 import { CompactSummaryCard } from './CompactSummaryCard'
+import { ConfigCard } from './ConfigCard'
+import { HistorySearchCard } from './HistorySearchCard'
 import { MessageBubble } from './MessageBubble'
 import { MetaCard } from './MetaCard'
 import { ModelChangeChip } from './ModelChangeChip'
+import { ModelPickerCard } from './ModelPickerCard'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
 import { QuestionReviewCard } from './QuestionReviewCard'
 import { SubagentCard } from './SubagentCard'
 import { SystemCard } from './SystemCard'
+import { ThemePickerCard } from './ThemePickerCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript, usePlanFile } from './useChatTranscript'
 import {
+  buildArrowKeys,
+  buildCtrlTKey,
   buildDigitKey,
+  buildEnterKey,
+  buildEscKey,
+  buildFilterKeys,
   buildOtherKeys,
+  buildPickerSelectKeys,
   buildPlanKeys,
   buildReviewKeys,
   buildSelectKeys,
+  buildSpaceKey,
   buildTabKeys,
   buildToggleKeys,
   findManualApproveIndex,
 } from './respond-keys'
 import { gateMenuByStatus, menuFingerprint, type TuiMenu } from '../tui-menu-parser'
+import { pickerFingerprint, type TuiPicker } from '../tui-picker-parser'
 import {
   countUserMessages,
   isAtBottom,
@@ -73,6 +85,12 @@ interface Props {
   // Re-parse FRESCO do buffer, chamado imediatamente antes de digitar (guard de
   // clique: o menu pode ter fechado/mudado desde o último debounce).
   reparseMenu?: () => TuiMenu | null
+  // Picker de /model, /theme, /config ou busca de histórico (Ctrl+R) parseado
+  // do buffer — Fase 2, família separada de tuiMenu (layout de tela diferente,
+  // ver tui-picker-parser). null = nenhum picker íntegro no momento.
+  tuiPicker?: TuiPicker | null
+  // Re-parse fresco do picker, mesmo papel de reparseMenu.
+  reparsePicker?: () => TuiPicker | null
 }
 
 // Render híbrido do transcript JSONL. O PTY segue vivo por baixo (xterm oculto no
@@ -98,7 +116,7 @@ function TranscriptPlanCard({
   return <PlanCard plan={plan || fetched || PLAN_PLACEHOLDER} decision={decision} />
 }
 
-export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode, onRespond, tuiMenu, reparseMenu }, ref) {
+export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ sessionId, status, onToggleMode, onRespond, tuiMenu, reparseMenu, tuiPicker, reparsePicker }, ref) {
   const { messages, loading, transcriptExists, lastPlanFilePath } = useChatTranscript(sessionId)
   const [echoes, setEchoes] = useState<Echo[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -351,6 +369,167 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     onRespond?.(keys)
   }
 
+  // ── Pickers de /model, /theme, /config e busca de histórico (Ctrl+R) ──────
+  // Família separada do menu TUI acima: layout de tela diferente (tabs, caixa
+  // de busca, effort/preview inline), sem gate de status (são UI local do
+  // CLI, disparada pelo próprio usuário — não há ambiguidade com "aguardando
+  // Claude" que justifique restringir por status, ao contrário do trio da
+  // Fase 1).
+  const pickerFp = tuiPicker ? pickerFingerprint(tuiPicker) : null
+  const [pickerSent, setPickerSent] = useState<{ fp: string } | null>(null)
+
+  useEffect(() => {
+    if (pickerSent && pickerFp !== pickerSent.fp) setPickerSent(null)
+  }, [pickerFp, pickerSent])
+
+  const canRespondPicker = onRespond != null && tuiPicker != null && pickerSent == null
+
+  function freshPickerMatches(): TuiPicker | null {
+    const fresh = reparsePicker?.() ?? null
+    if (!fresh || pickerFp == null || pickerFingerprint(fresh) !== pickerFp) return null
+    return fresh
+  }
+
+  // /model: clique numa opção navega (setas) + Enter aplica — composto em
+  // buildPickerSelectKeys a partir do highlight ATUAL do re-parse fresco.
+  function respondModelSelect(targetIndex: number) {
+    if (!canRespondPicker) return
+    const fresh = freshPickerMatches()
+    if (!fresh || fresh.kind !== 'model') return
+    onRespond?.(buildPickerSelectKeys(fresh.highlightIndex, targetIndex))
+  }
+  // Effort é um eixo à parte (←/→) — nunca resposta final, não marca sent.
+  function respondModelEffort(direction: 'left' | 'right') {
+    if (!canRespondPicker || !freshPickerMatches()) return
+    onRespond?.(buildArrowKeys(direction))
+  }
+  function respondModelApply() {
+    if (!canRespondPicker || pickerFp == null || !freshPickerMatches()) return
+    setPickerSent({ fp: pickerFp })
+    onRespond?.(buildEnterKey())
+  }
+  function respondModelCancel() {
+    if (!canRespondPicker || pickerFp == null || !freshPickerMatches()) return
+    setPickerSent({ fp: pickerFp })
+    onRespond?.(buildEscKey())
+  }
+
+  // /theme: mesmo padrão de navegação por seta do /model.
+  function respondThemeSelect(targetIndex: number) {
+    if (!canRespondPicker) return
+    const fresh = freshPickerMatches()
+    if (!fresh || fresh.kind !== 'theme') return
+    onRespond?.(buildPickerSelectKeys(fresh.highlightIndex, targetIndex))
+  }
+  function respondThemeTogglePreview() {
+    if (!canRespondPicker || !freshPickerMatches()) return
+    onRespond?.(buildCtrlTKey())
+  }
+  function respondThemeApply() {
+    if (!canRespondPicker || pickerFp == null || !freshPickerMatches()) return
+    setPickerSent({ fp: pickerFp })
+    onRespond?.(buildEnterKey())
+  }
+  function respondThemeCancel() {
+    if (!canRespondPicker || pickerFp == null || !freshPickerMatches()) return
+    setPickerSent({ fp: pickerFp })
+    onRespond?.(buildEscKey())
+  }
+
+  // /config: nenhuma ação aqui é "final" (o dialog fecha só depois de 1-3 Esc
+  // em sequência) — nunca marca pickerSent, o card renderiza de novo a cada
+  // re-parse até o picker sumir do buffer.
+  function respondConfigFilter(text: string) {
+    if (!canRespondPicker || !freshPickerMatches()) return
+    onRespond?.(buildFilterKeys(text))
+  }
+  // Navega do item destacado ATUAL (re-parse fresco) até o alvo + Space
+  // alterna. Sem highlight ainda (foco na busca) → 1 down primeiro (valida:
+  // busca→lista pousa no primeiro item), depois navega a partir dele.
+  function respondConfigToggle(targetIndex: number) {
+    if (!canRespondPicker) return
+    const fresh = freshPickerMatches()
+    if (!fresh || fresh.kind !== 'config') return
+    const keys: string[] = []
+    let fromIndex = fresh.items.findIndex((i) => i.highlighted)
+    if (fromIndex < 0) {
+      keys.push(...buildArrowKeys('down', 1))
+      fromIndex = 0
+    }
+    const delta = targetIndex - fromIndex
+    if (delta !== 0) keys.push(...buildArrowKeys(delta > 0 ? 'down' : 'up', Math.abs(delta)))
+    keys.push(...buildSpaceKey())
+    onRespond?.(keys)
+  }
+  function respondConfigFocusSearch() {
+    if (!canRespondPicker || !freshPickerMatches()) return
+    onRespond?.(['/'])
+  }
+  function respondConfigClose() {
+    if (!canRespondPicker || !freshPickerMatches()) return
+    onRespond?.(buildEscKey())
+  }
+
+  // Ctrl+R: só cancelar tem evidência (ver gap no parser/card).
+  function respondHistoryCancel() {
+    if (!canRespondPicker || pickerFp == null || !freshPickerMatches()) return
+    setPickerSent({ fp: pickerFp })
+    onRespond?.(buildEscKey())
+  }
+
+  const tuiPickerCardNode = tuiPicker ? (
+    <>
+      {tuiPicker.kind === 'model' && (
+        <ModelPickerCard
+          options={tuiPicker.options}
+          highlightIndex={tuiPicker.highlightIndex}
+          effortLabel={tuiPicker.effortLabel}
+          onSelect={canRespondPicker ? respondModelSelect : undefined}
+          onEffort={canRespondPicker ? respondModelEffort : undefined}
+          onApply={canRespondPicker ? respondModelApply : undefined}
+          onCancel={canRespondPicker ? respondModelCancel : undefined}
+          sent={pickerSent != null && pickerSent.fp === pickerFp}
+        />
+      )}
+      {tuiPicker.kind === 'theme' && (
+        <ThemePickerCard
+          options={tuiPicker.options}
+          highlightIndex={tuiPicker.highlightIndex}
+          preview={tuiPicker.preview}
+          syntaxTheme={tuiPicker.syntaxTheme}
+          previewOn={tuiPicker.previewOn}
+          onSelect={canRespondPicker ? respondThemeSelect : undefined}
+          onTogglePreview={canRespondPicker ? respondThemeTogglePreview : undefined}
+          onApply={canRespondPicker ? respondThemeApply : undefined}
+          onCancel={canRespondPicker ? respondThemeCancel : undefined}
+          sent={pickerSent != null && pickerSent.fp === pickerFp}
+        />
+      )}
+      {tuiPicker.kind === 'config' && (
+        <ConfigCard
+          tabs={tuiPicker.tabs}
+          activeTab={tuiPicker.activeTab}
+          searchQuery={tuiPicker.searchQuery}
+          searchFocused={tuiPicker.searchFocused}
+          items={tuiPicker.items}
+          hasMoreBelow={tuiPicker.hasMoreBelow}
+          onFilter={canRespondPicker ? respondConfigFilter : undefined}
+          onToggle={canRespondPicker ? respondConfigToggle : undefined}
+          onFocusSearch={canRespondPicker ? respondConfigFocusSearch : undefined}
+          onClose={canRespondPicker ? respondConfigClose : undefined}
+        />
+      )}
+      {tuiPicker.kind === 'history_search' && (
+        <HistorySearchCard
+          query={tuiPicker.query}
+          noMatch={tuiPicker.noMatch}
+          onCancel={canRespondPicker ? respondHistoryCancel : undefined}
+          sent={pickerSent != null && pickerSent.fp === pickerFp}
+        />
+      )}
+    </>
+  ) : null
+
   // Espera que o chat não consegue representar (provável prompt de permissão
   // y/n / menu TTY): status 'waiting' sem card conhecido — nem do transcript,
   // nem sintetizado do menu TUI (que tem precedência sobre o banner).
@@ -427,6 +606,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             precisa aparecer MESMO sem nenhuma mensagem — é o que destrava a
             sessão pra própria conversa nascer. */}
         {tuiCardNode && <div className="w-full max-w-3xl text-left">{tuiCardNode}</div>}
+        {tuiPickerCardNode && <div className="w-full max-w-3xl text-left">{tuiPickerCardNode}</div>}
       </div>
     )
   }
@@ -517,6 +697,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           }
         })}
         {tuiCardNode}
+        {tuiPickerCardNode}
         {pendingPrompt && (
           <div className="sticky bottom-0 flex items-center gap-2 rounded-md border border-[var(--color-accent)]/50 bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] shadow-lg">
             <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />

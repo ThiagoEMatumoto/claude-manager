@@ -26,6 +26,7 @@ import { mergePending, nextPendingApply, type PendingSelection } from './model-q
 import { detectFooterMode } from './permission-mode-parser'
 import { jumpDecision } from './permission-jump'
 import { gateMenuByStatus, menuFingerprint, parseTuiMenu, type TuiMenu } from './tui-menu-parser'
+import { parseTuiPicker, pickerFingerprint, type TuiPicker } from './tui-picker-parser'
 import { modelSupportsXhigh } from './model-context-limits'
 import { useTerminalPrefsStore } from '@/lib/terminal-prefs-store'
 import { TERMINAL_FONT_FAMILY } from '@/lib/terminal-font'
@@ -163,6 +164,10 @@ export function Terminal({
   // buffer do xterm — a fonte do card clicável no modo chat. Só existe com a
   // sessão em 'waiting'; null = sem menu íntegro (fail-closed no parser).
   const [pendingTuiMenu, setPendingTuiMenu] = useState<TuiMenu | null>(null)
+  // Picker de /model, /theme, /config ou busca de histórico (Ctrl+R) — Fase 2,
+  // parseado em paralelo ao menu TUI (família de tela diferente, sem gate de
+  // status: é UI local do CLI, sempre segura de mostrar quando o parse bate).
+  const [pendingTuiPicker, setPendingTuiPicker] = useState<TuiPicker | null>(null)
   // Esforço ativo e ultracode são rastreados localmente — não há campo no transcript
   // pra eles. Refletem o último valor que ESTE app injetou (null = ainda não definido).
   const [activeEffort, setActiveEffort] = useState<EffortLevel | null>(null)
@@ -254,6 +259,19 @@ export function Terminal({
     )
   }
 
+  // Parse fresco do picker (/model, /theme, /config, Ctrl+R) direto do
+  // buffer — mesmo papel de readTuiMenu, exposto ao ChatView como guard.
+  function readTuiPicker(): TuiPicker | null {
+    const t = xtermRef.current
+    return t ? parseTuiPicker(readTailText(t)) : null
+  }
+
+  function applyTuiPicker(picker: TuiPicker | null) {
+    setPendingTuiPicker((prev) =>
+      prev && picker && pickerFingerprint(prev) === pickerFingerprint(picker) ? prev : picker,
+    )
+  }
+
   // Menu TUI: parse na TRANSIÇÃO de status. Entrou num status elegível → tenta
   // parsear o que já está desenhado (o debounce do PTY cobre desenhos
   // posteriores); status inelegível → gate devolve null e limpa. 'waiting'
@@ -262,9 +280,11 @@ export function Terminal({
   useEffect(() => {
     if (exited) {
       setPendingTuiMenu(null)
+      setPendingTuiPicker(null)
       return
     }
     applyTuiMenu(gateMenuByStatus(readTuiMenu(), activity?.status))
+    applyTuiPicker(readTuiPicker())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity?.status, exited])
 
@@ -659,6 +679,7 @@ export function Terminal({
         // menu; 'starting'/'idle' (pré-transcript) só permission/trust; outros
         // status limpam (null).
         applyTuiMenu(gateMenuByStatus(parseTuiMenu(readTailText(t)), statusRef.current))
+        applyTuiPicker(parseTuiPicker(readTailText(t)))
         if (statusRef.current === 'working' || statusRef.current === 'starting') return
         setCurrentMode(detectFooterMode(readFooterText(t)))
       }, 150)
@@ -682,6 +703,7 @@ export function Terminal({
       // prompt numa pane remontada) não gera data event novo — sem este seed o
       // card só apareceria no próximo byte do PTY.
       applyTuiMenu(gateMenuByStatus(parseTuiMenu(readTailText(term)), statusRef.current))
+      applyTuiPicker(parseTuiPicker(readTailText(term)))
     })
 
     // Copy-on-select: copiar automaticamente o que for selecionado.
@@ -989,6 +1011,8 @@ export function Terminal({
             // guard de clique — re-parse fresco antes de digitar.
             tuiMenu={pendingTuiMenu}
             reparseMenu={readTuiMenu}
+            tuiPicker={pendingTuiPicker}
+            reparsePicker={readTuiPicker}
           />
         )}
 

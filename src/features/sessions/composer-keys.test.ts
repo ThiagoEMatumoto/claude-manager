@@ -67,6 +67,11 @@ describe('resolveForwardKey', () => {
     expect(resolveForwardKey({ key: 'd', ctrl: true }, empty)).toEqual({ seq: '\x04' })
   })
 
+  it('Ctrl+R → busca de histórico (DC2), com ou sem texto no rascunho', () => {
+    expect(resolveForwardKey({ key: 'r', ctrl: true }, empty)).toEqual({ seq: '\x12' })
+    expect(resolveForwardKey({ key: 'R', ctrl: true }, withText)).toEqual({ seq: '\x12' })
+  })
+
   it('Esc always forwards (cancel claude prompts/menus)', () => {
     expect(resolveForwardKey({ key: 'Escape' }, empty)).toEqual({ seq: '\x1b' })
     expect(resolveForwardKey({ key: 'Escape' }, withText)).toEqual({ seq: '\x1b' })

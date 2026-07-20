@@ -7,7 +7,16 @@ export interface ChatQuestion {
   question: string
   header: string
   multiSelect: boolean
-  options: { label: string; description: string }[]
+  options: {
+    label: string
+    description: string
+    // Campos abaixo só vêm preenchidos no card SINTETIZADO do menu TUI ao vivo
+    // (ChatView, a partir de tui-menu-parser) — o card pós-resposta do
+    // transcript (JSONL) nunca os popula (undefined), sem mudança visual lá.
+    sentinel?: 'other' | 'chat'
+    checked?: boolean
+    preview?: string
+  }[]
 }
 
 // Uma mensagem renderizável do chat. A lista é ORDENADA na ordem do transcript

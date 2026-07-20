@@ -19,12 +19,22 @@ import { ModelChangeChip } from './ModelChangeChip'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
+import { QuestionReviewCard } from './QuestionReviewCard'
 import { SubagentCard } from './SubagentCard'
 import { SystemCard } from './SystemCard'
 import { ThinkingCard } from './ThinkingCard'
 import { ToolResultCard, ToolUseCard } from './ToolCard'
 import { useChatTranscript, usePlanFile } from './useChatTranscript'
-import { buildDigitKey, buildPlanKeys, findManualApproveIndex } from './respond-keys'
+import {
+  buildDigitKey,
+  buildOtherKeys,
+  buildPlanKeys,
+  buildReviewKeys,
+  buildSelectKeys,
+  buildTabKeys,
+  buildToggleKeys,
+  findManualApproveIndex,
+} from './respond-keys'
 import { gateMenuByStatus, menuFingerprint, type TuiMenu } from '../tui-menu-parser'
 import {
   countUserMessages,
@@ -188,11 +198,15 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     }
   }, [tuiSent, resolvedCount, menuFp])
 
-  // Dados sintetizados pro QuestionCard: sentinelas (Type something./Chat about
-  // this) ficam fora das opções clicáveis — free-text segue pelo compositor.
+  // Dados sintetizados pro QuestionCard: a sentinela 'chat' fica fora das
+  // opções (não tem card pra ela); 'other' (texto livre) fica dentro — MAS só
+  // quando single-select (sem evidência validada pro caso multi+Other, ainda
+  // filtrada nesse caso).
   const tuiQuestion = useMemo(() => {
     if (!tuiMenu || tuiMenu.kind !== 'question') return null
-    const clickable = tuiMenu.options.filter((o) => o.sentinel == null)
+    const clickable = tuiMenu.options.filter(
+      (o) => o.sentinel !== 'chat' && (o.sentinel !== 'other' || !tuiMenu.multiSelect),
+    )
     if (clickable.length === 0) return null
     return {
       clickable,
@@ -201,7 +215,13 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           question: tuiMenu.question ?? 'Claude fez uma pergunta (veja o terminal).',
           header: '',
           multiSelect: tuiMenu.multiSelect,
-          options: clickable.map((o) => ({ label: o.label, description: o.description ?? '' })),
+          options: clickable.map((o) => ({
+            label: o.label,
+            description: o.description ?? '',
+            sentinel: o.sentinel,
+            checked: o.checked,
+            preview: o.preview,
+          })),
         },
       ],
     }
@@ -214,6 +234,10 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   // as opções vão inteiras pro card (não há sentinelas nesses menus).
   const tuiPermission =
     tuiMenu && (tuiMenu.kind === 'permission' || tuiMenu.kind === 'trust') ? tuiMenu : null
+
+  // Tela final de revisão ("Review your answers") do multi-select/multi-
+  // pergunta — kind próprio no parser, card dedicado (QuestionReviewCard).
+  const tuiReview = tuiMenu && tuiMenu.kind === 'question_review' ? tuiMenu : null
 
   // Conteúdo do plano pro card PENDENTE: o tool_use do ExitPlanMode ainda não
   // está no JSONL, mas o plan file foi escrito durante o plan mode — lemos ele
@@ -233,7 +257,7 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     gateMenuByStatus(tuiMenu, status) != null &&
     pendingPrompt == null &&
     menuFp !== consumedFp &&
-    (tuiMenu.kind === 'plan' || tuiQuestion != null || tuiPermission != null)
+    (tuiMenu.kind === 'plan' || tuiQuestion != null || tuiPermission != null || tuiReview != null)
   const canRespondTui = onRespond != null && showTuiCard && tuiSent == null
 
   // Guard de clique: RE-PARSE fresco do buffer imediatamente antes de digitar.
@@ -245,13 +269,61 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     return fresh
   }
 
+  // Single-select (com ou sem preview): buildSelectKeys decide dígito-só ou
+  // dígito+Enter conforme submitOnDigit do menu — resposta FINAL, marca sent.
   function respondTuiQuestion(clickIndex: number, label: string) {
+    if (!canRespondTui || !tuiQuestion || menuFp == null || tuiMenu?.multiSelect) return
+    const target = tuiQuestion.clickable[clickIndex]
+    if (!target || !freshMenuMatches()) return
+    const keys = buildSelectKeys(tuiMenu, target.index)
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, label, resolvedCount })
+    onRespond?.(keys)
+  }
+
+  // Checkbox de multi-select: dígito faz TOGGLE, NUNCA é resposta final — não
+  // marca tuiSent (o card segue interativo; o re-parse do Terminal já traz o
+  // `checked` atualizado no próximo tuiMenu). Submeter de fato é só na aba
+  // "Submit" → tela de revisão (respondTuiReview).
+  function respondTuiToggle(clickIndex: number) {
+    if (!canRespondTui || !tuiQuestion || menuFp == null || !tuiMenu?.multiSelect) return
+    const target = tuiQuestion.clickable[clickIndex]
+    if (!target || !freshMenuMatches()) return
+    const keys = buildToggleKeys(target.index)
+    if (keys.length === 0) return
+    onRespond?.(keys)
+  }
+
+  // "Other" (texto livre, single-select apenas): dígito + texto + Enter — é
+  // resposta FINAL, marca tuiSent.
+  function respondTuiOther(clickIndex: number, text: string) {
     if (!canRespondTui || !tuiQuestion || menuFp == null) return
     const target = tuiQuestion.clickable[clickIndex]
     if (!target || !freshMenuMatches()) return
-    const keys = buildDigitKey(target.index)
+    const keys = buildOtherKeys(target.index, text)
     if (keys.length === 0) return
-    setTuiSent({ fp: menuFp, label, resolvedCount })
+    setTuiSent({ fp: menuFp, label: text, resolvedCount })
+    onRespond?.(keys)
+  }
+
+  // Navegação de aba: nunca é resposta final (não marca tuiSent) — só move o
+  // cursor entre perguntas/Submit da barra de abas.
+  function respondTuiTabNav(direction: 'next' | 'prev') {
+    if (!canRespondTui || !tuiMenu?.tabs) return
+    if (!freshMenuMatches()) return
+    onRespond?.(buildTabKeys(direction))
+  }
+
+  // Tela de revisão final: dígito 1 (Submit answers) ou 2 (Cancel) — resposta
+  // FINAL de todo o fluxo de abas, marca tuiSent. O dígito vem do RE-PARSE
+  // (não do menu do estado), mesma cautela do plano.
+  function respondTuiReview(decision: 'submit' | 'cancel') {
+    if (!canRespondTui || !tuiReview || menuFp == null) return
+    const fresh = freshMenuMatches()
+    if (!fresh) return
+    const keys = buildReviewKeys(fresh, decision)
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, resolvedCount })
     onRespond?.(keys)
   }
 
@@ -302,8 +374,19 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
       {tuiMenu?.kind === 'question' && tuiQuestion && (
         <QuestionCard
           questions={tuiQuestion.questions}
-          onRespond={canRespondTui ? respondTuiQuestion : undefined}
+          onRespond={canRespondTui && !tuiMenu.multiSelect ? respondTuiQuestion : undefined}
+          onToggle={canRespondTui && tuiMenu.multiSelect ? respondTuiToggle : undefined}
+          onOtherSubmit={canRespondTui ? respondTuiOther : undefined}
           sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
+          tabs={tuiMenu.tabs}
+          onTabNav={canRespondTui && tuiMenu.tabs ? respondTuiTabNav : undefined}
+        />
+      )}
+      {tuiReview && (
+        <QuestionReviewCard
+          summary={tuiReview.context}
+          onDecide={canRespondTui ? respondTuiReview : undefined}
+          sent={tuiSent != null && tuiSent.fp === menuFp}
         />
       )}
       {tuiMenu?.kind === 'plan' && (

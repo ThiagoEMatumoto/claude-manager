@@ -12,8 +12,10 @@ import { Clock, Loader, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
 import { CommandCard, CommandOutputCard } from './CommandCard'
+import { CompactSummaryCard } from './CompactSummaryCard'
 import { MessageBubble } from './MessageBubble'
 import { MetaCard } from './MetaCard'
+import { ModelChangeChip } from './ModelChangeChip'
 import { PermissionCard } from './PermissionCard'
 import { PlanCard } from './PlanCard'
 import { QuestionCard } from './QuestionCard'
@@ -364,7 +366,21 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
             case 'thinking':
               return <ThinkingCard key={i} text={m.text} />
             case 'system':
-              return <SystemCard key={i} label={m.label} detail={m.detail} level={m.level} />
+              return (
+                <SystemCard
+                  key={i}
+                  label={m.label}
+                  detail={m.detail}
+                  level={m.level}
+                  trigger={m.trigger}
+                  preTokens={m.preTokens}
+                  postTokens={m.postTokens}
+                />
+              )
+            case 'compact_summary':
+              return <CompactSummaryCard key={i} text={m.text} />
+            case 'model_change':
+              return <ModelChangeChip key={i} from={m.from} to={m.to} />
             case 'command':
               return <CommandCard key={i} name={m.name} args={m.args} />
             case 'command_output':

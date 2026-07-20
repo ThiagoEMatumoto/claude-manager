@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { AlertTriangle, ChevronRight, Settings } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { fmtTokens } from '../../overview/usage-format'
 
 interface Props {
   label: string
   detail: string
   level: 'info' | 'warning' | 'error'
+  // Só preenchidos no compact_boundary quando o transcript grava compactMetadata.
+  trigger?: string
+  preTokens?: number
+  postTokens?: number
 }
 
 const LEVEL_COLOR: Record<Props['level'], string> = {
@@ -14,12 +19,20 @@ const LEVEL_COLOR: Record<Props['level'], string> = {
   error: 'text-[var(--color-danger)]',
 }
 
+const TRIGGER_LABEL: Record<string, string> = { auto: 'automática', manual: 'manual' }
+
 // Contexto de sistema CURADO: chip discreto e colapsado, centralizado entre as
 // mensagens. Só expande o detalhe sob demanda — nunca despeja conteúdo cru inline.
-export function SystemCard({ label, detail, level }: Props) {
+export function SystemCard({ label, detail, level, trigger, preTokens, postTokens }: Props) {
   const [open, setOpen] = useState(false)
   const color = LEVEL_COLOR[level]
   const showsMore = detail.trim() !== '' && detail.trim() !== label.trim()
+  const suffix = [
+    trigger && (TRIGGER_LABEL[trigger] ?? trigger),
+    preTokens != null && postTokens != null && `${fmtTokens(preTokens)}→${fmtTokens(postTokens)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <div className="flex justify-center">
       <div className="max-w-[85%] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/40 text-xs">
@@ -39,6 +52,7 @@ export function SystemCard({ label, detail, level }: Props) {
           )}
           <Icon as={level === 'error' ? AlertTriangle : Settings} size={11} className="shrink-0" />
           <span className="font-medium">{label}</span>
+          {suffix && <span className="text-[var(--color-text-dim)]">· {suffix}</span>}
         </button>
         {open && showsMore && (
           <div className="whitespace-pre-wrap break-words border-t border-[var(--color-border)] px-2 py-1.5 text-[var(--color-text-dim)]">

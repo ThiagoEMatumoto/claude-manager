@@ -26,18 +26,26 @@ interface RawLine {
   // Conteúdo injetado pela CLI no turno do usuário (SKILL.md, caveats, avisos) —
   // o humano NÃO digitou isso. Nunca pode virar bolha de usuário.
   isMeta?: boolean
+  // Resumo do /compact gravado como turno type:'user'. text vem em
+  // message.content (string) — o humano nunca digitou isso.
+  isCompactSummary?: boolean
   // Linhas type:'system': metadados de nível de linha (sem `message`). subtype
   // classifica; content/error trazem o texto; level a severidade.
   subtype?: string
   content?: string
   level?: string
   error?: unknown
+  // Presente só em subtype:'compact_boundary'. trigger: 'manual'|'auto'.
+  compactMetadata?: { trigger?: string; preTokens?: number; postTokens?: number }
   message?: {
     // id da mensagem da API. Linhas assistant de um mesmo turno de streaming
     // compartilham o id — base do agrupamento de blocos text adjacentes.
     id?: string
     role?: string
     content?: string | RawContentItem[]
+    // Só em linhas assistant. '<synthetic>' marca turnos sem modelo real
+    // (ex.: sumarização interna) — ignorado na detecção de troca de modelo.
+    model?: string
   }
   // Campo IRMÃO de `message` (nível da linha, não do content). A CLI grava aqui o
   // resultado estruturado do tool_use que a linha responde: `answers` (mapa
@@ -184,9 +192,16 @@ function asLevel(v: unknown): 'info' | 'warning' | 'error' {
 
 // PURO: linha system → chip curado, ou null se for um subtype não-whitelistado.
 // label = texto curto do chip (sempre visível); detail = conteúdo expandido.
-function parseSystemLine(
-  obj: RawLine,
-): { label: string; detail: string; level: 'info' | 'warning' | 'error' } | null {
+// compact_boundary carrega trigger/preTokens/postTokens quando o transcript
+// grava compactMetadata (CLIs antigas não gravam — campos ficam undefined).
+function parseSystemLine(obj: RawLine): {
+  label: string
+  detail: string
+  level: 'info' | 'warning' | 'error'
+  trigger?: string
+  preTokens?: number
+  postTokens?: number
+} | null {
   const sub = obj.subtype
   if (!sub || !(sub in SYSTEM_LABELS)) return null
   const label = SYSTEM_LABELS[sub]
@@ -194,6 +209,17 @@ function parseSystemLine(
   if (sub === 'api_error') {
     const detail = typeof obj.error === 'string' ? obj.error : content || JSON.stringify(obj.error ?? '')
     return { label, detail, level: 'error' }
+  }
+  if (sub === 'compact_boundary' && obj.compactMetadata) {
+    const cm = obj.compactMetadata
+    return {
+      label,
+      detail: content || label,
+      level: asLevel(obj.level),
+      trigger: typeof cm.trigger === 'string' ? cm.trigger : undefined,
+      preTokens: typeof cm.preTokens === 'number' ? cm.preTokens : undefined,
+      postTokens: typeof cm.postTokens === 'number' ? cm.postTokens : undefined,
+    }
   }
   return { label, detail: content || label, level: asLevel(obj.level) }
 }
@@ -245,6 +271,9 @@ function metaLabel(text: string): string {
 // commands, stdout de comando, avisos) — a ordem abaixo é FAIL-SAFE: só string
 // sem nenhum marker conhecido vira bolha 'user'.
 export function classifyUserString(obj: RawLine, text: string): ChatMessage {
+  // Resumo do /compact: SEMPRE prioritário — o marker vem direto da CLI, não
+  // precisa (nem deve) passar pelas heurísticas de texto abaixo.
+  if (obj.isCompactSummary === true) return { kind: 'compact_summary', text }
   if (obj.isMeta === true) return { kind: 'meta', text, label: metaLabel(text) }
   if (text.includes('<command-name>')) {
     const cmd = parseCommandTag(text)
@@ -314,6 +343,9 @@ export function parseChatMessages(
   // mesmo id). QUALQUER outro push (tool_use, thinking, user, …) quebra a
   // adjacência — o interleaving texto→tool→texto é preservado.
   let lastAssistantMergeId: string | null = null
+  // Último modelo real (não-'<synthetic>') visto numa linha assistant. null até
+  // a 1ª ocorrência — a 1ª nunca gera marcador, só define o baseline.
+  let lastModel: string | null = null
   const push = (msg: ChatMessage): void => {
     lastAssistantMergeId = null
     out.push(msg)
@@ -407,6 +439,16 @@ export function parseChatMessages(
 
     // assistant
     const msgId = typeof obj.message?.id === 'string' ? obj.message.id : null
+    // Troca de modelo mid-session: emite o marcador ANTES do conteúdo deste
+    // turno. '<synthetic>' (turnos sem modelo real) é ignorado por completo —
+    // não conta como troca nem vira o novo baseline.
+    const model = typeof obj.message?.model === 'string' ? obj.message.model : null
+    if (model && model !== '<synthetic>') {
+      if (lastModel !== null && model !== lastModel) {
+        push({ kind: 'model_change', from: lastModel, to: model })
+      }
+      lastModel = model
+    }
     if (Array.isArray(content)) {
       for (const item of content) {
         if (item?.type === 'text' && typeof item.text === 'string') {

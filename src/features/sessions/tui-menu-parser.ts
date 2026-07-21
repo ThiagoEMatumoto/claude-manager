@@ -437,6 +437,25 @@ export function gateMenuByStatus(
   return null
 }
 
+// "Pergunta X de Y" pro fluxo de multi-pergunta numa só chamada (Fase 2): a
+// barra de abas SEMPRE termina em "Submit" (validado ao vivo, sonda Fase 0/2 —
+// ver docs/probe-2116-findings.md); as abas antes dela são as perguntas da
+// sequência, `done` vira true assim que cada uma é respondida. Multi-select
+// PURO (uma pergunta só, categorias como abas) usa o MESMO shape de `tabs` com
+// semântica diferente — por isso `multiSelect` é obrigatório aqui pra não
+// rotular "Pergunta 1 de 1" numa tela que não é uma sequência de perguntas.
+export function questionPositionLabel(
+  tabs: TuiMenuTab[] | undefined,
+  multiSelect: boolean,
+): string | undefined {
+  if (multiSelect || !tabs || tabs.length < 2) return undefined
+  const questionTabs = tabs.slice(0, -1) // último item = "Submit"
+  if (questionTabs.length < 2) return undefined
+  const answered = questionTabs.filter((t) => t.done).length
+  const current = Math.min(answered + 1, questionTabs.length)
+  return `Pergunta ${current} de ${questionTabs.length}`
+}
+
 // Identidade estável de um menu parseado (pergunta + labels na ordem). Usada pra:
 // (a) não re-renderizar quando o re-parse produz o mesmo menu; (b) guard de
 // clique — re-parse fresco divergente do menu clicado → NÃO digitar no PTY.

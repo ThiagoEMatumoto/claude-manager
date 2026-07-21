@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gateMenuByStatus, menuFingerprint, parseTuiMenu } from './tui-menu-parser'
+import { gateMenuByStatus, menuFingerprint, parseTuiMenu, questionPositionLabel } from './tui-menu-parser'
 
 // Fixtures espelham o desenho REAL da TUI do claude 2.1.212 (validação live +
 // strings do binário) — ver header do tui-menu-parser.
@@ -597,5 +597,54 @@ describe('menuFingerprint', () => {
     const withPreview = { ...q, submitOnDigit: false }
     const withoutPreview = { ...q, submitOnDigit: true }
     expect(menuFingerprint(withPreview)).toBe(menuFingerprint(withoutPreview))
+  })
+})
+
+describe('questionPositionLabel — Fase 2 (multi-pergunta numa só chamada)', () => {
+  it('undefined sem tabs (single-select comum)', () => {
+    expect(questionPositionLabel(undefined, false)).toBeUndefined()
+  })
+
+  it('undefined em multi-select puro (mesmo shape de tabs, semântica diferente)', () => {
+    const tabs = [
+      { label: 'Linguagens', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, true)).toBeUndefined()
+  })
+
+  it('undefined com só 1 aba de pergunta + Submit (não é sequência)', () => {
+    const tabs = [
+      { label: 'Cor', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBeUndefined()
+  })
+
+  it('"Pergunta 1 de 2" na 1ª pergunta (nenhuma aba done ainda)', () => {
+    const tabs = [
+      { label: 'Cor', done: false },
+      { label: 'Hobby', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 1 de 2')
+  })
+
+  it('"Pergunta 2 de 2" depois de responder a 1ª (sonda Fase 2: Cor done, Hobby pendente)', () => {
+    const tabs = [
+      { label: 'Cor', done: true },
+      { label: 'Hobby', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 2 de 2')
+  })
+
+  it('clampa em N/N se todas as perguntas já vieram done (defensivo)', () => {
+    const tabs = [
+      { label: 'Cor', done: true },
+      { label: 'Hobby', done: true },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 2 de 2')
   })
 })

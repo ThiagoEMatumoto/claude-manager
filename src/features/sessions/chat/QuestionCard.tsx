@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, MessageCircleQuestion, Square, SquareCheck } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatQuestion } from '../../../../shared/types/ipc'
+import { questionPositionLabel } from '../tui-menu-parser'
 
 interface Props {
   questions: ChatQuestion[]
@@ -83,8 +84,10 @@ function OtherField({
 // - single-select: clique = onRespond (o ChatView decide dígito-só ou
 //   dígito+Enter, conforme `submitOnDigit` do menu parseado).
 // - multiSelect: clique = onToggle (checkbox, nunca submete sozinho).
-// - "Other" (single-select apenas — sem evidência validada pro caso
-//   multi+Other): campo de texto inline via onOtherSubmit.
+// - "Other" (texto livre): campo de texto inline via onOtherSubmit — validado
+//   ao vivo tanto pergunta única quanto DENTRO de multi-pergunta (sonda Fase 2,
+//   docs/probe-2116-findings.md); multi-SELECT+Other continua sem evidência e
+//   é filtrado antes de chegar aqui (ver `tuiQuestion` em ChatView).
 export function QuestionCard({
   questions,
   answers,
@@ -102,6 +105,10 @@ export function QuestionCard({
   const selectClickable = onRespond != null && !answered && !sent && q != null && !q.multiSelect
   const toggleClickable = onToggle != null && !answered && !sent && q != null && q.multiSelect
   const preview = q?.options.find((o) => o.preview != null)?.preview
+  // Multi-pergunta numa só chamada: a barra de abas já indica progresso
+  // (rótulos + done), mas "Pergunta X de Y" deixa explícito sem precisar
+  // decodificar os chips — undefined pra multi-select puro (ver questionPositionLabel).
+  const positionLabel = questionPositionLabel(tabs, q?.multiSelect ?? false)
 
   return (
     <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)]/60 text-sm">
@@ -113,6 +120,9 @@ export function QuestionCard({
       </div>
       {tabs && tabs.length > 0 && (
         <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-xs">
+          {positionLabel && (
+            <span className="shrink-0 text-[var(--color-text-dim)]">{positionLabel}</span>
+          )}
           <button
             type="button"
             onClick={() => onTabNav?.('prev')}

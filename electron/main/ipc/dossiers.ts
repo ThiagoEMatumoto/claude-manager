@@ -67,6 +67,27 @@ function broadcastRun(run: DossierRun): DossierRun {
   return run
 }
 
+// Para falhas de estágio (extract/verify/synth via claude -p) a pipeline já
+// persiste status:'failed' + error antes de relançar (ver dossier-pipeline.ts).
+// Aqui absorvemos ESSA rejeição especificamente e devolvemos a run já
+// atualizada — assim o caller (renderer) recebe uma promise resolvida e
+// dispara o refresh normal, exercendo o branch de UI que já existe pra
+// status 'failed'. Outras rejeições (ex.: throttle de fetch, run inexistente)
+// não deixam a run em 'failed' — nesses casos relançamos, preservando o
+// comportamento anterior (promise rejeitada).
+async function runPipelineStep(
+  runId: string,
+  action: () => Promise<DossierRun>,
+): Promise<DossierRun> {
+  try {
+    return broadcastRun(await action())
+  } catch (err) {
+    const run = store.getRun(runId)
+    if (!run || run.status !== 'failed') throw err
+    return broadcastRun(run)
+  }
+}
+
 export function registerDossiersIpc(): void {
   // ---- dossiers (entidade persistente) ----
 
@@ -107,20 +128,17 @@ export function registerDossiersIpc(): void {
 
   ipcMain.handle('dossiers:approveGateA', async (_e, raw: unknown): Promise<DossierRun> => {
     const { runId, plan } = approveGateASchema.parse(raw)
-    const run = await getDossierPipeline().approveGateA(runId, plan)
-    return broadcastRun(run)
+    return runPipelineStep(runId, () => getDossierPipeline().approveGateA(runId, plan))
   })
 
   ipcMain.handle('dossiers:approveGateB', async (_e, raw: unknown): Promise<DossierRun> => {
     const { runId, keepEvidenceIds } = approveGateBSchema.parse(raw)
-    const run = await getDossierPipeline().approveGateB(runId, keepEvidenceIds)
-    return broadcastRun(run)
+    return runPipelineStep(runId, () => getDossierPipeline().approveGateB(runId, keepEvidenceIds))
   })
 
   ipcMain.handle('dossiers:resumeRun', async (_e, raw: unknown): Promise<DossierRun> => {
     const { runId } = resumeRunSchema.parse(raw)
-    const run = await getDossierPipeline().resumeRun(runId)
-    return broadcastRun(run)
+    return runPipelineStep(runId, () => getDossierPipeline().resumeRun(runId))
   })
 
   // ---- leituras (vão direto ao store) ----

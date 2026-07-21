@@ -23,6 +23,10 @@ interface Props {
   // `questions[0]`; os botões só navegam (nunca submetem).
   tabs?: { label: string; done: boolean }[]
   onTabNav?: (direction: 'next' | 'prev') => void
+  // Multi-select PURO (Bug 3): botão dedicado que sai da tela de checkboxes —
+  // navegar as abas sozinho nunca chega na revisão, precisa de Enter separado
+  // (ver buildMultiSelectSubmitKeys). Ausente/sem tabs = sem botão.
+  onSubmitMulti?: () => void
 }
 
 // Uma opção foi escolhida se bate exata (single) ou aparece na lista juntada
@@ -90,6 +94,7 @@ export function QuestionCard({
   sentLabel,
   tabs,
   onTabNav,
+  onSubmitMulti,
 }: Props) {
   const answered = answers != null
   const sent = sentLabel != null && !answered
@@ -274,6 +279,15 @@ export function QuestionCard({
                   )
                 })}
               </div>
+              {qq === q && qq.multiSelect && toggleClickable && onSubmitMulti && (
+                <button
+                  type="button"
+                  onClick={onSubmitMulti}
+                  className="self-start rounded border border-[var(--color-accent)]/50 bg-[var(--color-accent)]/10 px-2 py-1 text-xs font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/20"
+                >
+                  Enviar respostas
+                </button>
+              )}
               {qq === q && preview && (
                 <pre className="max-h-48 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-[var(--color-text)]/90">
                   {preview}
@@ -289,7 +303,7 @@ export function QuestionCard({
               : selectClickable
                 ? 'Clique numa opção pra responder — ou use o compositor/terminal.'
                 : toggleClickable
-                  ? 'Marque as opções e use a barra de abas pra avançar até enviar.'
+                  ? 'Marque as opções e clique em "Enviar respostas" quando terminar.'
                   : 'Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.'}
           </div>
         )}

@@ -50,6 +50,21 @@ export function buildTabKeys(direction: 'next' | 'prev'): string[] {
   return [direction === 'next' ? '\x1b[C' : '\x1b[D']
 }
 
+// Submete um multi-select PURO (checkboxes marcados, uma pergunta só): o
+// parser não expõe qual aba está com o cursor agora (TuiMenuTab só tem
+// label/done, sem "aba ativa" — ver tui-menu-parser), então navegamos
+// `tabCount` vezes pra DIREITA — suficiente pra chegar em "Submit" venha de
+// onde vier, já que over-navegar além do fim CLAMPA sem efeito colateral
+// (validado ao vivo, sonda Fase 0: 3 setas num tab bar de 2 abas ainda
+// resolveu) — e Enter confirma a entrada na tela de revisão. Sem Enter
+// depois da navegação, o clique fica preso em "seleciona mas não envia"
+// (Bug 3). NUNCA usado em multi-pergunta (esse fluxo já resolve por
+// dígito-por-pergunta + buildReviewKeys no fim, ver findReviewOptionIndex).
+export function buildMultiSelectSubmitKeys(tabCount: number): string[] {
+  if (!Number.isInteger(tabCount) || tabCount <= 0) return []
+  return [...Array(tabCount).fill('\x1b[C'), '\r']
+}
+
 // Opções da tela de revisão ("Review your answers") pelo LABEL exato do
 // binário — nunca por posição fixa (a ordem/contagem pode variar em teoria,
 // mesma cautela de findManualApproveIndex).

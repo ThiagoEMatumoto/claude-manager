@@ -302,6 +302,7 @@ const api: Api = {
     getRun: (runId: string) => invoke('dossiers:getRun', runId),
     listEvidence: (runId: string) => invoke('dossiers:listEvidence', runId),
     listSources: (runId: string) => invoke('dossiers:listSources', runId),
+    isWebSearchEnabled: () => invoke('dossiers:isWebSearchEnabled'),
     onRunUpdated: (handler) => subscribe<unknown>('dossier:run-updated', handler),
     onUpdated: (handler) => subscribe<unknown>('dossier:updated', handler),
   },

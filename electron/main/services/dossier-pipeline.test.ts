@@ -171,12 +171,47 @@ describe('dossier-pipeline', () => {
 
   it('roteamento do verifier: primary → primary_accepted; vendor isolado → single_source', async () => {
     const verifier = new StubVerifier()
-    // primary (high) → primary_accepted sem corroboração.
-    expect(await verifier.verify('c', 'high', 0)).toBe('primary_accepted')
-    // vendor (biased) sem corroboração → single_source.
-    expect(await verifier.verify('c', 'biased', 0)).toBe('single_source')
-    // low sem corroboração → single_source; com corroboração → corroborated.
-    expect(await verifier.verify('c', 'low', 0)).toBe('single_source')
-    expect(await verifier.verify('c', 'low', 2)).toBe('corroborated')
+    const verdicts = await verifier.verify([
+      { id: 'a', claim: 'x', verbatimQuote: 'q', sourceId: 's1', trustTier: 'high' },
+      { id: 'b', claim: 'y', verbatimQuote: 'q', sourceId: 's2', trustTier: 'biased' },
+      { id: 'c', claim: 'z', verbatimQuote: 'q', sourceId: 's3', trustTier: 'low' },
+    ])
+    expect(verdicts.get('a')?.state).toBe('primary_accepted')
+    expect(verdicts.get('b')?.state).toBe('single_source')
+    expect(verdicts.get('c')?.state).toBe('single_source')
+  })
+
+  it('verifier em lote: fontes distintas com o mesmo claim → corroborated; negação → contested', async () => {
+    const verifier = new StubVerifier()
+    const verdicts = await verifier.verify([
+      { id: 'a', claim: 'o abandono caiu', verbatimQuote: 'q', sourceId: 's1', trustTier: 'medium' },
+      { id: 'b', claim: 'O abandono caiu', verbatimQuote: 'q', sourceId: 's2', trustTier: 'medium' },
+      { id: 'c', claim: 'não o abandono caiu', verbatimQuote: 'q', sourceId: 's3', trustTier: 'low' },
+      // mesma fonte de 'a': não corrobora nem contradiz.
+      { id: 'd', claim: 'o abandono caiu', verbatimQuote: 'q', sourceId: 's1', trustTier: 'medium' },
+    ])
+
+    expect(verdicts.get('b')).toEqual({
+      state: 'contested',
+      corroboratedBy: ['a', 'd'],
+      contradictedBy: ['c'],
+    })
+    expect(verdicts.get('c')?.state).toBe('contested')
+    expect(verdicts.get('c')?.contradictedBy).toEqual(['a', 'b', 'd'])
+    expect(verdicts.get('a')?.corroboratedBy).not.toContain('d')
+  })
+
+  it('persiste corroboração/contradição em evidence_records no Gate B', async () => {
+    const dossier = newDossier()
+    const pipeline = makePipeline()
+    const started = await pipeline.startRun(dossier.id)
+    await pipeline.approveGateA(started.id)
+    await pipeline.approveGateB(started.id)
+
+    const evidence = store.listEvidence(started.id)
+    expect(evidence.length).toBeGreaterThan(0)
+    // Sem relação encontrada as colunas ficam nulas — o que importa é que o
+    // veredito passou pelo setter e o state saiu de 'unverified'.
+    expect(evidence.every((e) => e.state !== 'unverified')).toBe(true)
   })
 })

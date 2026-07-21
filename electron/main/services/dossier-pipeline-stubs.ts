@@ -1,14 +1,16 @@
-import type { EvidenceState, TrustTier } from '../../../shared/types/ipc'
-import type {
-  ExtractedClaim,
-  Extractor,
-  FetchedDocument,
-  SearchOpts,
-  Snippet,
-  SourceProvider,
-  SynthRecord,
-  Synthesizer,
-  Verifier,
+import {
+  routeEvidenceState,
+  type ExtractedClaim,
+  type Extractor,
+  type FetchedDocument,
+  type SearchOpts,
+  type Snippet,
+  type SourceProvider,
+  type SynthRecord,
+  type Synthesizer,
+  type VerifyCandidate,
+  type Verifier,
+  type VerifyVerdict,
 } from './dossier-pipeline-types'
 
 // Stubs determinísticos: sem web real. A LÓGICA de produto (roteamento do verifier,
@@ -108,19 +110,41 @@ export class StubExtractor implements Extractor {
   }
 }
 
-// Verifier com lógica de roteamento REAL (regra de produto, não stub):
-//  - trust 'high'                         → primary_accepted (sem exigir corroboração)
-//  - 'biased'/'low' com 0 corroborações   → single_source
-//  - >=1 corroboração                     → corroborated
+// Base de um claim para o pareamento determinístico do stub: 'não X' e 'X' têm a
+// mesma base, e é isso que caracteriza a contradição aqui.
+function claimBase(claim: string): { base: string; negated: boolean } {
+  const trimmed = claim.trim().toLowerCase()
+  const match = /^(não|nao|not)\s+(.*)$/.exec(trimmed)
+  return match ? { base: match[2], negated: true } : { base: trimmed, negated: false }
+}
+
+// Verifier com roteamento REAL (regra de produto compartilhada com o verifier
+// Claude, via routeEvidenceState). O que é stub aqui é só o pareamento semântico,
+// que vira uma comparação textual determinística entre fontes DISTINTAS:
+//  - mesma base e mesma polaridade  → corrobora
+//  - mesma base e polaridade oposta → contradiz (→ contested)
 export class StubVerifier implements Verifier {
-  async verify(
-    _claim: string,
-    trustTier: TrustTier,
-    corroborating: number,
-  ): Promise<EvidenceState> {
-    if (trustTier === 'high') return 'primary_accepted'
-    if (corroborating >= 1) return 'corroborated'
-    return 'single_source'
+  async verify(candidates: readonly VerifyCandidate[]): Promise<Map<string, VerifyVerdict>> {
+    const parsed = candidates.map((c) => ({ candidate: c, ...claimBase(c.claim) }))
+    const out = new Map<string, VerifyVerdict>()
+
+    for (const self of parsed) {
+      const corroboratedBy: string[] = []
+      const contradictedBy: string[] = []
+      for (const other of parsed) {
+        if (other.candidate.id === self.candidate.id) continue
+        if (other.candidate.sourceId === self.candidate.sourceId) continue
+        if (other.base !== self.base) continue
+        if (other.negated === self.negated) corroboratedBy.push(other.candidate.id)
+        else contradictedBy.push(other.candidate.id)
+      }
+      out.set(self.candidate.id, {
+        state: routeEvidenceState(self.candidate.trustTier, corroboratedBy, contradictedBy),
+        corroboratedBy,
+        contradictedBy,
+      })
+    }
+    return out
   }
 }
 

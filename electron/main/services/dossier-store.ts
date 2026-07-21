@@ -517,6 +517,33 @@ export function updateEvidenceState(id: string, state: EvidenceState): EvidenceR
   return record
 }
 
+// Grava o veredito completo da verificação: state + as relações encontradas
+// (corroboração/contradição). Como updateEvidenceState, não toca na proveniência.
+export function updateEvidenceVerdict(
+  id: string,
+  verdict: { state: EvidenceState; corroboratedBy: string[]; contradictedBy: string[] },
+): EvidenceRecord {
+  getDb()
+    .prepare(
+      `UPDATE evidence_records
+         SET state = @state,
+             corroborated_by_json = @corroborated_by_json,
+             contradicted_by_json = @contradicted_by_json
+       WHERE id = @id`,
+    )
+    .run({
+      id,
+      state: verdict.state,
+      corroborated_by_json:
+        verdict.corroboratedBy.length > 0 ? JSON.stringify(verdict.corroboratedBy) : null,
+      contradicted_by_json:
+        verdict.contradictedBy.length > 0 ? JSON.stringify(verdict.contradictedBy) : null,
+    })
+  const record = getEvidence(id)
+  if (!record) throw new Error(`evidence record not found: ${id}`)
+  return record
+}
+
 // Remove um record (poda no Gate B). Hard delete: o usuário decidiu que não entra
 // na síntese.
 export function deleteEvidence(id: string): void {

@@ -259,6 +259,34 @@ describe('dossier-store', () => {
       expect(ev.contradictedByJson).toBeNull()
     })
 
+    it('updateEvidenceVerdict grava state + relações; arrays vazios viram null', () => {
+      const { run, source } = newChain()
+      const ev = store.addEvidence({
+        dossierRunId: run.id,
+        sourceId: source.id,
+        claim: 'c',
+        verbatimQuote: 'q',
+        state: 'unverified',
+      })
+
+      const contested = store.updateEvidenceVerdict(ev.id, {
+        state: 'contested',
+        corroboratedBy: ['ev-a'],
+        contradictedBy: ['ev-b', 'ev-c'],
+      })
+      expect(contested.state).toBe('contested')
+      expect(JSON.parse(contested.corroboratedByJson!)).toEqual(['ev-a'])
+      expect(JSON.parse(contested.contradictedByJson!)).toEqual(['ev-b', 'ev-c'])
+
+      const cleared = store.updateEvidenceVerdict(ev.id, {
+        state: 'single_source',
+        corroboratedBy: [],
+        contradictedBy: [],
+      })
+      expect(cleared.corroboratedByJson).toBeNull()
+      expect(cleared.contradictedByJson).toBeNull()
+    })
+
     it('listEvidence filtra por run e ordena por created_at', () => {
       const { run, source } = newChain() // já criou 1 evidence
       store.addEvidence({

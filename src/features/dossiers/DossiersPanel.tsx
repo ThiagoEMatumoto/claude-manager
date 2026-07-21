@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
-import { Archive, PlayCircle, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Archive, PlayCircle, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { dossiersApi } from '@/lib/ipc'
 import { useDossiersStore } from '@/store/dossiersStore'
 import type { Dossier, DossierRun } from '../../../shared/types/ipc'
 import { NewDossierForm } from './NewDossierForm'
@@ -136,6 +137,27 @@ function DetailColumn() {
   )
 }
 
+// Sem a chave da Tavily o funil roda com fontes fabricadas pelo provedor stub e
+// o dossiê "conclui" mesmo assim — o aviso existe pra essa falha não ser silenciosa.
+function WebSearchWarning() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    void dossiersApi.isWebSearchEnabled().then(setEnabled)
+  }, [])
+
+  if (enabled !== false) return null
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-warning)]/10 px-5 py-2 text-xs text-[var(--color-warning)]">
+      <Icon as={AlertTriangle} size={14} />
+      <span>
+        Busca web desligada — configure TAVILY_API_KEY em Configurações › Variáveis de ambiente.
+      </span>
+    </div>
+  )
+}
+
 export function DossiersPanel() {
   const dossiers = useDossiersStore((s) => s.dossiers)
   const loading = useDossiersStore((s) => s.loading)
@@ -168,6 +190,8 @@ export function DossiersPanel() {
           <Icon as={RefreshCw} size={16} />
         </button>
       </div>
+
+      <WebSearchWarning />
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-72 shrink-0 flex-col gap-2 overflow-y-auto border-r border-[var(--color-border)] p-3">

@@ -11,6 +11,8 @@ import {
   rescheduleAutoPull,
   runAutoPullNow,
 } from '../services/repo-pull-scheduler'
+import { CUSTOM_ENV_VARS_KEY } from '../services/custom-env'
+import { resetDossierPipeline } from '../services/dossier-pipeline-singleton'
 
 const getSchema = z.object({ key: z.string().min(1) })
 const setSchema = z.object({ key: z.string().min(1), value: z.unknown() })
@@ -34,5 +36,8 @@ export function registerPrefsIpc(): void {
       rescheduleAutoPull()
       if (key === AUTO_PULL_ENABLED_KEY && value === true) void runAutoPullNow()
     }
+    // Credenciais das integrações vivem em `custom_env_vars`: invalidar o
+    // pipeline faz a próxima run reler a chave sem restart.
+    if (key === CUSTOM_ENV_VARS_KEY) resetDossierPipeline()
   })
 }

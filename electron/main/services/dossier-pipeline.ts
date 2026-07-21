@@ -190,24 +190,29 @@ export class DossierPipeline {
 
   private async runExtract(runId: string): Promise<void> {
     this.storeApi.updateRun(runId, { status: 'extracting', stage: 'extracting' })
-    const fetched = this.storeApi.listSources(runId).filter((s) => s.status === 'fetched')
+    try {
+      const fetched = this.storeApi.listSources(runId).filter((s) => s.status === 'fetched')
 
-    await mapWithConcurrency(fetched, this.concurrency, async (source) => {
-      const doc = this.docCache.get(source.id) ?? (await this.sourceProvider.fetch(source.url))
-      const claims = await this.extractor.extract(doc, source.id)
-      for (const claim of claims) {
-        this.storeApi.addEvidence({
-          dossierRunId: runId,
-          sourceId: source.id,
-          claim: claim.claim,
-          verbatimQuote: claim.verbatimQuote,
-          anchor: claim.anchor ?? null,
-          state: 'unverified',
-          importance: claim.importance,
-        })
-      }
-    })
-    this.commitStage(runId, 'extracting')
+      await mapWithConcurrency(fetched, this.concurrency, async (source) => {
+        const doc = this.docCache.get(source.id) ?? (await this.sourceProvider.fetch(source.url))
+        const claims = await this.extractor.extract(doc, source.id)
+        for (const claim of claims) {
+          this.storeApi.addEvidence({
+            dossierRunId: runId,
+            sourceId: source.id,
+            claim: claim.claim,
+            verbatimQuote: claim.verbatimQuote,
+            anchor: claim.anchor ?? null,
+            state: 'unverified',
+            importance: claim.importance,
+          })
+        }
+      })
+      this.commitStage(runId, 'extracting')
+    } catch (err) {
+      this.failRun(runId, err)
+      throw err
+    }
   }
 
   // Verificação em LOTE: corroboração/contradição são relações entre claims de
@@ -217,58 +222,77 @@ export class DossierPipeline {
   // lotes diferentes não são comparados entre si.
   private async runVerify(runId: string): Promise<void> {
     this.storeApi.updateRun(runId, { status: 'verifying', stage: 'verifying' })
-    const records = this.storeApi.listEvidence(runId)
-    const sourcesById = this.indexSources(runId)
+    try {
+      const records = this.storeApi.listEvidence(runId)
+      const sourcesById = this.indexSources(runId)
 
-    const candidates: VerifyCandidate[] = records.map((record) => {
-      const source = sourcesById.get(record.sourceId)
-      if (!source) throw new Error(`evidence ${record.id} references missing source`)
-      return {
-        id: record.id,
-        claim: record.claim,
-        verbatimQuote: record.verbatimQuote,
-        sourceId: record.sourceId,
-        trustTier: source.trustTier,
-      }
-    })
+      const candidates: VerifyCandidate[] = records.map((record) => {
+        const source = sourcesById.get(record.sourceId)
+        if (!source) throw new Error(`evidence ${record.id} references missing source`)
+        return {
+          id: record.id,
+          claim: record.claim,
+          verbatimQuote: record.verbatimQuote,
+          sourceId: record.sourceId,
+          trustTier: source.trustTier,
+        }
+      })
 
-    for (let i = 0; i < candidates.length; i += VERIFY_BATCH_SIZE) {
-      const batch = candidates.slice(i, i + VERIFY_BATCH_SIZE)
-      const verdicts = await this.verifier.verify(batch)
-      for (const candidate of batch) {
-        const verdict = verdicts.get(candidate.id)
-        if (!verdict) throw new Error(`verifier omitiu o veredito de ${candidate.id}`)
-        this.storeApi.updateEvidenceVerdict(candidate.id, verdict)
+      for (let i = 0; i < candidates.length; i += VERIFY_BATCH_SIZE) {
+        const batch = candidates.slice(i, i + VERIFY_BATCH_SIZE)
+        const verdicts = await this.verifier.verify(batch)
+        for (const candidate of batch) {
+          const verdict = verdicts.get(candidate.id)
+          if (!verdict) throw new Error(`verifier omitiu o veredito de ${candidate.id}`)
+          this.storeApi.updateEvidenceVerdict(candidate.id, verdict)
+        }
       }
+      this.commitStage(runId, 'verifying')
+    } catch (err) {
+      this.failRun(runId, err)
+      throw err
     }
-    this.commitStage(runId, 'verifying')
   }
 
   private async runSynthesize(runId: string): Promise<void> {
     this.storeApi.updateRun(runId, { status: 'synthesizing', stage: 'synthesizing' })
-    const records = this.storeApi.listEvidence(runId)
-    const sourcesById = this.indexSources(runId)
+    try {
+      const records = this.storeApi.listEvidence(runId)
+      const sourcesById = this.indexSources(runId)
 
-    const synthRecords: SynthRecord[] = records.map((r) => {
-      const source = sourcesById.get(r.sourceId)
-      if (!source) throw new Error(`evidence ${r.id} references missing source`)
-      return {
-        id: r.id,
-        claim: r.claim,
-        verbatimQuote: r.verbatimQuote,
-        state: r.state,
-        sourceClass: source.sourceClass,
-      }
-    })
+      const synthRecords: SynthRecord[] = records.map((r) => {
+        const source = sourcesById.get(r.sourceId)
+        if (!source) throw new Error(`evidence ${r.id} references missing source`)
+        return {
+          id: r.id,
+          claim: r.claim,
+          verbatimQuote: r.verbatimQuote,
+          state: r.state,
+          sourceClass: source.sourceClass,
+        }
+      })
 
-    const summary = await this.synthesizer.synthesize(synthRecords)
-    // Grava o checkpoint de 'synthesizing' concluído, depois finaliza via updateRun
-    // (que carimba finished_at ao entrar no estado terminal 'done').
-    this.commitStage(runId, 'synthesizing')
-    this.storeApi.updateRun(runId, { summary, status: 'done', stage: 'done' })
+      const summary = await this.synthesizer.synthesize(synthRecords)
+      // Grava o checkpoint de 'synthesizing' concluído, depois finaliza via updateRun
+      // (que carimba finished_at ao entrar no estado terminal 'done').
+      this.commitStage(runId, 'synthesizing')
+      this.storeApi.updateRun(runId, { summary, status: 'done', stage: 'done' })
+    } catch (err) {
+      this.failRun(runId, err)
+      throw err
+    }
   }
 
   // ---- helpers ----
+
+  // Persiste a falha de um estágio (ex.: claude -p sem crédito/rate-limited)
+  // antes de relançar — sem isso a run fica travada pra sempre no status
+  // intermediário, já que updateRun(status: 'extracting'|...) rodou antes da
+  // chamada que quebrou.
+  private failRun(runId: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err)
+    this.storeApi.updateRun(runId, { status: 'failed', error: message })
+  }
 
   private indexSources(runId: string): Map<string, Source> {
     const map = new Map<string, Source>()

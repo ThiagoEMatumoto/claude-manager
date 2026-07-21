@@ -1,6 +1,14 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FetchedDocument, SearchOpts, Snippet, SourceProvider } from './dossier-pipeline-types'
+import type {
+  Extractor,
+  FetchedDocument,
+  SearchOpts,
+  Snippet,
+  SourceProvider,
+  Synthesizer,
+  Verifier,
+} from './dossier-pipeline-types'
 import { migrations } from './migrations/index'
 
 // Mesmo padrão do dossier-store.test: o store importa getDb de './db' (acoplado a
@@ -213,5 +221,75 @@ describe('dossier-pipeline', () => {
     // Sem relação encontrada as colunas ficam nulas — o que importa é que o
     // veredito passou pelo setter e o state saiu de 'unverified'.
     expect(evidence.every((e) => e.state !== 'unverified')).toBe(true)
+  })
+
+  // Falha silenciosa: quando um estágio real (claude -p) quebra (rate limit,
+  // crédito esgotado, etc.), a run não pode ficar travada pra sempre no status
+  // intermediário sem sinal nenhum pro usuário.
+  describe('falha de estágio: run termina em failed com error populado', () => {
+    it('extractor lança → run failed, error populado, checkpoint sem "extracting"', async () => {
+      const dossier = newDossier()
+      const throwingExtractor: Extractor = {
+        extract: () => Promise.reject(new Error('claude -p exited with code 1 (extractor)')),
+      }
+      const pipeline = new DossierPipeline(store, {
+        sourceProvider: new StubSourceProvider(),
+        extractor: throwingExtractor,
+        verifier: new StubVerifier(),
+        synthesizer: new StubSynthesizer(),
+      })
+
+      const started = await pipeline.startRun(dossier.id)
+      await expect(pipeline.approveGateA(started.id)).rejects.toThrow(/extractor/)
+
+      const failed = store.getRun(started.id)!
+      expect(failed.status).toBe('failed')
+      expect(failed.error).toContain('claude -p exited with code 1 (extractor)')
+      expect(failed.checkpointJson ?? '').not.toContain('extracting')
+    })
+
+    it('verifier lança → run failed, error populado', async () => {
+      const dossier = newDossier()
+      const throwingVerifier: Verifier = {
+        verify: () => Promise.reject(new Error('claude -p rate limited (verifier)')),
+      }
+      const pipeline = new DossierPipeline(store, {
+        sourceProvider: new StubSourceProvider(),
+        extractor: new StubExtractor(),
+        verifier: throwingVerifier,
+        synthesizer: new StubSynthesizer(),
+      })
+
+      const started = await pipeline.startRun(dossier.id)
+      await pipeline.approveGateA(started.id)
+      await expect(pipeline.approveGateB(started.id)).rejects.toThrow(/rate limited/)
+
+      const failed = store.getRun(started.id)!
+      expect(failed.status).toBe('failed')
+      expect(failed.error).toContain('claude -p rate limited (verifier)')
+    })
+
+    it('synthesizer lança → run failed, error populado', async () => {
+      const dossier = newDossier()
+      const throwingSynthesizer: Synthesizer = {
+        synthesize: () => Promise.reject(new Error('claude -p sem crédito (synthesizer)')),
+      }
+      const pipeline = new DossierPipeline(store, {
+        sourceProvider: new StubSourceProvider(),
+        extractor: new StubExtractor(),
+        verifier: new StubVerifier(),
+        synthesizer: throwingSynthesizer,
+      })
+
+      const started = await pipeline.startRun(dossier.id)
+      await pipeline.approveGateA(started.id)
+      await expect(pipeline.approveGateB(started.id)).rejects.toThrow(/sem crédito/)
+
+      const failed = store.getRun(started.id)!
+      expect(failed.status).toBe('failed')
+      expect(failed.error).toContain('claude -p sem crédito (synthesizer)')
+      // summary nunca foi setado — a run não deve parecer 'done'.
+      expect(failed.summary).toBeNull()
+    })
   })
 })

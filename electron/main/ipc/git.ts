@@ -9,6 +9,7 @@ import { getDb } from '../services/db'
 import { backfillRepoRemotes } from '../services/git-remote'
 import { cloneMissingRepos, listMissingRepos } from '../services/repo-clone'
 import { pullAllRepos, pullOneRepo } from '../services/repo-pull'
+import { recordPullRun, type PullRunTrigger } from '../services/repo-pull-store'
 import { emitToast } from '../services/notifications'
 import { validateBlankRepoName } from './blank-repo'
 import type { CloneMissingResult, PullRepoResult } from '../../../shared/types/ipc'
@@ -65,11 +66,14 @@ export async function cloneMissingWithToasts(): Promise<CloneMissingResult[]> {
 
 // Puxa (ff-only) todos os repos emitindo toast de progresso por-repo + um resumo
 // final. Compartilhado pelo handler manual (repos:pull-all) e pelo cron opt-in
-// (index.ts). Silencioso quando não há repos a atualizar.
-export async function pullAllWithToasts(): Promise<PullRepoResult[]> {
+// (repo-pull-scheduler.ts) — `trigger` distingue os dois na run persistida.
+// Silencioso (sem toast) quando não há repos a atualizar; a run ainda é gravada.
+export async function pullAllWithToasts(trigger: PullRunTrigger): Promise<PullRepoResult[]> {
+  const startedAt = Date.now()
   const results = await pullAllRepos(({ index, total, label }) => {
     emitToast('Atualizando repositórios', `git pull ${index} de ${total}: ${label}`)
   })
+  recordPullRun({ trigger, startedAt, finishedAt: Date.now(), results })
   const pulled = results.filter((r) => r.status === 'pulled').length
   const skipped = results.filter((r) => r.status === 'skipped').length
   const errored = results.filter((r) => r.status === 'error').length
@@ -201,7 +205,7 @@ export function registerGitIpc(): void {
 
   // Pull ff-only de todos os repos locais (pula sujos/divergentes) com progresso
   // via toast. Retorna o resumo por-repo.
-  ipcMain.handle('repos:pull-all', () => pullAllWithToasts())
+  ipcMain.handle('repos:pull-all', () => pullAllWithToasts('manual'))
 
   // Pull ff-only de um único repo, resolvido por repoId ou path.
   ipcMain.handle('repos:pull-one', (_e, payload: unknown) => {

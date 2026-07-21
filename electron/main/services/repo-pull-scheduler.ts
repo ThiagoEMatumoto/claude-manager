@@ -16,7 +16,7 @@ let autoPullTimer: ReturnType<typeof setInterval> | null = null
 export async function runAutoPullNow(): Promise<void> {
   if (!getPref(AUTO_PULL_ENABLED_KEY, false)) return
   try {
-    await pullAllWithToasts()
+    await pullAllWithToasts('auto')
   } catch (err) {
     console.error('[repo-sync] auto-pull falhou:', err)
   }

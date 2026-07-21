@@ -11,6 +11,7 @@ import * as featureStore from '../feature-store'
 import * as repoDepStore from '../repo-dependency-store'
 import * as handoffStore from '../handoff-store'
 import * as jobStore from '../scheduled-job-store'
+import * as repoPullStore from '../repo-pull-store'
 // Seam leaf (sem electron): dispara o run imediato sem importar a cadeia
 // job-scheduler → job-runner → ipc/sessions (que criaria ciclo com mcp/server).
 import { runJobNow } from '../job-run-now'
@@ -985,6 +986,11 @@ const jobReportSchema = z.object({
   report: z.string().min(1),
 })
 
+// Espelha ListPullRunsFilter (repo-pull-store).
+const repoPullRunListSchema = z.object({
+  limit: z.number().int().positive().optional(),
+})
+
 function scheduledJobTools(notify: McpNotify): ToolDef[] {
   return [
     {
@@ -1072,6 +1078,24 @@ function scheduledJobTools(notify: McpNotify): ToolDef[] {
   ]
 }
 
+// Espelha job_run_list (mesmo formato), mas pro histórico do auto-pull de repos
+// (repo_pull_runs, migration 033) — visibilidade direta de "está funcionando?".
+function repoPullTools(): ToolDef[] {
+  return [
+    {
+      name: 'repo_pull_run_list',
+      title: 'List repo auto-pull runs',
+      description:
+        'List the run history of the repo auto-pull/pull-all job (trigger auto|manual, timing, counts per status, per-repo results with branch breakdown), most recent first. Optional filter: limit (default 20).',
+      inputSchema: repoPullRunListSchema,
+      handler: (args) => {
+        const filter = repoPullRunListSchema.parse(args)
+        return ok({ items: repoPullStore.listPullRuns(filter) })
+      },
+    },
+  ]
+}
+
 export function buildTools(notify: McpNotify): ToolDef[] {
   return [
     ...overviewTools(),
@@ -1080,6 +1104,7 @@ export function buildTools(notify: McpNotify): ToolDef[] {
     ...featureTools(notify),
     ...handoffTools(notify),
     ...scheduledJobTools(notify),
+    ...repoPullTools(),
   ]
 }
 

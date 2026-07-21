@@ -34,7 +34,9 @@ export async function readOriginUrl(repoPath: string): Promise<RepoRemoteInfo> {
 
 // origin/HEAD aponta pra branch default do remote (ex. "origin/main"). Se não
 // estiver resolvido localmente, cai pra branch em checkout. Null se nada disso der.
-async function readDefaultBranch(git: ReturnType<typeof simpleGit>): Promise<string | null> {
+// Exportada pra reuso em repo-pull.ts como fallback quando repos.default_branch
+// estiver NULL (repo ainda não passou pelo backfill).
+export async function readDefaultBranch(git: ReturnType<typeof simpleGit>): Promise<string | null> {
   try {
     const ref = (await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim()
     if (ref) return ref.startsWith('origin/') ? ref.slice('origin/'.length) : ref

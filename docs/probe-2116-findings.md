@@ -228,3 +228,54 @@ Nada dos 5 layouts pedidos ficou sem reprodução — todos os 5 (a-e) produzira
 um `AskUserQuestion` real e uma sequência de teclas testada empiricamente.
 A única limitação é a metodológica já registrada acima (confirmação via JSONL
 não disponível; usei o parser real sobre o buffer real como fonte de verdade).
+
+## Fase 2 — Sonda dos tipos de cobertura ampla (multi-pergunta, Other)
+
+Gerado por `e2e/scenarios/probe-fase2-multiq-other.ts`. Diferença metodológica
+da Fase 0: aqui a sonda chama as **funções de produção reais**
+(`buildSelectKeys`, `buildOtherKeys`, `buildReviewKeys`, `playKeys` de
+`respond-keys.ts`) contra o `claude` real, em vez de tentar sequências de tecla
+cruas — o objetivo é confirmar se o *wiring já existente* resolve, não
+redescobrir a sequência.
+
+**Cenário A — single-select com "Other".** `buildOtherKeys(2, 'Elixir')` →
+`["3", "Elixir", "\r"]`. Aplicado via `playKeys`, o menu desapareceu do buffer
+(resolvido) na primeira tentativa. **Já funcionava, sem mudança de código.**
+
+**Cenário B — multi-pergunta (2 perguntas) com Other na 2ª.**
+`buildSelectKeys(Q1, 0)` → `["1"]` respondeu a Q1 e avançou pra Q2
+automaticamente (tab "Cor" virou `done:true`). Na Q2, `buildOtherKeys(2,
+'Fotografia')` → `["3", "Fotografia", "\r"]` levou direto pra
+`kind: 'question_review'` com o resumo `Cor → Vermelho` / `Hobby →
+Fotografia` correto (Other apareceu no resumo com o texto digitado, não com
+"Type something."). `buildReviewKeys(review, 'submit')` → `["1"]` (SEM Enter)
+resolveu o conjunto inteiro — confirma que o `question_review` tem
+`submitOnDigit: true` (sem preview) e dígito sozinho basta, refinando a
+incerteza registrada na Fase 0 ("não isolei se digit(1) sozinho já bastaria").
+
+**Conclusão Fase 2:** as 3 sub-features do catálogo de cobertura ampla:
+1. **Multi-pergunta numa só chamada** — mecanismo de submit E "Other" dentro
+   da sequência já funcionavam via `tabs`/`question_review` existentes (Fase
+   1/Bug 3 já validou o mesmo caminho pro multi-select). Único gap real era
+   UX: a barra de abas não deixava explícito "você está na pergunta 2 de 2"
+   (só os rótulos truncados + done/undone) — adicionado `questionPositionLabel`
+   (`tui-menu-parser.ts`) + render no `QuestionCard`, sem tocar no mecanismo
+   de teclas.
+2. **"Other" dinâmico** — já funcionava, inclusive dentro de multi-pergunta
+   (não coberto antes por sonda dedicada). Só o comentário em `QuestionCard.tsx`
+   estava desatualizado ("sem evidência validada pro caso multi+Other");
+   corrigido para reflexo do achado (multi-SELECT+Other continua sem
+   evidência e é filtrado à parte, isso não mudou).
+3. **Transições de permission-mode no chat** — investigado, NÃO implementado
+   nesta rodada: o modo atual (`currentMode`, `Terminal.tsx`) já é visível de
+   forma persistente via `PermissionPill`/`ComposerToolbar`, renderizado FORA
+   do toggle Terminal⇄Chat (visível nos dois modos). O pedido original
+   ("linha de sistema tipo 'Modo alterado para plan' quando o modo muda") é
+   um artefato DIFERENTE — um evento efêmero (nunca vai pro JSONL) que
+   precisaria de (a) histórico de transições com timestamp em `Terminal.tsx`
+   (hoje só guarda o valor atual) e (b) merge desse histórico na lista
+   `rendered` do `ChatView` pra aparecer na posição cronológica certa entre
+   as mensagens — mesmo padrão de "chip de sistema centralizado" já usado por
+   `SystemCard.tsx` (hoje só alimentado por `compact_boundary`, um evento real
+   do transcript, não por leitura de rodapé). Decisão de design que volta pro
+   usuário (ver relatório da sessão).

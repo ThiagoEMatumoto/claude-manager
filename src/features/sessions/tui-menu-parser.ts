@@ -118,6 +118,10 @@ const SEPARATOR_RE = /^─{3,}$/
 // numeração) — tolerado sem dígito na zona pós-última-opção; não é clicável
 // de qualquer forma (sentinela 'chat' já é filtrado no wiring).
 const UNNUMBERED_SENTINEL_RE = /^(Type something\.?|Chat about this\.?)$/
+// Chip/header truncado acima da pergunta (campo `header` da tool AskUserQuestion,
+// prefixado por um glyph de checkbox — observado ao vivo no 2.1.216, sonda
+// Fase 0). Nunca faz parte do texto da pergunta — é um rótulo curto à parte.
+const CHIP_RE = /^☐\s+\S/
 // Prompt de permissão de tool (y/n): headings "Do you want to make this edit to
 // …" / "Do you want to proceed?" / "run this command unsandboxed" etc. — todos
 // casam o genérico /Do you want/. Opções com strings exatas do binário 2.1.212.
@@ -202,6 +206,36 @@ function extractTabBar(lines: string[], questionLine: number, max = 6): TuiMenuT
     return tabs.length > 0 ? tabs : undefined
   }
   return undefined
+}
+
+// Pergunta: junta as linhas de wrap CONTÍGUAS (sem blank entre elas) da
+// pergunta acima da 1ª opção — a TUI quebra perguntas longas em várias linhas
+// visuais SEM inserir blank entre si (validado ao vivo, sonda Fase 0, claude
+// 2.1.216); junta com espaço pra reconstituir a prosa corrida. Primeiro pula
+// blank(s) imediatamente acima das opções (alguns layouts inserem um — 2.1.212)
+// até achar a última linha visual da pergunta (a "âncora"); dali sobe juntando
+// enquanto for não-branco e não for chip (CHIP_RE), barra de abas
+// (TAB_BAR_RE) ou linha de moldura de box (permission/trust: o diff/comando
+// acima da pergunta usa ╭╮╰╯─│, nunca é wrap da pergunta) — `max` limita o
+// pior caso (blank/chip/box ausentes) pra não engolir conversa anterior.
+const BOX_DRAWING_RE = /[┌┐└┘│╭╮╰╯─]/
+function extractQuestion(
+  lines: string[],
+  firstOptionLine: number,
+  max = 12,
+): { question?: string; questionLine: number } {
+  let i = firstOptionLine - 1
+  while (i >= 0 && lines[i].trim() === '') i--
+  if (i < 0) return { questionLine: firstOptionLine }
+  const parts: string[] = []
+  let questionLine = i
+  for (let seen = 0; i >= 0 && seen < max; i--, seen++) {
+    const t = lines[i].trim()
+    if (t === '' || CHIP_RE.test(t) || TAB_BAR_RE.test(t) || BOX_DRAWING_RE.test(t)) break
+    parts.unshift(t)
+    questionLine = i
+  }
+  return { question: parts.length > 0 ? parts.join(' ') : undefined, questionLine }
 }
 
 // Resumo "pergunta → resposta" da tela de revisão: linhas entre o título
@@ -316,17 +350,9 @@ export function parseTuiMenu(text: string): TuiMenu | null {
     options[highlightIdx] = { ...options[highlightIdx], preview: previewParts.join('\n') }
   }
 
-  // Pergunta: a linha não-branca mais próxima ACIMA da primeira opção.
-  let question: string | undefined
-  let questionLine = run[0].line
-  for (let i = run[0].line - 1; i >= 0; i--) {
-    const t = lines[i].trim()
-    if (t !== '') {
-      question = t
-      questionLine = i
-      break
-    }
-  }
+  // Pergunta: junta as linhas de wrap contíguas acima da 1ª opção (ver
+  // extractQuestion) — não só a última.
+  const { question, questionLine } = extractQuestion(lines, run[0].line)
 
   // Classificação com precedência review > plan > trust > permission >
   // question. AskUserQuestion sempre desenha as sentinelas (Type
@@ -409,6 +435,25 @@ export function gateMenuByStatus(
   )
     return menu
   return null
+}
+
+// "Pergunta X de Y" pro fluxo de multi-pergunta numa só chamada (Fase 2): a
+// barra de abas SEMPRE termina em "Submit" (validado ao vivo, sonda Fase 0/2 —
+// ver docs/probe-2116-findings.md); as abas antes dela são as perguntas da
+// sequência, `done` vira true assim que cada uma é respondida. Multi-select
+// PURO (uma pergunta só, categorias como abas) usa o MESMO shape de `tabs` com
+// semântica diferente — por isso `multiSelect` é obrigatório aqui pra não
+// rotular "Pergunta 1 de 1" numa tela que não é uma sequência de perguntas.
+export function questionPositionLabel(
+  tabs: TuiMenuTab[] | undefined,
+  multiSelect: boolean,
+): string | undefined {
+  if (multiSelect || !tabs || tabs.length < 2) return undefined
+  const questionTabs = tabs.slice(0, -1) // último item = "Submit"
+  if (questionTabs.length < 2) return undefined
+  const answered = questionTabs.filter((t) => t.done).length
+  const current = Math.min(answered + 1, questionTabs.length)
+  return `Pergunta ${current} de ${questionTabs.length}`
 }
 
 // Identidade estável de um menu parseado (pergunta + labels na ordem). Usada pra:

@@ -41,3 +41,15 @@ export function parsePermissionMode(text: string): PermissionMode | null {
 export function detectFooterMode(footer: string): PermissionMode {
   return parsePermissionMode(footer) ?? 'default'
 }
+
+// Decide se uma mudança de `currentMode` (Terminal.tsx) merece o banner efêmero de
+// transição. `prev` null cobre DOIS casos que nunca notificam: o estado inicial
+// (ainda não detectamos nada) e a PRIMEIRA detecção real (baseline, não é uma
+// "mudança" que o usuário fez — é só a leitura inicial do rodapé). Só dispara quando
+// já tínhamos um modo real anterior e ele difere do novo. Puro/testável (sem timers).
+export function shouldNotifyModeChange(
+  prev: PermissionMode | null,
+  next: PermissionMode | null,
+): boolean {
+  return prev != null && next != null && prev !== next
+}

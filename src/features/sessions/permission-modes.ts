@@ -27,3 +27,9 @@ export const PERMISSION_SHORT_LABELS: Record<PermissionMode, string> = {
   bypassPermissions: 'Bypass',
   dontAsk: 'S/ pergunta',
 }
+
+// Label completo (mesmo texto do PermissionPill não-compacto) pro banner efêmero de
+// transição de modo — nunca inventar rótulo novo, reusar o vocabulário já visível na UI.
+export function permissionModeLabel(mode: PermissionMode): string {
+  return PERMISSION_OPTIONS.find((opt) => opt.value === mode)?.label ?? 'Padrão'
+}

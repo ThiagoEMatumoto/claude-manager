@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, MessageCircleQuestion, Square, SquareCheck } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatQuestion } from '../../../../shared/types/ipc'
+import { questionPositionLabel } from '../tui-menu-parser'
 
 interface Props {
   questions: ChatQuestion[]
@@ -23,6 +24,10 @@ interface Props {
   // `questions[0]`; os botões só navegam (nunca submetem).
   tabs?: { label: string; done: boolean }[]
   onTabNav?: (direction: 'next' | 'prev') => void
+  // Multi-select PURO (Bug 3): botão dedicado que sai da tela de checkboxes —
+  // navegar as abas sozinho nunca chega na revisão, precisa de Enter separado
+  // (ver buildMultiSelectSubmitKeys). Ausente/sem tabs = sem botão.
+  onSubmitMulti?: () => void
 }
 
 // Uma opção foi escolhida se bate exata (single) ou aparece na lista juntada
@@ -79,8 +84,10 @@ function OtherField({
 // - single-select: clique = onRespond (o ChatView decide dígito-só ou
 //   dígito+Enter, conforme `submitOnDigit` do menu parseado).
 // - multiSelect: clique = onToggle (checkbox, nunca submete sozinho).
-// - "Other" (single-select apenas — sem evidência validada pro caso
-//   multi+Other): campo de texto inline via onOtherSubmit.
+// - "Other" (texto livre): campo de texto inline via onOtherSubmit — validado
+//   ao vivo tanto pergunta única quanto DENTRO de multi-pergunta (sonda Fase 2,
+//   docs/probe-2116-findings.md); multi-SELECT+Other continua sem evidência e
+//   é filtrado antes de chegar aqui (ver `tuiQuestion` em ChatView).
 export function QuestionCard({
   questions,
   answers,
@@ -90,6 +97,7 @@ export function QuestionCard({
   sentLabel,
   tabs,
   onTabNav,
+  onSubmitMulti,
 }: Props) {
   const answered = answers != null
   const sent = sentLabel != null && !answered
@@ -97,6 +105,10 @@ export function QuestionCard({
   const selectClickable = onRespond != null && !answered && !sent && q != null && !q.multiSelect
   const toggleClickable = onToggle != null && !answered && !sent && q != null && q.multiSelect
   const preview = q?.options.find((o) => o.preview != null)?.preview
+  // Multi-pergunta numa só chamada: a barra de abas já indica progresso
+  // (rótulos + done), mas "Pergunta X de Y" deixa explícito sem precisar
+  // decodificar os chips — undefined pra multi-select puro (ver questionPositionLabel).
+  const positionLabel = questionPositionLabel(tabs, q?.multiSelect ?? false)
 
   return (
     <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)]/60 text-sm">
@@ -108,6 +120,9 @@ export function QuestionCard({
       </div>
       {tabs && tabs.length > 0 && (
         <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5 text-xs">
+          {positionLabel && (
+            <span className="shrink-0 text-[var(--color-text-dim)]">{positionLabel}</span>
+          )}
           <button
             type="button"
             onClick={() => onTabNav?.('prev')}
@@ -274,6 +289,15 @@ export function QuestionCard({
                   )
                 })}
               </div>
+              {qq === q && qq.multiSelect && toggleClickable && onSubmitMulti && (
+                <button
+                  type="button"
+                  onClick={onSubmitMulti}
+                  className="self-start rounded border border-[var(--color-accent)]/50 bg-[var(--color-accent)]/10 px-2 py-1 text-xs font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/20"
+                >
+                  Enviar respostas
+                </button>
+              )}
               {qq === q && preview && (
                 <pre className="max-h-48 overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-[var(--color-text)]/90">
                   {preview}
@@ -289,7 +313,7 @@ export function QuestionCard({
               : selectClickable
                 ? 'Clique numa opção pra responder — ou use o compositor/terminal.'
                 : toggleClickable
-                  ? 'Marque as opções e use a barra de abas pra avançar até enviar.'
+                  ? 'Marque as opções e clique em "Enviar respostas" quando terminar.'
                   : 'Responda no compositor abaixo (ou no terminal) — selecione com as setas e Enter.'}
           </div>
         )}

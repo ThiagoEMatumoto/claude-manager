@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gateMenuByStatus, menuFingerprint, parseTuiMenu } from './tui-menu-parser'
+import { gateMenuByStatus, menuFingerprint, parseTuiMenu, questionPositionLabel } from './tui-menu-parser'
 
 // Fixtures espelham o desenho REAL da TUI do claude 2.1.212 (validação live +
 // strings do binário) — ver header do tui-menu-parser.
@@ -83,6 +83,67 @@ Space to toggle, Enter to confirm, a to select all, n to select none, i to inver
 `)
     expect(menu).not.toBeNull()
     expect(menu!.multiSelect).toBe(true)
+  })
+
+  it('Bug 1 — junta as linhas de wrap da pergunta (não só a última), excluindo o chip', () => {
+    // Espelha o layout (e) da sonda Fase 0 (claude 2.1.216): chip + pergunta
+    // quebrada em várias linhas visuais SEM blank entre si.
+    const menu = parseTuiMenu(` ☐ Arquitetura
+Imagine um sistema distribuído com dezenas de microsserviços onde o serviço de
+pagamentos precisa consultar o serviço de inventário em tempo real antes de
+confirmar uma transação: qual abordagem você prefere?
+❯ 1. Opção 1
+     Chamadas síncronas com consistência forte
+  2. Opção 2
+     Saga assíncrona com compensação
+  3. Type something.
+
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`)
+    expect(menu).not.toBeNull()
+    expect(menu!.question).toBe(
+      'Imagine um sistema distribuído com dezenas de microsserviços onde o serviço de ' +
+        'pagamentos precisa consultar o serviço de inventário em tempo real antes de ' +
+        'confirmar uma transação: qual abordagem você prefere?',
+    )
+    expect(menu!.question).not.toContain('Arquitetura')
+  })
+
+  it('Bug 1 — layout novo (chip adjacente, sem blank): pergunta de 1 linha não engole o chip', () => {
+    const menu = parseTuiMenu(` ☐ Confirmação
+Você confirma?
+❯ 1. Sim
+  2. Não
+  3. Type something.
+
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`)
+    expect(menu).not.toBeNull()
+    expect(menu!.question).toBe('Você confirma?')
+  })
+
+  it('Bug 1 — para na barra de abas (multi-pergunta) sem juntar a pergunta anterior', () => {
+    const menu = parseTuiMenu(`←  ☐ Cor  ☐ Animal  ✔ Submit  →
+Qual sua cor favorita?
+❯ 1. Vermelho
+  2. Azul
+  3. Type something.
+
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+`)
+    expect(menu).not.toBeNull()
+    expect(menu!.question).toBe('Qual sua cor favorita?')
+    expect(menu!.tabs).toEqual([
+      { label: 'Cor', done: false },
+      { label: 'Animal', done: false },
+      { label: 'Submit', done: true },
+    ])
   })
 })
 
@@ -523,5 +584,67 @@ describe('menuFingerprint', () => {
     expect(menuFingerprint(perm)).toContain('permission')
     expect(menuFingerprint(trust)).toContain('trust')
     expect(menuFingerprint(perm)).not.toBe(menuFingerprint(trust))
+  })
+
+  it('Bug 2 — NÃO inclui submitOnDigit (mesmas opções/labels = mesmo fingerprint mesmo com submitOnDigit diferente)', () => {
+    // Documenta o mecanismo do Bug 2: applyTuiMenu (Terminal.tsx) dedupa pelo
+    // fingerprint e retém o estado antigo quando ele bate — se submitOnDigit
+    // não está no fingerprint, um parse mais recente com submitOnDigit
+    // diferente (preview apareceu/sumiu) NUNCA substitui o estado. Por isso
+    // ChatView.respondTuiQuestion usa o menu do RE-PARSE fresco (não o
+    // `tuiMenu` do estado) pra decidir dígito-só vs dígito+Enter.
+    const q = parseTuiMenu(FRUIT_MENU)!
+    const withPreview = { ...q, submitOnDigit: false }
+    const withoutPreview = { ...q, submitOnDigit: true }
+    expect(menuFingerprint(withPreview)).toBe(menuFingerprint(withoutPreview))
+  })
+})
+
+describe('questionPositionLabel — Fase 2 (multi-pergunta numa só chamada)', () => {
+  it('undefined sem tabs (single-select comum)', () => {
+    expect(questionPositionLabel(undefined, false)).toBeUndefined()
+  })
+
+  it('undefined em multi-select puro (mesmo shape de tabs, semântica diferente)', () => {
+    const tabs = [
+      { label: 'Linguagens', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, true)).toBeUndefined()
+  })
+
+  it('undefined com só 1 aba de pergunta + Submit (não é sequência)', () => {
+    const tabs = [
+      { label: 'Cor', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBeUndefined()
+  })
+
+  it('"Pergunta 1 de 2" na 1ª pergunta (nenhuma aba done ainda)', () => {
+    const tabs = [
+      { label: 'Cor', done: false },
+      { label: 'Hobby', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 1 de 2')
+  })
+
+  it('"Pergunta 2 de 2" depois de responder a 1ª (sonda Fase 2: Cor done, Hobby pendente)', () => {
+    const tabs = [
+      { label: 'Cor', done: true },
+      { label: 'Hobby', done: false },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 2 de 2')
+  })
+
+  it('clampa em N/N se todas as perguntas já vieram done (defensivo)', () => {
+    const tabs = [
+      { label: 'Cor', done: true },
+      { label: 'Hobby', done: true },
+      { label: 'Submit', done: true },
+    ]
+    expect(questionPositionLabel(tabs, false)).toBe('Pergunta 2 de 2')
   })
 })

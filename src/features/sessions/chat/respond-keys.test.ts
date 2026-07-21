@@ -6,6 +6,7 @@ import {
   buildEnterKey,
   buildEscKey,
   buildFilterKeys,
+  buildMultiSelectSubmitKeys,
   buildOtherKeys,
   buildPickerSelectKeys,
   buildPlanKeys,
@@ -153,6 +154,24 @@ describe('buildTabKeys — navegação entre abas', () => {
   it('seta direita/esquerda, nunca outra coisa', () => {
     expect(buildTabKeys('next')).toEqual(['\x1b[C'])
     expect(buildTabKeys('prev')).toEqual(['\x1b[D'])
+  })
+})
+
+describe('buildMultiSelectSubmitKeys — Bug 3 (multi-select puro sai da tela de checkboxes)', () => {
+  it('over-navega N vezes pra direita (N = nº de abas) + Enter, sempre terminando em Enter', () => {
+    expect(buildMultiSelectSubmitKeys(2)).toEqual(['\x1b[C', '\x1b[C', '\r'])
+    expect(buildMultiSelectSubmitKeys(1)).toEqual(['\x1b[C', '\r'])
+  })
+
+  it('fail-closed pra contagem de abas inválida (0, negativa, não-inteira)', () => {
+    expect(buildMultiSelectSubmitKeys(0)).toEqual([])
+    expect(buildMultiSelectSubmitKeys(-1)).toEqual([])
+    expect(buildMultiSelectSubmitKeys(1.5)).toEqual([])
+  })
+
+  it('nunca fica só em setas — sem o Enter final o clique repete o Bug 3 (seleciona mas não sai da tela)', () => {
+    const keys = buildMultiSelectSubmitKeys(3)
+    expect(keys[keys.length - 1]).toBe('\r')
   })
 })
 

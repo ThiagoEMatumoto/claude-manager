@@ -37,6 +37,7 @@ import {
   buildEnterKey,
   buildEscKey,
   buildFilterKeys,
+  buildMultiSelectSubmitKeys,
   buildOtherKeys,
   buildPickerSelectKeys,
   buildPlanKeys,
@@ -289,12 +290,23 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   }
 
   // Single-select (com ou sem preview): buildSelectKeys decide dígito-só ou
-  // dígito+Enter conforme submitOnDigit do menu — resposta FINAL, marca sent.
+  // dígito+Enter conforme submitOnDigit — resposta FINAL, marca sent. USA o
+  // menu do RE-PARSE fresco (não o `tuiMenu` do estado): `submitOnDigit` NÃO
+  // entra no fingerprint (menuFingerprint), então o dedup de applyTuiMenu
+  // (Terminal.tsx) pode reter no estado um `submitOnDigit` desatualizado de um
+  // parse anterior enquanto kind/opções ficam iguais — usar o estado aqui
+  // mandaria dígito-só quando a TUI já exige dígito+Enter (ou vice-versa), e o
+  // clique "seleciona mas não envia" (Bug 2). `target.index` continua vindo do
+  // memo (tuiQuestion) porque freshMenuMatches() já garante fingerprint igual
+  // ao do estado — mesmas opções/índices, só os campos fora do fingerprint
+  // (submitOnDigit/preview/context) podem ter mudado.
   function respondTuiQuestion(clickIndex: number, label: string) {
     if (!canRespondTui || !tuiQuestion || menuFp == null || tuiMenu?.multiSelect) return
     const target = tuiQuestion.clickable[clickIndex]
-    if (!target || !freshMenuMatches()) return
-    const keys = buildSelectKeys(tuiMenu, target.index)
+    if (!target) return
+    const fresh = freshMenuMatches()
+    if (!fresh) return
+    const keys = buildSelectKeys(fresh, target.index)
     if (keys.length === 0) return
     setTuiSent({ fp: menuFp, label, resolvedCount })
     onRespond?.(keys)
@@ -331,6 +343,21 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
     if (!canRespondTui || !tuiMenu?.tabs) return
     if (!freshMenuMatches()) return
     onRespond?.(buildTabKeys(direction))
+  }
+
+  // Multi-select PURO (Bug 3): botão dedicado "Enviar respostas" — over-navega
+  // até "Submit" (buildMultiSelectSubmitKeys clampa, não depende de saber a
+  // aba atual) + Enter, que É o passo que faltava pra sair da tela de
+  // checkboxes. Resposta FINAL, marca tuiSent. Não oferecido em multi-pergunta
+  // (tabs de perguntas — esse fluxo já resolve via digit-por-pergunta).
+  function respondTuiSubmitMulti() {
+    if (!canRespondTui || !tuiMenu?.multiSelect || !tuiMenu.tabs || menuFp == null) return
+    const fresh = freshMenuMatches()
+    if (!fresh?.tabs) return
+    const keys = buildMultiSelectSubmitKeys(fresh.tabs.length)
+    if (keys.length === 0) return
+    setTuiSent({ fp: menuFp, resolvedCount })
+    onRespond?.(keys)
   }
 
   // Tela de revisão final: dígito 1 (Submit answers) ou 2 (Cancel) — resposta
@@ -560,6 +587,9 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           sentLabel={tuiSent && tuiSent.fp === menuFp ? tuiSent.label : undefined}
           tabs={tuiMenu.tabs}
           onTabNav={canRespondTui && tuiMenu.tabs ? respondTuiTabNav : undefined}
+          onSubmitMulti={
+            canRespondTui && tuiMenu.multiSelect && tuiMenu.tabs ? respondTuiSubmitMulti : undefined
+          }
         />
       )}
       {tuiReview && (

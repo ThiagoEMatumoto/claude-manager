@@ -23,7 +23,8 @@ import { buildPromptBytes } from './chat/prompt-bytes'
 import { MODEL_ALIASES, EFFORT_LEVELS, type ModelAlias, type EffortLevel } from './ModelPill'
 import { MODEL_LABELS } from '../../../shared/models'
 import { mergePending, nextPendingApply, type PendingSelection } from './model-queue'
-import { detectFooterMode } from './permission-mode-parser'
+import { detectFooterMode, shouldNotifyModeChange } from './permission-mode-parser'
+import { permissionModeLabel } from './permission-modes'
 import { jumpDecision } from './permission-jump'
 import { gateMenuByStatus, menuFingerprint, parseTuiMenu, type TuiMenu } from './tui-menu-parser'
 import { parseTuiPicker, pickerFingerprint, type TuiPicker } from './tui-picker-parser'
@@ -151,6 +152,10 @@ export function Terminal({
   // Timer do "pular até o modo alvo" (loop em selectPermission que lê o rodapé do xterm
   // após cada Shift+Tab). Permite cancelar um jump em voo. null = nenhum em curso.
   const jumpTimerRef = useRef<number | null>(null)
+  // Último currentMode visto pelo effect de notificação (banner efêmero de transição,
+  // ver useEffect abaixo). null = ainda sem baseline (mount ou 1ª detecção real) —
+  // shouldNotifyModeChange usa isso pra nunca notificar no carregamento inicial.
+  const prevModeForToastRef = useRef<PermissionMode | null>(null)
 
   const [title, setTitle] = useState<string | null>(null)
   // Origem do título: 'manual' (rename do usuário) nunca é sobrescrito pelo
@@ -472,6 +477,17 @@ export function Terminal({
       if (permTimerRef.current != null) clearTimeout(permTimerRef.current)
     }
   }, [])
+
+  // Banner efêmero de transição de permission-mode: o VALOR atual já é sempre visível
+  // (PermissionPill/ComposerToolbar), este effect só reage à MUDANÇA. shouldNotifyModeChange
+  // suprime mount e a 1ª detecção real (baseline) — só dispara em transições subsequentes de
+  // fato (ex.: usuário cicla via Shift+Tab, ou a CLI muda de modo sozinha).
+  useEffect(() => {
+    if (currentMode != null && shouldNotifyModeChange(prevModeForToastRef.current, currentMode)) {
+      showToast({ title: `Modo alterado para ${permissionModeLabel(currentMode)}` })
+    }
+    prevModeForToastRef.current = currentMode
+  }, [currentMode])
 
   // Saiu em < 3s do start, com código != 0 e sem nunca ter emitido bytes →
   // tratamos como "claude não encontrado". Não é detecção perfeita, mas evita o

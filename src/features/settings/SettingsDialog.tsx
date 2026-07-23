@@ -518,11 +518,20 @@ function SessionTab({ open }: { open: boolean }) {
   const setDefaultPermission = useSessionPrefsStore((s) => s.setDefaultPermission)
   const setDefaultAdvisor = useSessionPrefsStore((s) => s.setDefaultAdvisor)
   const setKeyboardMode = useSessionPrefsStore((s) => s.setKeyboardMode)
+  const [disableAutoCompact, setDisableAutoCompact] = useState(false)
 
   useEffect(() => {
     if (!open) return
     void useSessionPrefsStore.getState().load()
+    void prefsApi
+      .get<boolean>('session.disableAutoCompact')
+      .then((v) => setDisableAutoCompact(v ?? false))
   }, [open])
+
+  function updateDisableAutoCompact(v: boolean) {
+    setDisableAutoCompact(v)
+    void prefsApi.set('session.disableAutoCompact', v)
+  }
 
   return (
     <div className="space-y-4">
@@ -601,6 +610,27 @@ function SessionTab({ open }: { open: boolean }) {
             onChange={(v) => void setDefaultPaneMode(v)}
           />
         </div>
+      </div>
+
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Contexto
+        </div>
+        <label className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-[var(--color-text)]">Desabilitar auto-compact</div>
+            <div className="text-xs text-[var(--color-text-dim)]">
+              Impede o Claude Code de compactar o contexto sozinho quando ele enche. Vale só
+              para sessões abertas a partir de agora; use `/compact` quando quiser compactar.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={disableAutoCompact}
+            onChange={(e) => updateDisableAutoCompact(e.target.checked)}
+            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+        </label>
       </div>
 
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-3">

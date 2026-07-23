@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { sanitizeCustomEnv, mergeCustomEnv, getEnvVar } from './custom-env'
+import {
+  sanitizeCustomEnv,
+  mergeCustomEnv,
+  getEnvVar,
+  withAutoCompactDisabled,
+  sessionSpawnEnv,
+  DISABLE_AUTOCOMPACT_KEY,
+  CUSTOM_ENV_VARS_KEY,
+} from './custom-env'
 import { getPref } from './prefs-store'
 
 vi.mock('./prefs-store', () => ({ getPref: vi.fn() }))
@@ -82,5 +90,70 @@ describe('getEnvVar', () => {
   it('ausente nos dois → undefined', () => {
     getPrefMock.mockReturnValue(null)
     expect(getEnvVar('CM_TEST_KEY')).toBeUndefined()
+  })
+})
+
+describe('withAutoCompactDisabled', () => {
+  it('disabled → DISABLE_AUTOCOMPACT=1', () => {
+    expect(withAutoCompactDisabled({ PATH: '/usr/bin' }, true)).toEqual({
+      PATH: '/usr/bin',
+      DISABLE_AUTOCOMPACT: '1',
+    })
+  })
+
+  it('não-disabled → chave ausente (nunca 0)', () => {
+    const env = withAutoCompactDisabled({ PATH: '/usr/bin' }, false)
+    expect('DISABLE_AUTOCOMPACT' in env).toBe(false)
+  })
+
+  it('retorna objeto novo (não muta a base)', () => {
+    const base = { PATH: '/usr/bin' }
+    const env = withAutoCompactDisabled(base, true)
+    expect(env).not.toBe(base)
+    expect(base).toEqual({ PATH: '/usr/bin' })
+  })
+})
+
+describe('sessionSpawnEnv', () => {
+  function mockPrefs(prefs: { disableAutoCompact?: boolean; custom?: unknown }) {
+    getPrefMock.mockImplementation((key: string, fallback: unknown) => {
+      if (key === DISABLE_AUTOCOMPACT_KEY) return prefs.disableAutoCompact ?? fallback
+      if (key === CUSTOM_ENV_VARS_KEY) return prefs.custom ?? fallback
+      return fallback
+    })
+  }
+
+  beforeEach(() => {
+    getPrefMock.mockReset()
+  })
+
+  it('pref ligada → DISABLE_AUTOCOMPACT=1', () => {
+    mockPrefs({ disableAutoCompact: true })
+    expect(sessionSpawnEnv({ PATH: '/usr/bin' }).DISABLE_AUTOCOMPACT).toBe('1')
+  })
+
+  it('pref desligada → chave ausente', () => {
+    mockPrefs({ disableAutoCompact: false })
+    expect('DISABLE_AUTOCOMPACT' in sessionSpawnEnv({ PATH: '/usr/bin' })).toBe(false)
+  })
+
+  it('pref ausente → chave ausente', () => {
+    mockPrefs({})
+    expect('DISABLE_AUTOCOMPACT' in sessionSpawnEnv({ PATH: '/usr/bin' })).toBe(false)
+  })
+
+  it('custom env do usuário sobrescreve a var', () => {
+    mockPrefs({ disableAutoCompact: true, custom: { DISABLE_AUTOCOMPACT: '0', FOO: 'bar' } })
+    const env = sessionSpawnEnv({ PATH: '/usr/bin' })
+    expect(env.DISABLE_AUTOCOMPACT).toBe('0')
+    expect(env.FOO).toBe('bar')
+  })
+
+  it('não muta a base', () => {
+    mockPrefs({ disableAutoCompact: true })
+    const base = { PATH: '/usr/bin' }
+    const env = sessionSpawnEnv(base)
+    expect(env).not.toBe(base)
+    expect(base).toEqual({ PATH: '/usr/bin' })
   })
 })

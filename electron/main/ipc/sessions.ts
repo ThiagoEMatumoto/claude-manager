@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join, sep } from 'node:path'
 import { getDb } from '../services/db'
 import { ptyManager } from '../services/pty-manager'
+import { sessionSpawnEnv } from '../services/custom-env'
 import { get as getFeature, linkedObjectiveTitles } from '../services/feature-store'
 import * as handoffStore from '../services/handoff-store'
 // formatPtyInjection vive em services/handoff/inject.ts (fonte canônica, sem
@@ -365,6 +366,7 @@ function startSession(opts: {
       cwd: opts.cwd,
       cols: opts.cols,
       rows: opts.rows,
+      env: sessionSpawnEnv(),
     })
   } catch (err) {
     db.prepare("UPDATE sessions SET status = 'crashed', ended_at = ? WHERE id = ?").run(

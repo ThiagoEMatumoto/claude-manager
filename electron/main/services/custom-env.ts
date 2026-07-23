@@ -49,3 +49,21 @@ export function getEnvVar(key: string): string | undefined {
 export function spawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return mergeCustomEnv(base, readCustomEnv())
 }
+
+export const DISABLE_AUTOCOMPACT_KEY = 'session.disableAutoCompact'
+
+// A CLI só olha a presença da var: setar '0' desabilitaria o auto-compact do
+// mesmo jeito, então quando a pref está desligada a chave é omitida.
+export function withAutoCompactDisabled(
+  base: NodeJS.ProcessEnv,
+  disabled: boolean,
+): NodeJS.ProcessEnv {
+  return disabled ? { ...base, DISABLE_AUTOCOMPACT: '1' } : { ...base }
+}
+
+// Env dos spawns de sessão (PTY do `claude`). O custom env do usuário entra por
+// último e pode sobrescrever a var.
+export function sessionSpawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const withFlag = withAutoCompactDisabled(base, getPref<boolean>(DISABLE_AUTOCOMPACT_KEY, false))
+  return mergeCustomEnv(withFlag, readCustomEnv())
+}

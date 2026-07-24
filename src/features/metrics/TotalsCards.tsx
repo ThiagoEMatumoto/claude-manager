@@ -11,7 +11,7 @@ function fmtUsd(n: number): string {
 function Card({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border p-4"
+      className="flex flex-col gap-1 rounded-[14px] border p-4"
       style={{
         borderColor: 'var(--color-border)',
         background: 'var(--color-surface)',
@@ -20,7 +20,10 @@ function Card({ label, value, hint }: { label: string; value: string; hint?: str
       <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-dim)' }}>
         {label}
       </span>
-      <span className="text-2xl font-semibold tabular-nums" style={{ color: 'var(--color-text)' }}>
+      <span
+        className="font-mono text-2xl font-semibold tabular-nums"
+        style={{ color: 'var(--color-text)' }}
+      >
         {value}
       </span>
       {hint && (

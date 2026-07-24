@@ -34,7 +34,7 @@ export function TopToolsList({ tools }: { tools: MetricsToolRow[] }) {
               />
             </span>
             <span
-              className="w-12 shrink-0 text-right text-sm tabular-nums"
+              className="w-12 shrink-0 text-right font-mono text-sm tabular-nums"
               style={{ color: 'var(--color-text-dim)' }}
             >
               {tool.count.toLocaleString('pt-BR')}

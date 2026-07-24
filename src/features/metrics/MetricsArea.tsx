@@ -20,7 +20,7 @@ const WINDOWS: { id: MetricsWindow; label: string }[] = [
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section
-      className="flex flex-col gap-3 rounded-lg border p-4"
+      className="flex flex-col gap-3 rounded-[14px] border p-4"
       style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
     >
       <h2 className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>

@@ -188,6 +188,15 @@ html, body, #root {
   box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
+/* Terminal ativo no split (dockview): o grupo focado ganha o marcador accent da
+   casa (inset 2px, mesma linguagem de .pw-active-marker) + uma moldura sutil. Só
+   acabamento visual — box-shadow inset não afeta o layout nem o fit() do xterm. */
+.dockview-theme-abyss .dv-groupview.dv-active-group > .dv-content-container {
+  box-shadow:
+    inset 2px 0 0 var(--color-accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pw-pulse,
   .pw-ring,

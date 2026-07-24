@@ -454,9 +454,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </Button>
         </div>
       </GradientBorder>
-      <div className="mt-1 px-1 font-mono text-[10px] text-[var(--color-text-dim)]">
-        {hint} · Ctrl+↑/↓ histórico
-      </div>
         </>
       )}
     </div>

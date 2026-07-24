@@ -45,7 +45,9 @@ export function CcConfigsView({ tab, configs, loading, focus, onClearFocus }: Pr
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4">
-      <div className="mb-3 text-xs text-[var(--color-text-dim)]">{items.length} itens</div>
+      <div className="mb-3 font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
+        {items.length} itens
+      </div>
       <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
         {tab === 'agents' &&
           configs.agents.map((a) => (

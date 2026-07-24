@@ -73,7 +73,7 @@ function Body({
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
-      <div className="mb-3 text-xs text-[var(--color-text-dim)]">
+      <div className="mb-3 font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
         Mostrando {shown.length} de {filtered}
         {filtered !== total && ` (${total} no total)`}
       </div>

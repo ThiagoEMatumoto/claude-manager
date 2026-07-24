@@ -143,6 +143,12 @@ export function SessionHeader({
                     <span className="text-[var(--color-border)]"> · </span>
                   </>
                 )}
+                {repoLabel && repoLabel !== displayTitle && (
+                  <>
+                    <span className="text-[var(--color-text-dim)]">{repoLabel}</span>
+                    <span className="text-[var(--color-border)]"> / </span>
+                  </>
+                )}
                 {displayTitle}
               </button>
               {/* Lápis só no hover do header — rename continua acessível sem poluir. */}

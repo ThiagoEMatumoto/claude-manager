@@ -1,5 +1,6 @@
 import { Archive, GitBranch } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { activeMarker } from '@/features/brand'
 import { relativeTime } from '@/lib/time'
 import { stalledDays } from '../../../shared/feature-visibility'
 import type { Feature, FeatureWithStats, Repo } from '../../../shared/types/ipc'
@@ -86,9 +87,9 @@ export function FeatureCard({
             onSelect()
           }
         }}
-        className={`group w-full cursor-pointer rounded-lg border px-4 py-3 text-left transition ${
+        className={`group w-full cursor-pointer rounded-[14px] border px-4 py-3 text-left transition ${
           active
-            ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]'
+            ? `border-[var(--color-accent)] bg-[var(--color-surface-2)] ${activeMarker}`
             : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]/60'
         }`}
       >
@@ -178,8 +179,12 @@ export function StatusBadge({ status }: { status: Feature['status'] }) {
   const meta = STATUS_META[status]
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
       {meta.label}

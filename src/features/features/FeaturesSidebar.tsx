@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, History, Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { Input } from '@/components/ui/Input'
 import type { Feature, FeatureStatus, ObjectiveWithProgress, Project } from '../../../shared/types/ipc'
 import { STATUS_META, STATUS_ORDER } from './status'
@@ -96,15 +97,10 @@ export function FeaturesSidebar({
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="text-sm font-semibold tracking-tight">Features</div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNew}
-            title="Nova feature"
-            className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-          >
+          <Button variant="primary" size="sm" onClick={onNew} title="Nova feature">
             <Icon as={Plus} size={13} />
             Nova
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onBackfill}
@@ -183,7 +179,7 @@ export function FeaturesSidebar({
                 <Icon as={isCollapsed ? ChevronRight : ChevronDown} size={13} />
                 {project.icon && <span>{project.icon}</span>}
                 <span className="truncate">{project.name}</span>
-                <span className="ml-auto text-[10px]">{features.length}</span>
+                <span className="ml-auto font-mono text-[10px] tabular-nums">{features.length}</span>
               </button>
               {!isCollapsed && (
                 <ul className="flex flex-col gap-px">

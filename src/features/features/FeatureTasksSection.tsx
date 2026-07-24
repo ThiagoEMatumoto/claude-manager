@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { tasksApi } from '@/lib/ipc'
 import { useFeaturesStore } from '@/store/featuresStore'
 import type { ObjectiveWithProgress, Task, TaskLink } from '../../../shared/types/ipc'
@@ -71,17 +72,17 @@ export function FeatureTasksSection({ featureId, objectives, krTitles }: Props) 
     <section className="mt-8">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[var(--color-text)]">Tarefas</h2>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => {
             setEditingTask(null)
             setDialogOpen(true)
           }}
-          className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
         >
           <Icon as={Plus} size={13} />
           Nova tarefa
-        </button>
+        </Button>
       </div>
 
       {tasks.length === 0 ? (

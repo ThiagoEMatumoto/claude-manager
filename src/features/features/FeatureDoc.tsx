@@ -113,9 +113,9 @@ export function FeatureDoc({ feature, loading, reposById }: Props) {
         </div>
 
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-dim)]">
-          {created && <span>criada: {created}</span>}
-          {updated && <span>atualizada: {updated}</span>}
-          {completed && <span>concluída: {completed}</span>}
+          {created && <span className="font-mono tabular-nums">criada: {created}</span>}
+          {updated && <span className="font-mono tabular-nums">atualizada: {updated}</span>}
+          {completed && <span className="font-mono tabular-nums">concluída: {completed}</span>}
           <span>synth: {feature.synthMode}</span>
           {feature.model && <span>modelo: {feature.model}</span>}
         </div>

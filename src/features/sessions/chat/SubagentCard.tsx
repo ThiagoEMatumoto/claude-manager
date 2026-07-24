@@ -32,7 +32,7 @@ export function SubagentCard({ name, description, turnCount, turns, status }: Pr
         <Icon as={Bot} size={12} className="shrink-0 text-[var(--color-accent)]" />
         <span className="shrink-0 font-medium text-[var(--color-text)]">{name}</span>
         {status === 'ok' && (
-          <Icon as={Check} size={12} className="shrink-0 text-[var(--color-success,#22c55e)]" />
+          <Icon as={Check} size={12} className="shrink-0 text-[var(--color-success)]" />
         )}
         {status === 'error' && (
           <Icon as={X} size={12} className="shrink-0 text-[var(--color-danger)]" />

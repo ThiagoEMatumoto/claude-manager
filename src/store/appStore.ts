@@ -248,6 +248,12 @@ interface AppState {
   // merge incremental via onGlobalActivity, refetch nas mutações de pane.
   liveSessions: LiveSessionInfo[]
   restoreBlocked: boolean
+  // Número de sessões que o boot vai restaurar (lido do snapshot). null até o
+  // getBootState resolver. Consumido pela splash de boot ("restaurando N sessões").
+  bootSessionCount: number | null
+  // true quando o fluxo de restore terminou (ou não havia nada a restaurar, ou
+  // ficou bloqueado). A splash usa pra auto-avançar quando a animação já passou.
+  restoreComplete: boolean
   // Layout do dockview a aplicar (api.fromJSON) UMA vez, após as panes do restore
   // existirem no store. O AppShell consome e chama clearPendingLayout.
   pendingLayout: string | null
@@ -353,6 +359,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   panes: [],
   liveSessions: [],
   restoreBlocked: false,
+  bootSessionCount: null,
+  restoreComplete: false,
   pendingLayout: null,
   focusPaneId: null,
   gridRequest: null,
@@ -380,14 +388,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     restoreStarted = true
     const { openPanes, cleanShutdown, restoreAttempts, dockLayout } =
       await workspaceApi.getBootState()
-    if (openPanes.length === 0) return
+    set({ bootSessionCount: openPanes.length })
+    if (openPanes.length === 0) {
+      set({ restoreComplete: true })
+      return
+    }
 
     // Shutdown gracioso: confiamos no estado salvo e restauramos direto.
     // Crash com >=2 tentativas seguidas: provável crash-loop — não auto-restaura,
     // expõe banner pra o usuário decidir.
     const manualOnly = !cleanShutdown && restoreAttempts >= 2
     if (manualOnly) {
-      set({ restoreBlocked: true })
+      set({ restoreBlocked: true, restoreComplete: true })
       return
     }
 
@@ -397,6 +409,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (dockLayout && openPanes.every((p) => p.paneId)) set({ pendingLayout: dockLayout })
     await restoreFromSnapshots(openPanes, get().resumeSession, get().openSession)
     await workspaceApi.resetRestoreAttempts()
+    set({ restoreComplete: true })
   },
 
   retryRestore: async () => {

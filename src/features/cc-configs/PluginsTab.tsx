@@ -116,7 +116,7 @@ export function PluginsTab({ installed, loading, error, runAction, onNavigate }:
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div className="mb-3 text-xs text-[var(--color-text-dim)]">
+          <div className="mb-3 font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
             {filtered.length} de {installed.length}
           </div>
           {filtered.length === 0 ? (
@@ -325,7 +325,7 @@ function PluginDrawer({
             {typeof details.alwaysOnTokens === 'number' && (
               <div className="flex items-center justify-between rounded-md bg-[var(--color-surface-2)]/60 px-3 py-2 text-xs">
                 <span className="text-[var(--color-text-dim)]">Custo always-on</span>
-                <span className="font-medium text-[var(--color-text)]">
+                <span className="font-mono font-medium tabular-nums text-[var(--color-text)]">
                   {details.alwaysOnTokens.toLocaleString()} tokens
                 </span>
               </div>
@@ -461,7 +461,7 @@ function ComponentRefs({
           <div key={key}>
             <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-dim)]">
               <span>{label}</span>
-              <span>{refs[key].length}</span>
+              <span className="font-mono tabular-nums">{refs[key].length}</span>
             </div>
             <div className="flex flex-col gap-1">
               {refs[key].map((ref) => {

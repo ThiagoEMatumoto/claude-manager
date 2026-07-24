@@ -1,7 +1,15 @@
 import { useState } from 'react'
-import { AlertTriangle, ChevronRight, CornerDownRight, Wrench } from 'lucide-react'
+import { AlertTriangle, ChevronRight, CornerDownRight, Terminal, Wrench } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { CopyButton } from '@/components/ui/CopyButton'
+
+// Ícone da tool: terminal pras de shell (Bash), wrench pro resto. O transcript
+// (ChatMessage.tool_use) não expõe elapsed/duração, então não há "✓ Xs" a mostrar.
+function toolIcon(name: string): ComponentType<LucideProps> {
+  return /^(bash|shell|sh|zsh)$/i.test(name.trim()) ? Terminal : Wrench
+}
 
 // Resumo de uma linha do input/result quando o card está fechado.
 function summarize(value: unknown, max = 140): string {
@@ -30,17 +38,18 @@ function pretty(value: unknown): string {
 
 export function ToolUseCard({ name, input }: { name: string; input: unknown }) {
   const [open, setOpen] = useState(false)
+  // Linha de telemetria: mono, wrench accent, path/args em dim com ellipsis.
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/60 text-xs">
+    <div className="rounded-lg font-mono text-[11px] transition-colors hover:bg-[var(--color-surface-2)]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+        className="flex w-full items-center gap-2 px-1.5 py-1 text-left"
       >
-        <Icon as={ChevronRight} size={12} className={`shrink-0 transition ${open ? 'rotate-90' : ''}`} />
-        <Icon as={Wrench} size={12} className="shrink-0 text-[var(--color-accent)]" />
-        <span className="shrink-0 font-medium text-[var(--color-text)]">{name}</span>
-        {!open && <span className="truncate text-[var(--color-text-dim)]">{summarize(input)}</span>}
+        <Icon as={ChevronRight} size={11} className={`shrink-0 transition ${open ? 'rotate-90' : ''}`} />
+        <Icon as={toolIcon(name)} size={11} className="shrink-0 text-[var(--color-accent)]" />
+        <span className="shrink-0 text-[var(--color-text)]">{name}</span>
+        <span className="truncate text-[var(--color-text-dim)]">{summarize(input)}</span>
       </button>
       {open && (
         <div className="group relative border-t border-[var(--color-border)]">
@@ -60,29 +69,30 @@ export function ToolUseCard({ name, input }: { name: string; input: unknown }) {
 
 export function ToolResultCard({ content, isError }: { content: string; isError: boolean }) {
   const [open, setOpen] = useState(false)
+  // Resultado como linha de telemetria: ✓ em accent2 (sucesso) / ✕ em coral (erro).
   return (
     <div
-      className={`rounded-md border bg-[var(--color-surface)]/40 text-xs ${
-        isError ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]'
+      className={`rounded-lg font-mono text-[11px] transition-colors hover:bg-[var(--color-surface-2)] ${
+        isError ? 'bg-[color-mix(in_srgb,var(--color-danger)_8%,transparent)]' : ''
       }`}
     >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+        className="flex w-full items-center gap-2 px-1.5 py-1 text-left"
       >
-        <Icon as={ChevronRight} size={12} className={`shrink-0 transition ${open ? 'rotate-90' : ''}`} />
+        <Icon as={ChevronRight} size={11} className={`shrink-0 transition ${open ? 'rotate-90' : ''}`} />
         <Icon
           as={isError ? AlertTriangle : CornerDownRight}
-          size={12}
-          className={`shrink-0 ${isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'}`}
+          size={11}
+          className={`shrink-0 ${isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-accent2)]'}`}
         />
         <span
-          className={`shrink-0 font-medium ${
-            isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-dim)]'
+          className={`shrink-0 ${
+            isError ? 'text-[var(--color-danger)]' : 'text-[var(--color-accent2)]'
           }`}
         >
-          {isError ? 'erro' : 'resultado'}
+          {isError ? '✕ erro' : '✓ resultado'}
         </span>
         {!open && <span className="truncate text-[var(--color-text-dim)]">{summarize(content)}</span>}
       </button>

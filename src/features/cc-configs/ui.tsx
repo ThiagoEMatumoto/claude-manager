@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { activeMarker } from '@/features/brand'
 
 export function Badge({
   children,
@@ -8,14 +9,14 @@ export function Badge({
   tone?: 'neutral' | 'on' | 'off' | 'warn'
 }) {
   const tones: Record<string, string> = {
-    neutral: 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
-    on: 'bg-[var(--color-success)]/20 text-[var(--color-success)]',
-    off: 'bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
-    warn: 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]',
+    neutral: 'border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
+    on: 'border-[var(--color-success)]/45 bg-[var(--color-success)]/12 text-[var(--color-success)]',
+    off: 'border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text-dim)]',
+    warn: 'border-[var(--color-warning)]/45 bg-[var(--color-warning)]/12 text-[var(--color-warning)]',
   }
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${tones[tone]}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${tones[tone]}`}
     >
       {children}
     </span>
@@ -43,9 +44,9 @@ export function Card({
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border p-3.5 transition ${
+      className={`rounded-[14px] border p-3.5 transition ${
         active
-          ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]/60'
+          ? `border-[var(--color-accent)] bg-[var(--color-surface-2)]/60 ${activeMarker}`
           : 'border-[var(--color-border)] bg-[var(--color-surface)]'
       } ${interactive ? 'cursor-pointer hover:border-[var(--color-text-dim)]' : ''}`}
     >

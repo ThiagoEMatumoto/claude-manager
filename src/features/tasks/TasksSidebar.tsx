@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
+import { Button } from '@/features/brand'
 import type {
   Feature,
   ObjectiveWithProgress,
@@ -100,15 +101,10 @@ export function TasksSidebar({
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="text-sm font-semibold tracking-tight">Tarefas</div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNew}
-            title="Nova tarefa"
-            className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-          >
+          <Button variant="primary" size="sm" onClick={onNew} title="Nova tarefa">
             <Icon as={Plus} size={13} />
             Nova
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onReload}

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronRight, Clock, ClipboardList, XCircle } from 'lucide-react'
+import { CheckCircle2, Clock, XCircle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer'
+import { ApexDot, Button, GradientBorder, Ruler } from '@/features/brand'
 
 interface Props {
   plan: string
@@ -27,79 +28,79 @@ const COLLAPSE_THRESHOLD = 1200
 // enviam a decisão ao PTY; a decision real do JSONL substitui o estado otimista.
 export function PlanCard({ plan, decision, onDecide, sent, canApprove = true }: Props) {
   const [open, setOpen] = useState(plan.length <= COLLAPSE_THRESHOLD)
+  const pending = decision === undefined
 
   const status =
     decision === true
       ? { icon: CheckCircle2, label: 'Aprovado', cls: 'text-[var(--color-success)]' }
       : decision === false
         ? { icon: XCircle, label: 'Rejeitado', cls: 'text-[var(--color-danger)]' }
-        : { icon: Clock, label: 'Aguardando aprovação', cls: 'text-[var(--color-text-dim)]' }
+        : { icon: Clock, label: 'Aguardando decisão', cls: 'text-[var(--color-text-dim)]' }
 
   return (
-    <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-surface)]/60 text-sm">
-      <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-        >
-          <Icon
-            as={ChevronRight}
-            size={12}
-            className={`shrink-0 transition ${open ? 'rotate-90' : ''}`}
-          />
-          <Icon as={ClipboardList} size={14} className="shrink-0 text-[var(--color-accent)]" />
-          <span className="font-medium text-[var(--color-text)]">Revisão de plano</span>
-        </button>
-        <span className={`flex shrink-0 items-center gap-1 text-xs ${status.cls}`}>
-          <Icon as={status.icon} size={13} />
-          {status.label}
+    // Card de decisão: borda-gradiente ativa enquanto pende, sólida após decidir.
+    <GradientBorder
+      active={pending}
+      radius={16}
+      style={{ display: 'block', width: '100%' }}
+      innerClassName="text-sm"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2.5">
+        <span className="flex items-center gap-2.5 font-semibold text-[var(--color-text)]">
+          {/* Único ApexDot pulsante da vista (só quando pendente). */}
+          <ApexDot size={7} active={pending} />
+          Plano pronto — sua decisão
+        </span>
+        <span className={`flex shrink-0 items-center gap-2 font-mono text-[10px] ${status.cls}`}>
+          {pending && <Ruler variant="equalizer" count={6} height={11} />}
+          <span className="flex items-center gap-1">
+            <Icon as={status.icon} size={12} />
+            {status.label}
+          </span>
         </span>
       </div>
       {open ? (
-        <div className="px-3 py-2.5">
+        <div className="px-4 py-3">
           <MarkdownViewer content={plan} />
         </div>
       ) : (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="w-full px-3 py-2 text-left text-xs text-[var(--color-text-dim)]"
+          className="w-full px-4 py-2.5 text-left text-xs text-[var(--color-text-dim)]"
         >
           Plano longo — clique para expandir.
         </button>
       )}
       {/* Botões de decisão: só enquanto a decisão real não chegou. `sent` mantém os
           botões visíveis porém desabilitados até o JSONL confirmar. */}
-      {decision === undefined && (onDecide != null || sent) && (
-        <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-3 py-2">
+      {pending && (onDecide != null || sent) && (
+        <div className="flex flex-wrap items-center gap-2.5 border-t border-[var(--color-border)] px-4 py-3">
           {canApprove ? (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={sent || onDecide == null}
               onClick={() => onDecide?.('approve')}
-              className="rounded border border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-accent)]/25 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-[var(--color-accent)]/10"
             >
               Aprovar plano
-            </button>
+            </Button>
           ) : (
-            <span className="text-xs text-[var(--color-text-dim)]">
-              Pra aprovar, use o terminal.
-            </span>
+            <span className="text-xs text-[var(--color-text-dim)]">Pra aprovar, use o terminal.</span>
           )}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={sent || onDecide == null}
             onClick={() => onDecide?.('reject')}
-            className="rounded border border-[var(--color-border)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)]/90 transition hover:border-[var(--color-text-dim)] disabled:cursor-default disabled:opacity-50 disabled:hover:border-[var(--color-border)]"
           >
             Continuar planejando
-          </button>
-          {sent && (
-            <span className="text-xs text-[var(--color-text-dim)]">Decisão enviada…</span>
-          )}
+          </Button>
+          <span className="font-mono text-[10px] text-[var(--color-text-dim)]/70">
+            {sent ? 'Decisão enviada…' : '⏎ aprova · esc rejeita'}
+          </span>
         </div>
       )}
-    </div>
+    </GradientBorder>
   )
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, FolderLock, ShieldQuestion } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { ApexDot, GradientBorder, Ruler } from '@/features/brand'
 import type { TuiMenuOption } from '../tui-menu-parser'
 
 interface Props {
@@ -43,19 +44,25 @@ export function PermissionCard({ kind, question, context, options, onRespond, se
   const sent = sentLabel != null
   const clickable = onRespond != null && !sent
 
-  const title = kind === 'trust' ? 'Confiar neste diretório?' : 'Permissão solicitada'
+  const title = kind === 'trust' ? 'Confiar neste diretório?' : 'Permissão — sua decisão'
 
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/40 text-sm">
-      <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2">
-        <Icon
-          as={kind === 'trust' ? FolderLock : ShieldQuestion}
-          size={14}
-          className="shrink-0 text-[var(--color-warning)]"
-        />
-        <span className="font-medium text-[var(--color-text)]">{title}</span>
+    // Card de decisão: borda-gradiente ativa (é sempre o momento pendente).
+    <GradientBorder active radius={16} style={{ display: 'block', width: '100%' }} innerClassName="text-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-2.5">
+        <span className="flex items-center gap-2.5 font-semibold text-[var(--color-text)]">
+          {/* Único ApexDot pulsante da vista enquanto pende (some ao enviar). */}
+          <ApexDot size={7} active={!sent} />
+          <Icon
+            as={kind === 'trust' ? FolderLock : ShieldQuestion}
+            size={14}
+            className="shrink-0 text-[var(--color-warning)]"
+          />
+          {title}
+        </span>
+        {!sent && <Ruler variant="equalizer" count={6} height={11} />}
       </div>
-      <div className="flex flex-col gap-2 px-3 py-2.5">
+      <div className="flex flex-col gap-2 px-4 py-3">
         {question && <div className="text-[var(--color-text)]">{question}</div>}
         {context && (
           <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/60">
@@ -115,12 +122,12 @@ export function PermissionCard({ kind, question, context, options, onRespond, se
             )
           })}
         </div>
-        <div className="text-xs text-[var(--color-text-dim)]">
+        <div className="font-mono text-[10px] text-[var(--color-text-dim)]/70">
           {sent
             ? 'Resposta enviada…'
-            : 'Enviado direto ao terminal — Esc no terminal cancela.'}
+            : '⏎ responde · esc rejeita — enviado direto ao terminal.'}
         </div>
       </div>
-    </div>
+    </GradientBorder>
   )
 }

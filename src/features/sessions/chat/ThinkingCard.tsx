@@ -12,22 +12,22 @@ interface Props {
 export function ThinkingCard({ text }: Props) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/40 text-xs">
+    <div className="rounded-lg font-mono text-[11px] transition-colors hover:bg-[var(--color-surface-2)]">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[var(--color-text-dim)]"
+        className="flex w-full items-center gap-2 px-1.5 py-1 text-left text-[var(--color-text-dim)]"
       >
         <Icon
           as={ChevronRight}
-          size={12}
+          size={11}
           className={`shrink-0 transition ${open ? 'rotate-90' : ''}`}
         />
-        <Icon as={Brain} size={12} className="shrink-0" />
-        <span className="font-medium">Pensando…</span>
+        <Icon as={Brain} size={11} className="shrink-0" />
+        <span>pensou</span>
       </button>
       {open && (
-        <div className="border-t border-[var(--color-border)] px-3 py-2 italic text-[var(--color-text-dim)]">
+        <div className="px-3 py-2 font-sans italic text-[var(--color-text-dim)]">
           <MarkdownViewer content={text} />
         </div>
       )}

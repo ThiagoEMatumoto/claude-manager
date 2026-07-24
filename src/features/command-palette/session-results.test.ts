@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   capByGroup,
-  ENDED_SESSIONS_GROUP,
-  LIVE_SESSIONS_GROUP,
+  GARAGE_GROUP as ENDED_SESSIONS_GROUP,
   SESSION_GROUP_CAPS,
+  WAITING_GROUP as LIVE_SESSIONS_GROUP,
 } from './session-results'
 
 function items(group: string, n: number) {

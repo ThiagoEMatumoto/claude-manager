@@ -1,0 +1,295 @@
+/* Intro/Splash de boot da Pitwall. A narrativa: a pista se desenha → o carro dá
+   voltas → entra no box → o muro se abre e vira a logo → o wordmark aparece.
+   As animações são orquestradas por animation-delay a partir do mount (t0). O
+   movimento do "carro" na pista usa SMIL (animateMotion), que segue o path em
+   unidades do viewBox — CSS offset-path sofre com a escala do viewBox no SVG.
+
+   prefers-reduced-motion: o BootSplashGate nem exibe a intro no boot; ainda assim
+   a splash respeita o modo (via [data-reduced="true"], setado por matchMedia)
+   pulando pro estado final estático — cobre o caso do botão Repetir. */
+
+.spl-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: radial-gradient(70% 55% at 50% 42%, #0c0b13, #050507);
+  color: var(--color-text);
+  opacity: 1;
+  transition: opacity 0.32s ease;
+}
+
+.spl-root[data-exiting='true'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.spl-stage {
+  width: min(760px, 82vw);
+  position: relative;
+}
+
+.spl-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Traçado base da pista + o traço de gradiente que "desenha" via dashoffset. */
+.spl-track-glow {
+  stroke-dasharray: 2600;
+  stroke-dashoffset: 2600;
+  animation: spl-draw 0.95s ease 0.15s forwards;
+}
+
+/* Dot central (a logo) — some ao início e cresce quando o carro chega ao box. */
+.spl-apex {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spl-apex-in 0.5s ease 2.45s forwards;
+}
+
+.spl-ring {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spl-ring 0.9s ease-out 3.9s 3;
+}
+
+/* Muros: aparecem juntos (fechados) e deslizam abrindo o vão. */
+.spl-wall {
+  opacity: 0;
+  transform-box: fill-box;
+}
+.spl-wall-l {
+  animation: spl-wall-l 0.95s cubic-bezier(0.22, 0.61, 0.36, 1) 3.3s forwards;
+}
+.spl-wall-r {
+  animation: spl-wall-r 0.95s cubic-bezier(0.22, 0.61, 0.36, 1) 3.3s forwards;
+}
+
+.spl-wordmark {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: spl-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) 4.55s forwards;
+  font-weight: 800;
+  font-size: 40px;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  margin-top: 20px;
+}
+
+.spl-subtitle {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: spl-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) 4.75s forwards;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--color-text-dim);
+  margin-top: 10px;
+}
+
+.spl-ruler {
+  display: flex;
+  gap: 6px;
+  margin-top: 20px;
+}
+.spl-tick {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border);
+  animation: spl-tick 0.4s ease forwards;
+}
+
+.spl-status {
+  opacity: 0;
+  animation: spl-fade 0.5s ease 4.9s forwards;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #5b5677;
+  margin-top: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.spl-status b {
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+
+.spl-ctas {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: spl-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) 6.1s forwards;
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.spl-skip {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: #5b5677;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.spl-skip:hover {
+  color: var(--color-text);
+}
+
+.spl-toggle {
+  position: absolute;
+  bottom: 18px;
+  left: 20px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: #5b5677;
+  cursor: pointer;
+  user-select: none;
+}
+.spl-toggle input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.spl-caption {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #45415c;
+  opacity: 0;
+  animation: spl-fade 0.5s ease 6.2s forwards;
+  text-align: center;
+}
+@media (max-height: 640px) {
+  .spl-caption {
+    display: none;
+  }
+}
+
+@keyframes spl-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes spl-apex-in {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes spl-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.5);
+  }
+}
+@keyframes spl-wall-l {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  42% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-22px);
+  }
+}
+@keyframes spl-wall-r {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  42% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(22px);
+  }
+}
+@keyframes spl-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes spl-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes spl-tick {
+  to {
+    background: var(--color-accent);
+  }
+}
+
+/* Reduced motion: estado final estático, sem animação nem carro na pista. */
+.spl-root[data-reduced='true'] .spl-track-glow {
+  animation: none;
+  stroke-dashoffset: 0;
+}
+.spl-root[data-reduced='true'] .spl-apex {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+.spl-root[data-reduced='true'] .spl-ring {
+  animation: none;
+  opacity: 0;
+}
+.spl-root[data-reduced='true'] .spl-wall-l {
+  animation: none;
+  opacity: 1;
+  transform: translateX(-22px);
+}
+.spl-root[data-reduced='true'] .spl-wall-r {
+  animation: none;
+  opacity: 1;
+  transform: translateX(22px);
+}
+.spl-root[data-reduced='true'] .spl-wordmark,
+.spl-root[data-reduced='true'] .spl-subtitle,
+.spl-root[data-reduced='true'] .spl-status,
+.spl-root[data-reduced='true'] .spl-ctas,
+.spl-root[data-reduced='true'] .spl-caption {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+.spl-root[data-reduced='true'] .spl-tick {
+  animation: none;
+  background: var(--color-accent);
+}

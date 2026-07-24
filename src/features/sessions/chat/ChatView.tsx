@@ -11,6 +11,7 @@ import {
 import { Clock, Loader, TerminalSquare } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { ChatMessage, SessionActivity } from '../../../../shared/types/ipc'
+import { ChatStatusStrip } from './ChatStatusStrip'
 import { CommandCard, CommandOutputCard } from './CommandCard'
 import { ChatEmptyState } from './ChatEmptyState'
 import { CompactSummaryCard } from './CompactSummaryCard'
@@ -185,6 +186,18 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   // mensagens de disco: ecos otimistas são só texto do usuário.
   const interactive = useMemo(() => resolveInteractive(messages), [messages])
   const pendingPrompt = useMemo(() => pendingInteractive(messages), [messages])
+
+  // Último subagente do transcript (nome + status) pra faixa de estado. Dado real
+  // do transcript; o status vem do mesmo mapa que o SubagentCard consome.
+  const lastSubagent = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.kind === 'subagent') {
+        return { name: m.name, error: interactive.subagents.get(m.id) === true }
+      }
+    }
+    return null
+  }, [messages, interactive])
 
   // ── Momento pendente vindo do menu TUI parseado do buffer ──────────────────
   const menuFp = tuiMenu ? menuFingerprint(tuiMenu) : null
@@ -633,12 +646,17 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
   }
 
   return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-[var(--color-bg)]">
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="absolute inset-0 z-10 overflow-y-auto bg-[var(--color-bg)] px-3 py-4"
+      className="min-h-0 flex-1 overflow-y-auto py-[18px]"
+      style={{
+        background:
+          'radial-gradient(90% 40% at 50% 0%, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 60%)',
+      }}
     >
-      <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-3">
+      <div ref={contentRef} className="mx-auto flex max-w-[780px] flex-col gap-3.5 px-6">
         {rendered.map((m, i) => {
           // Ecos otimistas vêm DEPOIS das mensagens de disco; marcamos como pendentes.
           const echoPending = i >= messages.length
@@ -759,6 +777,12 @@ export const ChatView = forwardRef<ChatViewHandle, Props>(function ChatView({ se
           </div>
         )}
       </div>
+    </div>
+    <ChatStatusStrip
+      status={status}
+      subagentName={lastSubagent?.name}
+      subagentError={lastSubagent?.error}
+    />
     </div>
   )
 })

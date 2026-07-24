@@ -10,6 +10,10 @@ const DEFAULT_PERMISSION_KEY = 'session.defaultPermission'
 const DEFAULT_ADVISOR_KEY = 'session.defaultAdvisor'
 const KEYBOARD_MODE_KEY = 'session.keyboardMode'
 const DEFAULT_PANE_MODE_KEY = 'session.defaultPaneMode'
+// Exibir a intro/splash de boot da Pitwall. Default ligado; a própria splash tem
+// um checkbox pra desligar. Lido direto (prefsApi) pelo BootSplashGate no boot,
+// antes deste store carregar — por isso a chave é exportada.
+export const SHOW_INTRO_ON_BOOT_KEY = 'app.showIntroOnBoot'
 
 // Preferência de teclado do composer (consumida pela Fase 2). 'enter-sends' =
 // Enter envia / Shift+Enter quebra; 'enter-newline' inverte (Enter quebra /
@@ -56,6 +60,7 @@ interface SessionPrefsState {
   defaultAdvisor: AdvisorDefault
   keyboardMode: KeyboardSendMode
   defaultPaneMode: PaneMode
+  showIntroOnBoot: boolean
   loaded: boolean
   load: () => Promise<void>
   setDefaultModel: (m: ModelDefault) => Promise<void>
@@ -64,6 +69,7 @@ interface SessionPrefsState {
   setDefaultAdvisor: (a: AdvisorDefault) => Promise<void>
   setKeyboardMode: (k: KeyboardSendMode) => Promise<void>
   setDefaultPaneMode: (m: PaneMode) => Promise<void>
+  setShowIntroOnBoot: (v: boolean) => Promise<void>
 }
 
 // Defaults de criação de sessão (modelo + effort) e preferência de teclado do
@@ -76,17 +82,19 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
   defaultAdvisor: '',
   keyboardMode: DEFAULT_KEYBOARD_MODE,
   defaultPaneMode: DEFAULT_PANE_MODE,
+  showIntroOnBoot: true,
   loaded: false,
 
   load: async () => {
     if (get().loaded) return
-    const [model, effort, permission, advisor, keyboard, paneMode] = await Promise.all([
+    const [model, effort, permission, advisor, keyboard, paneMode, showIntro] = await Promise.all([
       prefsApi.get<string>(DEFAULT_MODEL_KEY),
       prefsApi.get<string>(DEFAULT_EFFORT_KEY),
       prefsApi.get<string>(DEFAULT_PERMISSION_KEY),
       prefsApi.get<string>(DEFAULT_ADVISOR_KEY),
       prefsApi.get<string>(KEYBOARD_MODE_KEY),
       prefsApi.get<string>(DEFAULT_PANE_MODE_KEY),
+      prefsApi.get<boolean>(SHOW_INTRO_ON_BOOT_KEY),
     ])
     set({
       defaultModel: model && MODEL_WHITELIST.has(model) ? (model as ModelDefault) : '',
@@ -98,6 +106,8 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
       defaultAdvisor: advisor && ADVISOR_WHITELIST.has(advisor) ? (advisor as AdvisorDefault) : '',
       keyboardMode: keyboard === 'enter-newline' ? 'enter-newline' : DEFAULT_KEYBOARD_MODE,
       defaultPaneMode: sanitizePaneMode(paneMode),
+      // Ausente (undefined) = default ligado; só desliga com o valor explícito false.
+      showIntroOnBoot: showIntro !== false,
       loaded: true,
     })
   },
@@ -132,6 +142,11 @@ export const useSessionPrefsStore = create<SessionPrefsState>((set, get) => ({
     // Espelha no appStore pra valer já na próxima sessão, sem esperar reboot.
     setDefaultPaneModeFallback(m)
     await prefsApi.set(DEFAULT_PANE_MODE_KEY, m)
+  },
+
+  setShowIntroOnBoot: async (v) => {
+    set({ showIntroOnBoot: v })
+    await prefsApi.set(SHOW_INTRO_ON_BOOT_KEY, v)
   },
 }))
 

@@ -10,7 +10,7 @@ export const MEETING_STATUS_META: Record<MeetingStatus, { label: string; color: 
   diarizing: { label: 'identificando vozes', color: 'var(--color-warning)' },
   ready: { label: 'pronta', color: 'var(--color-info)' },
   extracted: { label: 'extraída', color: 'var(--color-success)' },
-  failed: { label: 'falhou', color: 'var(--color-text-dim)' },
+  failed: { label: 'falhou', color: 'var(--color-danger)' },
 }
 
 // Label + cor por tipo de item extraído (action item/decisão/feedback…).

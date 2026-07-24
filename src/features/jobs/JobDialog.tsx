@@ -373,7 +373,7 @@ export function JobDialog({ open, onClose, job }: Props) {
             <div className="text-xs font-medium text-[var(--color-text)]">
               {formatSchedule(schedule)}
             </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-dim)]">
+            <div className="mt-1 font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
               {preview.length > 0
                 ? `Próximas: ${preview.map(formatWhen).join(' · ')}`
                 : 'Sem execuções previstas.'}

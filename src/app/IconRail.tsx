@@ -18,7 +18,15 @@ import type { ComponentType } from 'react'
 import type { Area } from '@/store/appStore'
 import { useAppStore } from '@/store/appStore'
 import { Icon, ICON_SIZE_HEADER } from '@/components/ui/Icon'
+import { ApexDot } from '@/features/brand'
 import { useWaitingCount } from '@/features/session-switcher/useWaitingCount'
+
+// Fundo do item ativo: gradiente da marca translúcido + anel inset accent.
+const ACTIVE_TILE: React.CSSProperties = {
+  background:
+    'linear-gradient(150deg, color-mix(in srgb, var(--color-accent) 28%, transparent), color-mix(in srgb, var(--color-accent2) 10%, transparent))',
+  boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent)',
+}
 
 interface AreaDef {
   id: Area
@@ -66,17 +74,22 @@ export function IconRail({ onOpenSettings }: Props) {
                     ? `${a.label} · ${waitingCount} aguardando você`
                     : a.label
                 }
-                className={`relative flex h-10 w-10 items-center justify-center rounded-md transition ${
+                className={`relative flex h-[38px] w-[38px] items-center justify-center rounded-[11px] transition ${
                   active
-                    ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)]'
+                    ? 'text-[var(--color-text)]'
                     : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
                 }`}
+                style={active ? ACTIVE_TILE : undefined}
               >
                 <Icon as={a.icon} size={ICON_SIZE_HEADER} />
                 {a.id === 'projects' && waitingCount > 0 && (
-                  <span className="absolute right-0.5 top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--color-warning)] px-0.5 text-[9px] font-semibold leading-none text-black">
-                    {waitingCount}
-                  </span>
+                  <ApexDot
+                    size={7}
+                    active
+                    className="absolute right-[3px] top-[3px]"
+                    color="var(--color-accent)"
+                    title={`${waitingCount} aguardando você`}
+                  />
                 )}
               </button>
             </li>
@@ -88,7 +101,7 @@ export function IconRail({ onOpenSettings }: Props) {
         type="button"
         onClick={onOpenSettings}
         title="Configurações"
-        className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]"
+        className="flex h-[38px] w-[38px] items-center justify-center rounded-[11px] text-[var(--color-text-dim)] transition hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]"
       >
         <Icon as={Settings} size={ICON_SIZE_HEADER} />
       </button>

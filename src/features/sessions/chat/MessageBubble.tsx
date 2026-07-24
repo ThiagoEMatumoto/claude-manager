@@ -9,23 +9,36 @@ interface Props {
 
 export function MessageBubble({ role, text, pending }: Props) {
   const isUser = role === 'user'
-  return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-          isUser
-            ? 'bg-[var(--color-accent)]/15 text-[var(--color-text)]'
-            : 'bg-[var(--color-surface-2)]/60 text-[var(--color-text)]'
-        } ${pending ? 'opacity-60' : ''}`}
-      >
-        <MarkdownViewer content={text} />
-        {pending && (
-          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-[var(--color-text-dim)]">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
-            enviando…
-          </div>
-        )}
+  if (isUser) {
+    // Bolha do usuário: alinhada à direita, gradiente da marca translúcido,
+    // cauda inferior-direita (radius 16 16 4 16).
+    return (
+      <div className="flex justify-end">
+        <div
+          className={`max-w-[80%] rounded-[16px_16px_4px_16px] border border-[color-mix(in_srgb,var(--color-accent)_32%,transparent)] px-3.5 py-2.5 text-[13.5px] leading-[1.5] text-[var(--color-text)] ${
+            pending ? 'opacity-60' : ''
+          }`}
+          style={{
+            background:
+              'linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 15%, transparent), color-mix(in srgb, var(--color-accent2) 6%, transparent))',
+          }}
+        >
+          <MarkdownViewer content={text} />
+          {pending && (
+            <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-[var(--color-text-dim)]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-text-dim)]" />
+              enviando…
+            </div>
+          )}
+        </div>
       </div>
+    )
+  }
+  // Bloco do agente: corpo em Schibsted, sem bolha, marcado por uma borda-esquerda
+  // accent (linguagem "em pista").
+  return (
+    <div className="border-l-2 border-[var(--color-accent)] pl-3.5 text-[14px] leading-[1.55] text-[var(--color-text)]">
+      <MarkdownViewer content={text} />
     </div>
   )
 }

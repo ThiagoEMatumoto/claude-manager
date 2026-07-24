@@ -11,7 +11,8 @@ import {
 import { Icon } from '@/components/ui/Icon'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { usePanelTier } from './use-panel-tier'
-import { ContextUsageIndicator } from './ContextUsageIndicator'
+import { MeasureBlocks } from '@/features/brand/MeasureBlocks'
+import { contextUsage, formatContextUsage } from './model-context-limits'
 import { formatRelative, statusDotView } from './status-view'
 import type { PaneMode } from '@/store/appStore'
 import type { SessionActivity } from '../../../shared/types/ipc'
@@ -89,12 +90,15 @@ export function SessionHeader({
   // Tooltip carrega tudo que era texto visível: label de status, tempo relativo
   // e o título da atividade corrente reportado pelo claude.
   const dotTooltip = [dot.label, relTime, activity?.title].filter(Boolean).join(' · ')
+  // Reusa o cálculo puro de contexto (mesma fonte do ContextUsageIndicator):
+  // tokens.context / limite do modelo → pct. A cor sai do limiar do MeasureBlocks.
+  const ctxUsage = contextUsage({ tokens: activity?.tokens, model: activity?.model ?? null })
 
   return (
     <div
       ref={ref}
-      className="group flex h-8 shrink-0 items-center justify-between gap-3 border-b border-l-2 border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-3 text-xs"
-      style={projectColor ? { borderLeftColor: projectColor } : undefined}
+      className="group flex h-[33px] shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-3.5 text-xs"
+      style={{ boxShadow: `inset 2px 0 0 ${projectColor ?? 'var(--color-accent)'}` }}
     >
       <div className="flex min-w-0 items-center gap-2">
         {!exited && (
@@ -111,7 +115,14 @@ export function SessionHeader({
             />
           </span>
         )}
-        {projectName && <span className="shrink-0">{renderProjectIcon(projectIcon)}</span>}
+        {projectName && (
+          <span
+            className="shrink-0"
+            style={{ color: projectColor ?? 'var(--color-accent)' }}
+          >
+            {renderProjectIcon(projectIcon)}
+          </span>
+        )}
         {tier !== 'narrow' &&
           (editing ? (
             <input
@@ -141,6 +152,12 @@ export function SessionHeader({
                   <>
                     <span className="text-[var(--color-text-dim)]">{projectName}</span>
                     <span className="text-[var(--color-border)]"> · </span>
+                  </>
+                )}
+                {repoLabel && repoLabel !== displayTitle && (
+                  <>
+                    <span className="text-[var(--color-text-dim)]">{repoLabel}</span>
+                    <span className="text-[var(--color-border)]"> / </span>
                   </>
                 )}
                 {displayTitle}
@@ -188,7 +205,14 @@ export function SessionHeader({
         {/* Uso de contexto compacto (só NN%); detalhe completo no tooltip. Cabe
             até no mid (~36px; splits de 3-4 panes caem aqui) — some só no
             narrow, junto com o toggle. */}
-        {!exited && tier !== 'narrow' && <ContextUsageIndicator activity={activity} compact />}
+        {!exited && tier !== 'narrow' && ctxUsage && (
+          <div
+            title={`Janela de contexto · ${formatContextUsage(ctxUsage)}`}
+            className="flex shrink-0 items-center"
+          >
+            <MeasureBlocks label="ctx" percent={ctxUsage.pct} value={`${ctxUsage.pct}%`} />
+          </div>
+        )}
         {/* Toggle Terminal⇄Chat em 1 ícone: mostra o modo DESTINO. */}
         {onToggleMode && tier !== 'narrow' && (
           <button
@@ -200,7 +224,7 @@ export function SessionHeader({
                 : 'Mudar para Terminal — terminal cru (PTY)'
             }
             aria-label={mode === 'terminal' ? 'Mudar para Chat' : 'Mudar para Terminal'}
-            className="rounded border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-accent)]"
+            className="rounded p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-accent)]"
           >
             <Icon as={mode === 'terminal' ? MessageSquare : SquareTerminal} size={13} />
           </button>
@@ -212,7 +236,7 @@ export function SessionHeader({
           onClick={onMinimize}
           title="Minimizar — mantém a sessão rodando em background, acessível no strip de sessões"
           aria-label="Minimizar"
-          className="rounded border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-accent)]"
+          className="rounded p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-accent)]"
         >
           <Icon as={Minus} size={13} />
         </button>
@@ -222,7 +246,7 @@ export function SessionHeader({
           disabled={exited}
           title="Encerrar o processo claude e fechar a sessão (some do strip)"
           aria-label="Encerrar"
-          className="rounded border border-[var(--color-border)] p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-danger)] disabled:opacity-40"
+          className="rounded p-1 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-danger)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-danger)] disabled:opacity-40"
         >
           <Icon as={Power} size={13} />
         </button>

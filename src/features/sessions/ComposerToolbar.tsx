@@ -1,5 +1,6 @@
 import { Clock, Loader, OctagonX } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import type { PermissionMode, SessionActivity } from '../../../shared/types/ipc'
 import { ModelPill, type EffortLevel, type ModelAlias } from './ModelPill'
 import { EffortPill } from './EffortPill'
@@ -88,15 +89,16 @@ export function ComposerToolbar({
         compact={compact}
       />
       {onInterrupt && (
-        <button
-          type="button"
+        <Button
+          variant="danger"
+          size="sm"
           onClick={onInterrupt}
           title="Interromper o claude — envia Ctrl+C ao PTY (o mesmo que digitar Ctrl+C no terminal)."
-          className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-dim)] transition hover:border-[var(--color-danger)]/50 hover:text-[var(--color-danger)]"
+          className="gap-1 px-2 py-0.5 text-[10px]"
         >
-          <Icon as={OctagonX} size={11} className="text-[var(--color-danger)]" />
+          <Icon as={OctagonX} size={11} />
           <span className="whitespace-nowrap">Interromper</span>
-        </button>
+        </Button>
       )}
       {hasPending &&
         (canSwitch ? (

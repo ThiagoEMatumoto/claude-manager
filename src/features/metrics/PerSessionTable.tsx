@@ -97,10 +97,10 @@ export function PerSessionTable({ rows }: { rows: MetricsSessionRow[] }) {
                   <td className={`${cellCls} max-w-0 truncate`} style={{ color: 'var(--color-text)' }}>
                     {row.title ?? row.ccSessionId.slice(0, 8)}
                   </td>
-                  <td className={`${cellCls} text-right tabular-nums`} style={{ color: 'var(--color-text)' }}>
+                  <td className={`${cellCls} text-right font-mono tabular-nums`} style={{ color: 'var(--color-text)' }}>
                     {fmtInt(row.turns)}
                   </td>
-                  <td className={`${cellCls} text-right tabular-nums`} style={{ color: 'var(--color-text)' }}>
+                  <td className={`${cellCls} text-right font-mono tabular-nums`} style={{ color: 'var(--color-text)' }}>
                     {fmtUsd(row.costUsd)}
                   </td>
                   <td className={`${cellCls} whitespace-nowrap`} style={{ color: 'var(--color-text)' }}>
@@ -111,8 +111,8 @@ export function PerSessionTable({ rows }: { rows: MetricsSessionRow[] }) {
                   <tr data-testid="session-detail" style={{ backgroundColor: 'var(--color-surface-2)' }}>
                     <td colSpan={5} className="px-2.5 py-1.5" style={{ color: 'var(--color-text-dim)' }}>
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>Agent calls: {fmtInt(row.agentCalls)}</span>
-                        <span>Última atividade: {fmtDateTime(row.lastTs)}</span>
+                        <span className="font-mono tabular-nums">Agent calls: {fmtInt(row.agentCalls)}</span>
+                        <span className="font-mono tabular-nums">Última atividade: {fmtDateTime(row.lastTs)}</span>
                         <span>Projeto (id): {row.projectId ?? '—'}</span>
                         <span className="font-mono opacity-70">{row.ccSessionId}</span>
                       </div>

@@ -176,9 +176,18 @@ export function ExtractionReview({
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <span
-                        className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                        style={{ color: kind.color, border: `1px solid ${kind.color}` }}
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                        style={{
+                          color: kind.color,
+                          borderColor: `color-mix(in srgb, ${kind.color} 45%, transparent)`,
+                          background: `color-mix(in srgb, ${kind.color} 12%, transparent)`,
+                        }}
                       >
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: kind.color }}
+                        />
                         {kind.label}
                       </span>
                       {materialized ? (

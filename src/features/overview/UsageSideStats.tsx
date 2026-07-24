@@ -1,5 +1,6 @@
 import { ArrowRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Ruler } from '@/features/brand'
 import { useAppStore } from '@/store/appStore'
 import type { MetricsSnapshot } from '../../../shared/types/ipc'
 import { fmtInt, fmtModelName } from './usage-format'
@@ -60,12 +61,14 @@ function CacheHit({ rate }: { rate: number }) {
         <Label>Cache hit</Label>
         <span className="text-sm font-semibold tabular-nums text-[var(--color-text)]">{pct}%</span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
-        <div
-          className="h-full rounded-full bg-[var(--color-accent)]"
-          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-        />
-      </div>
+      <Ruler
+        variant="progress"
+        value={Math.min(1, Math.max(0, rate))}
+        count={20}
+        height={16}
+        className="mt-1.5"
+        aria-label={`Cache hit ${pct}%`}
+      />
     </div>
   )
 }

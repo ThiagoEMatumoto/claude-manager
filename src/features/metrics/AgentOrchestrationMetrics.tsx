@@ -62,7 +62,7 @@ function KpiCard({
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-lg border p-4"
+      className="flex flex-col gap-2 rounded-[14px] border p-4"
       style={{
         borderColor: 'var(--color-border)',
         background: 'var(--color-surface)',
@@ -75,7 +75,7 @@ function KpiCard({
       <div className="flex items-baseline gap-2">
         <span
           data-testid="kpi-value"
-          className="text-2xl font-semibold tabular-nums"
+          className="font-mono text-2xl font-semibold tabular-nums"
           style={{ color: valueColor }}
         >
           {formatPct(value)}
@@ -83,7 +83,7 @@ function KpiCard({
         {delta && (
           <span
             data-testid="kpi-delta"
-            className="text-[11px] font-medium tabular-nums"
+            className="font-mono text-[11px] font-medium tabular-nums"
             style={{ color: deltaColor }}
           >
             {deltaArrow} {formatDelta(delta)}

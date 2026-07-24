@@ -4,7 +4,7 @@ import { DueDateBadge, PriorityBadge, TaskStatusBadge } from '@/features/tasks/T
 import { PARENT_TYPE_META } from '@/features/tasks/status'
 import { selectUrgentTasks } from '../../../shared/home-selectors'
 import type { OverviewPendingTask } from '../../../shared/types/ipc'
-import { CardEmpty, HomeCard } from './HomeGrid'
+import { CardDot, CardEmpty, HomeCard } from './HomeGrid'
 
 // Card "Tasks urgentes": absorve a antiga lista "Pendências do dia" — vencidas
 // → vencem hoje → em andamento, via selectUrgentTasks. `pending` já chega
@@ -20,6 +20,7 @@ export function TasksCard({ pending }: { pending: OverviewPendingTask[] }) {
     <HomeCard
       title="Tasks urgentes"
       count={urgent.length}
+      dot={<CardDot color="var(--color-warning)" />}
       action={
         <button
           type="button"

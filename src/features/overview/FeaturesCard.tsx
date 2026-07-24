@@ -4,7 +4,7 @@ import { useAppStore } from '@/store/appStore'
 import { STATUS_META as FEATURE_STATUS_META } from '@/features/features/status'
 import { isStalledFeature, selectFeaturesWithoutObjective } from '../../../shared/home-selectors'
 import type { OverviewFeatureActivity } from '../../../shared/types/ipc'
-import { CardEmpty, HomeCard } from './HomeGrid'
+import { CardDot, CardEmpty, HomeCard } from './HomeGrid'
 
 // Card "Features em andamento": atividade real de sessões por feature
 // (data.features do agregado), com destaque "parada >3d" via isStalledFeature
@@ -19,6 +19,7 @@ export function FeaturesCard({ features }: { features: OverviewFeatureActivity[]
     <HomeCard
       title="Features em andamento"
       count={features.length}
+      dot={<CardDot color="var(--color-accent2)" />}
       action={
         <button
           type="button"

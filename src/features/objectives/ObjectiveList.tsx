@@ -1,5 +1,6 @@
 import type { ObjectiveStatus, ObjectiveWithProgress } from '../../../shared/types/ipc'
 import { relativeTime } from '@/lib/time'
+import { activeMarker } from '@/features/brand'
 import { KIND_META, STATUS_META } from './status'
 import { ProgressBar } from './ProgressBar'
 
@@ -47,9 +48,9 @@ function ObjectiveCard({
       <button
         type="button"
         onClick={onSelect}
-        className={`w-full rounded-lg border px-4 py-3 text-left transition ${
+        className={`w-full rounded-[14px] border px-4 py-3 text-left transition ${
           active
-            ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]'
+            ? `border-[var(--color-accent)] bg-[var(--color-surface-2)] ${activeMarker}`
             : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]/60'
         }`}
       >
@@ -101,8 +102,12 @@ export function StatusBadge({ status }: { status: ObjectiveStatus }) {
   const meta = STATUS_META[status]
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
       {meta.label}
@@ -114,8 +119,12 @@ export function KindBadge({ kind }: { kind: ObjectiveWithProgress['kind'] }) {
   const meta = KIND_META[kind]
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       {meta.label}
     </span>

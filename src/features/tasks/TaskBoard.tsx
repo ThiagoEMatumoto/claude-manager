@@ -91,7 +91,7 @@ export function TaskBoard({ tasks, resolveLinkLabel, onEdit, onNavigateLink }: P
           >
             <header className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
               <span className="text-xs font-medium text-[var(--color-text)]">{col.label}</span>
-              <span className="rounded-full bg-[var(--color-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-dim)]">
+              <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-text-dim)]">
                 {items.length}
               </span>
             </header>

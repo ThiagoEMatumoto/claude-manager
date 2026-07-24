@@ -15,6 +15,7 @@ import {
 import type { LucideProps } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { Icon } from '@/components/ui/Icon'
+import { activeMarker } from '@/features/brand'
 
 export type CcTab =
   | 'plugins'
@@ -83,7 +84,7 @@ function TabButton({
         onClick={() => onSelect(tab.id)}
         className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
           isActive
-            ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+            ? `bg-[var(--color-surface-2)] text-[var(--color-text)] ${activeMarker}`
             : 'text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
         }`}
       >
@@ -91,7 +92,9 @@ function TabButton({
           <Icon as={tab.icon} className={isActive ? undefined : 'text-[var(--color-text-dim)]'} />
           {tab.label}
         </span>
-        {count != null && <span className="text-xs text-[var(--color-text-dim)]">{count}</span>}
+        {count != null && (
+          <span className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">{count}</span>
+        )}
       </button>
     </li>
   )

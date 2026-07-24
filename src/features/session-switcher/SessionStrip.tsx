@@ -11,6 +11,7 @@ import {
   type LucideProps,
 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { ApexDot } from '@/features/brand'
 import { relativeTime } from '@/lib/time'
 import { pendingEndSessionIds, useAppStore } from '@/store/appStore'
 import { childSessionIds, useHandoffsStore } from '@/store/handoffsStore'
@@ -158,7 +159,7 @@ export function SessionStrip({ onOpenSwitcher }: Props) {
 
   return (
     <div
-      className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2"
+      className="flex h-[38px] shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_40%,transparent)] px-2"
     >
       {visibleSessions.length === 0 ? (
         <span className="px-1 text-[11px] text-[var(--color-text-dim)]">
@@ -241,26 +242,41 @@ function Chip({ item, isOpen, isFocused, isPinned, onOpen, onEnd, onTogglePin }:
     preview ? `\n${preview}` : ''
   }`
   const { icon, spin } = statusIcon(item.status)
+  const waiting = item.status === 'waiting'
 
   return (
     <div
-      data-waiting={item.status === 'waiting' || undefined}
-      className={`group flex h-6 shrink-0 items-center gap-1.5 rounded border px-2 text-[11px] transition ${
+      data-waiting={waiting || undefined}
+      className={`group flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition ${
         isFocused
-          ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] text-[var(--color-text)]'
+          ? 'border-[color-mix(in_srgb,var(--color-accent)_55%,transparent)] text-[var(--color-text)]'
           : isOpen
             ? 'border-[var(--color-border)] bg-[var(--color-surface-2)]/60 text-[var(--color-text)]'
             : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
       }`}
+      style={
+        isFocused
+          ? {
+              background:
+                'linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 16%, transparent), color-mix(in srgb, var(--color-accent2) 6%, transparent))',
+            }
+          : undefined
+      }
       title={tooltip}
     >
       <button type="button" onClick={onOpen} className="flex min-w-0 items-center gap-2">
-        <Icon
-          as={icon}
-          size={12}
-          className={spin ? 'shrink-0 animate-spin' : 'shrink-0'}
-          style={{ color: item.projectColor ?? 'var(--color-border)' }}
-        />
+        {/* Aguardando ("no box · sua vez") ganha O Ápice pulsante; demais estados
+            mantêm o glifo cuja FORMA carrega o status e a COR o projeto. */}
+        {waiting ? (
+          <ApexDot size={7} active color="var(--color-accent)" className="shrink-0" />
+        ) : (
+          <Icon
+            as={icon}
+            size={12}
+            className={spin ? 'shrink-0 animate-spin' : 'shrink-0'}
+            style={{ color: item.projectColor ?? 'var(--color-border)' }}
+          />
+        )}
         <span className="max-w-40 truncate">{title}</span>
       </button>
       {/* Fixado: o próprio botão vira o indicador (sempre visível, preenchido). */}

@@ -74,7 +74,7 @@ export function KeyResultRow({ kr, linkedFeatures, onEdit, onDelete }: Props) {
                 {f.archived ? (
                   <span className="shrink-0">órfã</span>
                 ) : (
-                  <span className="shrink-0 tabular-nums">{fmtProgress(f.progress)}</span>
+                  <span className="shrink-0 font-mono tabular-nums">{fmtProgress(f.progress)}</span>
                 )}
               </button>
             </li>

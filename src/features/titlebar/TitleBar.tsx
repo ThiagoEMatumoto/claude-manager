@@ -1,12 +1,23 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { windowApi } from '@/lib/ipc'
+import { PitwallLogo, type PitwallLogoState } from '@/features/brand'
+import { useWaitingCount } from '@/features/session-switcher/useWaitingCount'
 import { UsageWidget } from './UsageWidget'
 
 const drag = { WebkitAppRegion: 'drag' } as CSSProperties
 const noDrag = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
+// Estado do símbolo reflete a fila de "no box": 3+ vira fila, 1-2 box aberto,
+// 0 mostra o muro em pista (sem parada).
+function logoState(waiting: number): PitwallLogoState {
+  if (waiting >= 3) return 'fila'
+  if (waiting >= 1) return 'box-aberto'
+  return 'em-pista'
+}
+
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false)
+  const waitingCount = useWaitingCount()
 
   useEffect(() => {
     void windowApi.isMaximized().then(setMaximized)
@@ -15,22 +26,34 @@ export function TitleBar() {
 
   return (
     <header
-      className="flex h-9 shrink-0 items-center justify-between border-b pl-3 pr-1 select-none"
+      className="flex h-10 shrink-0 items-center justify-between border-b pl-3.5 pr-1 select-none"
       style={{
         ...drag,
-        background: 'var(--color-surface)',
+        background: 'color-mix(in srgb, var(--color-surface) 85%, transparent)',
         borderColor: 'var(--color-border)',
       }}
       onDoubleClick={() => void windowApi.toggleMaximize()}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
+        <PitwallLogo state={logoState(waitingCount)} size={16} title="Pitwall" />
         <span
-          className="h-2.5 w-2.5 rounded-full"
-          style={{ background: 'var(--color-accent)' }}
-        />
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text-dim)' }}>
-          Claude Manager
+          className="leading-none"
+          style={{ fontWeight: 700, fontSize: 13, letterSpacing: '-0.02em' }}
+        >
+          Pitwall
         </span>
+        {waitingCount > 0 && (
+          <span
+            className="rounded-full px-2.5 py-0.5 text-[10px] font-medium leading-none"
+            style={{
+              background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
+              color: 'var(--color-accent)',
+            }}
+            title={`${waitingCount} sessão(ões) no box — aguardando você`}
+          >
+            {waitingCount} no box
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2" style={noDrag}>
@@ -93,9 +116,9 @@ function ControlButton({
       title={label}
       onClick={onClick}
       style={noDrag}
-      className={`flex h-9 w-11 items-center justify-center text-[var(--color-text-dim)] transition-colors ${
+      className={`flex h-10 w-11 items-center justify-center text-[var(--color-text-dim)] transition-colors ${
         danger
-          ? 'hover:bg-[var(--color-danger)] hover:text-white'
+          ? 'hover:bg-[var(--color-danger)] hover:text-[var(--color-bg)]'
           : 'hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]'
       }`}
     >

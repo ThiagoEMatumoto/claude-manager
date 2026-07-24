@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { activeMarker } from '@/features/brand'
 import type { Meeting, MeetingStatus } from '../../../shared/types/ipc'
 import { MEETING_STATUS_META } from './status'
 
@@ -11,8 +12,12 @@ function MeetingStatusBadge({ status }: { status: MeetingStatus }) {
   const meta = MEETING_STATUS_META[status]
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
       {meta.label}
@@ -49,9 +54,9 @@ export function MeetingList({ meetings, selectedId, onSelect, onDelete }: Props)
               onKeyDown={(e) => {
                 if (e.key === 'Enter') onSelect(meeting)
               }}
-              className={`group w-full cursor-pointer rounded-lg border px-4 py-3 text-left transition ${
+              className={`group w-full cursor-pointer rounded-[14px] border px-4 py-3 text-left transition ${
                 active
-                  ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]/60'
+                  ? `border-[var(--color-accent)] bg-[var(--color-surface-2)]/60 ${activeMarker}`
                   : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)]/60'
               }`}
             >
@@ -60,7 +65,7 @@ export function MeetingList({ meetings, selectedId, onSelect, onDelete }: Props)
                   <div className="truncate text-sm font-medium text-[var(--color-text)]">
                     {meeting.title}
                   </div>
-                  <div className="mt-0.5 text-xs text-[var(--color-text-dim)]">
+                  <div className="mt-0.5 font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
                     {formatDate(meeting.createdAt)}
                   </div>
                 </div>

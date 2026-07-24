@@ -37,14 +37,17 @@ export function OverviewArea() {
           <div className="py-12 text-center text-sm text-[var(--color-text-dim)]">Carregando…</div>
         )}
         {data && (
-          <div className="mx-auto flex max-w-6xl flex-col gap-6">
+          <div className="mx-auto flex max-w-[1120px] flex-col gap-[18px]">
             <div className="home-rise" style={{ '--i': 0 } as CSSProperties}>
               <HomeHero counts={data.counts} onRefresh={() => void refresh()} />
             </div>
 
             <UsageStatsRow snapshot={snapshot} loading={metricsLoading} />
 
-            <div className="home-rise grid gap-6 lg:grid-cols-3" style={{ '--i': 5 } as CSSProperties}>
+            <div
+              className="home-rise grid gap-[14px] lg:grid-cols-3"
+              style={{ '--i': 5 } as CSSProperties}
+            >
               <UsageChartCard snapshot={snapshot} loading={metricsLoading} />
               <UsageSideStats snapshot={snapshot} loading={metricsLoading} />
             </div>

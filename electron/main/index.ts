@@ -82,7 +82,7 @@ function createMainWindow(): BrowserWindow {
     show: false,
     frame: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0b0b0f',
+    backgroundColor: '#08080b',
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,

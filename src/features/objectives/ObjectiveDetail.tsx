@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArrowLeft, Pencil, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { navigateToFeature } from '@/lib/nav'
 import { objectiveProgressTone } from '../../../shared/progress'
 import type { KeyResult, ObjectiveDetail as ObjectiveDetailType } from '../../../shared/types/ipc'
@@ -60,7 +61,7 @@ function ManualProgress({
         onKeyUp={() => onCommit(draft)}
         className="flex-1 accent-[var(--color-accent)]"
       />
-      <span className="w-10 shrink-0 text-right text-sm tabular-nums text-[var(--color-text)]">
+      <span className="w-10 shrink-0 text-right font-mono text-sm tabular-nums text-[var(--color-text)]">
         {Math.round(draft)}%
       </span>
     </div>
@@ -108,7 +109,7 @@ function ProgressBreakdown({ detail }: { detail: ObjectiveDetailType }) {
           className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-text-dim)]"
         >
           <span className="min-w-0 truncate">{c.label}</span>
-          <span className="shrink-0 tabular-nums">{Math.round(c.progress)}%</span>
+          <span className="shrink-0 font-mono tabular-nums">{Math.round(c.progress)}%</span>
         </li>
       ))}
     </ul>
@@ -119,7 +120,7 @@ function MetricField({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-[var(--color-bg)] px-3 py-2">
       <div className="text-[10px] text-[var(--color-text-dim)]">{label}</div>
-      <div className="text-sm tabular-nums text-[var(--color-text)]">{value}</div>
+      <div className="font-mono text-sm tabular-nums text-[var(--color-text)]">{value}</div>
     </div>
   )
 }
@@ -207,11 +208,11 @@ export function ObjectiveDetail({
 
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-dim)]">
           {detail.period && <span>período: {detail.period}</span>}
-          {start && <span>início: {start}</span>}
-          {end && <span>fim: {end}</span>}
+          {start && <span className="font-mono tabular-nums">início: {start}</span>}
+          {end && <span className="font-mono tabular-nums">fim: {end}</span>}
           {detail.priority && <span>prioridade: {PRIORITY_LABEL[detail.priority]}</span>}
           {detail.owner && <span>owner: {detail.owner}</span>}
-          {completed && <span>concluído: {completed}</span>}
+          {completed && <span className="font-mono tabular-nums">concluído: {completed}</span>}
         </div>
       </header>
 
@@ -262,14 +263,10 @@ export function ObjectiveDetail({
         <section className="mt-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Key Results</h2>
-            <button
-              type="button"
-              onClick={onNewKr}
-              className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-            >
+            <Button variant="primary" size="sm" onClick={onNewKr}>
               <Icon as={Plus} size={13} />
               Novo KR
-            </button>
+            </Button>
           </div>
           {detail.keyResults.length === 0 ? (
             <p className="text-xs text-[var(--color-text-dim)]">Nenhum key result.</p>

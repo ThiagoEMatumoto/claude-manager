@@ -171,11 +171,29 @@ html, body, #root {
 .pw-rise { animation: pw-rise 0.4s ease-out both; }
 .pw-cursor { animation: pw-cursor 1s step-end infinite; }
 
+/* Equalizer d'"A Régua" (estado "em pista / agente pensando"): barras oscilando.
+   Cada barra recebe um --pw-eq-delay inline para dessincronizar a onda. */
+@keyframes pw-eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.pw-eq-bar {
+  transform-origin: bottom;
+  animation: pw-eq 0.9s ease-in-out infinite;
+  animation-delay: var(--pw-eq-delay, 0ms);
+}
+
+/* Marcador de item/sessão ativa: barra accent colada à esquerda. */
+.pw-active-marker {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pw-pulse,
   .pw-ring,
   .pw-rise,
-  .pw-cursor {
+  .pw-cursor,
+  .pw-eq-bar {
     animation: none;
   }
 }

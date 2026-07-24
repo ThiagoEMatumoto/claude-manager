@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { PitwallLogo } from '@/features/brand'
 import { dialogApi, vaultApi } from '@/lib/ipc'
 
 interface Props {
@@ -37,17 +38,26 @@ export function WelcomeDialog({ onDone }: Props) {
     <Dialog
       open
       onClose={() => {}}
-      title="Bem-vindo ao Pitwall"
+      showClose={false}
       footer={
         <Button onClick={handleStart} disabled={!root.trim()} loading={submitting}>
-          Começar
+          Entrar no box
         </Button>
       }
     >
-      <p className="mb-4 text-sm text-[var(--color-text-dim)]">
-        Seus projetos ficarão organizados sob uma pasta-raiz. Escolha onde os
-        vaults dos projetos serão criados — você pode mudar isso depois nas
-        configurações.
+      <div className="mb-5 flex flex-col items-center text-center">
+        <PitwallLogo state="box-aberto" size={52} className="text-[var(--color-text)]" />
+        <div className="mt-3 text-2xl font-semibold tracking-[-0.02em] text-[var(--color-text)]">
+          Pitwall
+        </div>
+        <div className="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+          O cockpit do dev
+        </div>
+      </div>
+
+      <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-dim)]">
+        Antes de entrar em pista, monte o box: escolha uma pasta-raiz onde cada
+        projeto ganha sua garagem. Dá pra remapear depois nas configurações.
       </p>
 
       <Input

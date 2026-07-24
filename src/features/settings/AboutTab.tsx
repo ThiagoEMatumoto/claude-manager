@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Code, Bug, MessageSquarePlus, Tag } from 'lucide-react'
+import { PitwallLogo } from '@/features/brand'
 import { appApi, shellApi } from '@/lib/ipc'
 import type { AppInfo } from '../../../shared/types/ipc'
 
@@ -56,23 +57,28 @@ export function AboutTab({ open }: { open: boolean }) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4">
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold text-[var(--color-text)]">Pitwall</span>
-          <span className="text-sm text-[var(--color-text-dim)]">
-            v{info?.version ?? '…'}
-          </span>
-        </div>
-        {info && (
-          <div className="mt-2 space-y-0.5 text-xs text-[var(--color-text-dim)]">
-            <div>
-              {info.platform} · {info.arch}
-            </div>
-            <div>
-              Electron {info.electron} · Chrome {info.chrome} · Node {info.node}
-            </div>
+      <div className="flex items-center gap-4 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4">
+        <PitwallLogo state="box-aberto" size={40} className="shrink-0 text-[var(--color-text)]" />
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-semibold tracking-[-0.02em] text-[var(--color-text)]">
+              Pitwall
+            </span>
+            <span className="text-sm text-[var(--color-text-dim)]">
+              v{info?.version ?? '…'}
+            </span>
           </div>
-        )}
+          {info && (
+            <div className="mt-2 space-y-0.5 text-xs text-[var(--color-text-dim)]">
+              <div>
+                {info.platform} · {info.arch}
+              </div>
+              <div>
+                Electron {info.electron} · Chrome {info.chrome} · Node {info.node}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div>

@@ -74,7 +74,7 @@ export function SettingsDialog({ open, onClose }: Props) {
               onClick={() => setTab(id)}
               className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
                 tab === id
-                  ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                  ? 'bg-[var(--color-surface-2)] text-[var(--color-accent)] shadow-[inset_2px_0_0_var(--color-accent)]'
                   : 'text-[var(--color-text-dim)] hover:bg-[var(--color-bg)]/40 hover:text-[var(--color-text)]'
               }`}
             >
@@ -666,12 +666,15 @@ const SWATCH_KEYS = ['bg', 'surface-2', 'accent', 'text', 'border'] as const
 
 function AppearanceTab({ open }: { open: boolean }) {
   const [pref, setPref] = useState<ThemePref>({ presetId: DEFAULT_PRESET_ID })
+  const showIntroOnBoot = useSessionPrefsStore((s) => s.showIntroOnBoot)
+  const setShowIntroOnBoot = useSessionPrefsStore((s) => s.setShowIntroOnBoot)
 
   useEffect(() => {
     if (!open) return
     void loadThemePref().then((p) => {
       if (p) setPref(p)
     })
+    void useSessionPrefsStore.getState().load()
   }, [open])
 
   function update(next: ThemePref) {
@@ -728,6 +731,17 @@ function AppearanceTab({ open }: { open: boolean }) {
         <ColorSelect
           value={accent}
           onChange={(hex) => update({ presetId: pref.presetId, accent: hex })}
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+          Boot
+        </div>
+        <Toggle
+          label="Mostrar a intro do Pitwall no boot"
+          checked={showIntroOnBoot}
+          onChange={(v) => void setShowIntroOnBoot(v)}
         />
       </div>
 

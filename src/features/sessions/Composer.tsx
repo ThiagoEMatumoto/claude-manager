@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { ChevronRight, CornerDownLeft, Image as ImageIcon, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button, GradientBorder } from '@/features/brand'
 import { sessionsApi } from '@/lib/ipc'
 import { useSessionPrefsStore } from '@/lib/session-prefs-store'
 import { navigateHistory, resolveComposerKey, resolveForwardKey } from './composer-keys'
@@ -356,7 +357,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       )}
       {!collapsed && (
         <>
-      <div className="flex items-end gap-2">
+      <GradientBorder
+        radius={12}
+        innerBg="var(--color-bg)"
+        className="w-full"
+        style={{ display: 'block', width: '100%' }}
+        innerClassName="flex items-end gap-2 px-2.5 py-2"
+      >
+        <div className="relative min-w-0 flex-1">
+          {/* Placeholder da marca: texto + cursor piscante (pw-cursor). Overlay
+              decorativo (pointer-events-none) mostrado só com o input vazio — não
+              interfere no textarea real por baixo. */}
+          {text.length === 0 && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0 flex items-center font-mono text-sm leading-[1.5] text-[var(--color-text-dim)]"
+            >
+              Escreva um prompt…
+              <span className="pw-cursor ml-0.5 inline-block h-[15px] w-[7px] bg-[var(--color-accent)] align-text-bottom" />
+            </div>
+          )}
         <textarea
           ref={innerRef}
           value={text}
@@ -369,8 +389,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           rows={2}
-          placeholder="Escreva um prompt — vai pro mesmo claude. Vazio: setas/Esc/Ctrl+C dirigem a TUI."
-          className="max-h-48 min-h-[2.5rem] flex-1 resize-none overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-dim)] focus:border-[var(--color-accent)]"
+          placeholder=""
+          aria-label="Escreva um prompt — vai pro mesmo claude. Vazio: setas/Esc/Ctrl+C dirigem a TUI."
+          className="max-h-48 min-h-[2.5rem] w-full resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-sm text-[var(--color-text)] outline-none"
           onKeyDown={(e) => {
             // Não deixa atalhos globais/terminal interceptarem enquanto compõe.
             e.stopPropagation()
@@ -417,27 +438,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             // 'newline' e 'noop': comportamento nativo do textarea (quebra/edição).
           }}
         />
+        </div>
         <div className="flex shrink-0 flex-col gap-1">
-          <button
-            type="button"
-            onClick={submit}
-            title={hint}
-            className="flex items-center gap-1 rounded border border-[var(--color-accent)] bg-[var(--color-accent)] px-2.5 py-1 text-xs font-medium text-[var(--color-bg)] hover:opacity-90"
-          >
+          <Button variant="primary" size="sm" onClick={submit} title={hint}>
             <Icon as={CornerDownLeft} size={13} />
             Enviar
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={insertOnly}
             title="Insere o texto no prompt do claude sem enviar — você revisa e aperta Enter"
-            className="rounded border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-accent)]"
           >
             Inserir
-          </button>
+          </Button>
         </div>
-      </div>
-      <div className="mt-1 px-1 text-[10px] text-[var(--color-text-dim)]">
+      </GradientBorder>
+      <div className="mt-1 px-1 font-mono text-[10px] text-[var(--color-text-dim)]">
         {hint} · Ctrl+↑/↓ histórico
       </div>
         </>

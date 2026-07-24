@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { useDossiersStore } from '@/store/dossiersStore'
 import type { SourceClass } from '../../../shared/types/ipc'
 import { SOURCE_CLASS_LABEL } from './dossier-labels'
@@ -115,7 +116,9 @@ export function NewDossierForm() {
                 style={{
                   color: active ? 'var(--color-accent)' : 'var(--color-text-dim)',
                   borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
-                  background: active ? 'var(--color-accent)1a' : undefined,
+                  background: active
+                    ? 'color-mix(in srgb, var(--color-accent) 12%, transparent)'
+                    : undefined,
                 }}
               >
                 {SOURCE_CLASS_LABEL[c]}
@@ -132,28 +135,29 @@ export function NewDossierForm() {
         className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
       />
       <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => {
             setOpen(false)
             reset()
           }}
-          className="rounded px-2 py-1 text-xs text-[var(--color-text-dim)] hover:text-[var(--color-text)]"
         >
           Cancelar
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
+          variant="primary"
+          size="sm"
           disabled={
             submitting ||
             title.trim().length === 0 ||
             question.trim().length === 0 ||
             classes.size === 0
           }
-          className="rounded border border-[var(--color-accent)] px-3 py-1 text-xs font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-40"
         >
           {submitting ? 'Criando…' : 'Criar'}
-        </button>
+        </Button>
       </div>
     </form>
   )

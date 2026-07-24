@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { CheckCircle2, PlayCircle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { useDossiersStore, type RunDetail } from '@/store/dossiersStore'
 import type { DossierPlanInput, EvidenceRecord, Source } from '../../../shared/types/ipc'
 import {
@@ -98,12 +99,18 @@ function GateBView({ detail }: { detail: RunDetail }) {
                   <td className="px-3 py-2">
                     {source && (
                       <span
-                        className="rounded-full border px-2 py-0.5 text-[11px]"
+                        className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]"
                         style={{
                           color: TRUST_TIER_COLOR[source.trustTier],
-                          borderColor: TRUST_TIER_COLOR[source.trustTier],
+                          borderColor: `color-mix(in srgb, ${TRUST_TIER_COLOR[source.trustTier]} 45%, transparent)`,
+                          background: `color-mix(in srgb, ${TRUST_TIER_COLOR[source.trustTier]} 12%, transparent)`,
                         }}
                       >
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ background: TRUST_TIER_COLOR[source.trustTier] }}
+                        />
                         {TRUST_TIER_LABEL[source.trustTier]}
                       </span>
                     )}
@@ -231,15 +238,15 @@ export function RunDetailView({ detail }: { detail: RunDetail }) {
 
   if (status === 'paused') {
     return (
-      <button
-        type="button"
+      <Button
+        variant="primary"
         onClick={() => void resumeRun(detail.run.id)}
         disabled={busy}
-        className="flex items-center justify-center gap-2 rounded-md border border-[var(--color-accent)] px-3 py-2 text-sm font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-50"
+        className="justify-center"
       >
         <Icon as={PlayCircle} size={16} />
         {busy ? 'Retomando…' : 'Retomar pesquisa'}
-      </button>
+      </Button>
     )
   }
 

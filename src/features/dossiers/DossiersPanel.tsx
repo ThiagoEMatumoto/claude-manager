@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Archive, PlayCircle, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button, activeMarker } from '@/features/brand'
 import { dossiersApi } from '@/lib/ipc'
 import { useDossiersStore } from '@/store/dossiersStore'
 import type { Dossier, DossierRun } from '../../../shared/types/ipc'
@@ -25,9 +26,18 @@ function RunStatusBadge({ status }: { status: DossierRun['status'] }) {
   const color = RUN_STATUS_COLOR[status]
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
-      style={{ color, borderColor: color, background: `${color}1a` }}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        color,
+        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+      }}
     >
+      <span
+        aria-hidden
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ background: color }}
+      />
       {RUN_STATUS_LABEL[status]}
     </span>
   )
@@ -38,10 +48,12 @@ function DossierListItem({ dossier, active }: { dossier: Dossier; active: boolea
   const archive = useDossiersStore((s) => s.archive)
   return (
     <div
-      className="flex items-start justify-between gap-2 rounded-md border p-2 transition"
+      className={`flex items-start justify-between gap-2 rounded-md border p-2 transition ${active ? activeMarker : ''}`}
       style={{
         borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
-        background: active ? 'var(--color-accent)0d' : 'var(--color-surface)',
+        background: active
+          ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)'
+          : 'var(--color-surface)',
       }}
     >
       <button
@@ -93,15 +105,15 @@ function DetailColumn() {
         <p className="text-sm text-[var(--color-text-dim)]">{dossier.question}</p>
       </div>
 
-      <button
-        type="button"
+      <Button
+        variant="primary"
         onClick={() => void startRun(dossier.id)}
         disabled={busy}
-        className="flex items-center justify-center gap-2 rounded-md border border-[var(--color-accent)] px-3 py-2 text-sm font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent)]/10 disabled:opacity-50"
+        className="justify-center"
       >
         <Icon as={PlayCircle} size={16} />
         {busy ? 'Iniciando…' : 'Iniciar pesquisa'}
-      </button>
+      </Button>
 
       {runs.length > 0 && (
         <div>
@@ -114,16 +126,18 @@ function DetailColumn() {
                 key={run.id}
                 type="button"
                 onClick={() => void selectRun(run.id)}
-                className="flex items-center justify-between gap-2 rounded-md border p-2 text-left transition"
+                className={`flex items-center justify-between gap-2 rounded-md border p-2 text-left transition ${run.id === selectedRunId ? activeMarker : ''}`}
                 style={{
                   borderColor:
                     run.id === selectedRunId ? 'var(--color-accent)' : 'var(--color-border)',
                   background:
-                    run.id === selectedRunId ? 'var(--color-accent)0d' : 'var(--color-surface)',
+                    run.id === selectedRunId
+                      ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)'
+                      : 'var(--color-surface)',
                 }}
               >
                 <RunStatusBadge status={run.status} />
-                <span className="text-[11px] text-[var(--color-text-dim)]">
+                <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
                   {formatDate(run.startedAt)}
                 </span>
               </button>

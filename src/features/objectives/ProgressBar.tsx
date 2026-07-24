@@ -28,7 +28,7 @@ export function ProgressBar({ value, className = '', tone = 'accent' }: Props) {
           }}
         />
       </div>
-      <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-[var(--color-text-dim)]">
+      <span className="w-9 shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--color-text-dim)]">
         {value === null ? '—' : `${Math.round(pct)}%`}
       </span>
     </div>

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Input } from '@/components/ui/Input'
+import { Button } from '@/features/brand'
 import type {
   ObjectiveKind,
   ObjectiveStatus,
@@ -92,15 +93,10 @@ export function ObjectivesSidebar({
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="text-sm font-semibold tracking-tight">Objetivos</div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNew}
-            title="Novo objetivo"
-            className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-          >
+          <Button variant="primary" size="sm" onClick={onNew} title="Novo objetivo">
             <Icon as={Plus} size={13} />
             Novo
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onReload}
@@ -195,7 +191,7 @@ export function ObjectivesSidebar({
                     title={meta.label}
                   />
                   <span className="truncate">{o.title}</span>
-                  <span className="ml-auto shrink-0 text-[10px] tabular-nums">
+                  <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
                     {o.progress === null ? '—' : `${Math.round(o.progress)}%`}
                   </span>
                 </button>

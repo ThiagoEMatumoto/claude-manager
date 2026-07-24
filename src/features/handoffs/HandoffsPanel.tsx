@@ -128,9 +128,14 @@ export function StatusBadge({ status }: { status: HandoffStatus }) {
   const color = STATUS_COLOR[status]
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
-      style={{ color, borderColor: color, background: `${color}1a` }}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        color,
+        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+      }}
     >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
       {STATUS_LABEL[status]}
     </span>
   )
@@ -289,10 +294,12 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
 
   return (
     <div
-      className="rounded-md border bg-[var(--color-surface)] p-3"
+      className="rounded-[14px] border bg-[var(--color-surface)] p-3"
       style={{
         borderColor: highlight ? 'var(--color-warning)' : 'var(--color-border)',
-        background: highlight ? 'var(--color-warning)0d' : undefined,
+        background: highlight
+          ? 'color-mix(in srgb, var(--color-warning) 8%, transparent)'
+          : undefined,
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -305,7 +312,11 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
             {live && (
               <span
                 className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
-                style={{ color: live.color, borderColor: live.color, background: `${live.color}1a` }}
+                style={{
+                  color: live.color,
+                  borderColor: `color-mix(in srgb, ${live.color} 45%, transparent)`,
+                  background: `color-mix(in srgb, ${live.color} 12%, transparent)`,
+                }}
                 title="Estado ao vivo da sessão-filha"
               >
                 <span
@@ -331,7 +342,7 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
             </div>
           )}
           {(activityLabel || ctxLabel) && (
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-dim)]">
+            <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
               {activityLabel && <span title="Última atividade da filha">{activityLabel}</span>}
               {ctxLabel && <span title="Tokens de contexto em uso">{ctxLabel}</span>}
             </div>
@@ -347,7 +358,7 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-[11px] text-[var(--color-text-dim)]">
+          <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
             {formatDate(handoff.createdAt)}
           </span>
           {childLive && (
@@ -393,7 +404,7 @@ function HandoffCard({ handoff, ttlHours }: { handoff: Handoff; ttlHours: number
           className="mt-2 rounded-md border px-3 py-2 text-sm"
           style={{
             borderColor: 'var(--color-warning)',
-            background: 'var(--color-warning)14',
+            background: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',
             color: 'var(--color-text)',
           }}
         >
@@ -535,7 +546,7 @@ function OutcomeButton({
       style={{
         color: active ? color : 'var(--color-text-dim)',
         borderColor: active ? color : 'var(--color-border)',
-        background: active ? `${color}1a` : undefined,
+        background: active ? `color-mix(in srgb, ${color} 12%, transparent)` : undefined,
       }}
     >
       <Icon as={icon} size={12} />
@@ -595,7 +606,7 @@ export function HandoffsPanel() {
               <section key={group.status}>
                 <div className="mb-2 flex items-center gap-2">
                   <StatusBadge status={group.status} />
-                  <span className="text-xs text-[var(--color-text-dim)]">
+                  <span className="font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
                     {group.items.length}
                   </span>
                 </div>

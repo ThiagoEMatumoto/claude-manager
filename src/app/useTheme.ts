@@ -26,6 +26,12 @@ export function applyTheme(tokens: ThemeTokens) {
   for (const [key, value] of Object.entries(tokens)) {
     root.style.setProperty(`--color-${key}`, value)
   }
+  // Gradiente da marca Pitwall (accent → accent2). Derivado das vars já setadas
+  // acima para que troque junto com o tema sem recalcular aqui.
+  root.style.setProperty(
+    '--gradient-brand',
+    'linear-gradient(135deg, var(--color-accent), var(--color-accent2))',
+  )
   currentTokens = tokens
   for (const fn of listeners) fn(tokens)
 }

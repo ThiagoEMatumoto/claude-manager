@@ -7,6 +7,7 @@ export type ThemeTokenKey =
   | 'text-dim'
   | 'accent'
   | 'accent-dim'
+  | 'accent2'
   | 'success'
   | 'warning'
   | 'danger'
@@ -20,73 +21,75 @@ export interface ThemePreset {
   tokens: ThemeTokens
 }
 
-export const DEFAULT_PRESET_ID = 'ember'
+// Vácuo é o default da marca Pitwall. As chaves internas (ember/slate/ocean/
+// forest) são preservadas como IDs persistidos em prefs (ThemePref.presetId) —
+// só valores e labels mudam, então preferências salvas não quebram:
+// slate→Vácuo (default), forest→Sinal, ocean→Gelo, ember→Papaia (ex-laranja).
+export const DEFAULT_PRESET_ID = 'slate'
 
-const ember: ThemeTokens = {
-  bg: '#0b0b0f',
-  surface: '#14141b',
-  'surface-2': '#1c1c25',
-  border: '#2a2a35',
-  text: '#e8e8ef',
-  'text-dim': '#9c9cae',
-  accent: '#ff7a45',
-  'accent-dim': '#c95f33',
-  success: '#5a9e6f',
-  warning: '#c79a4a',
-  danger: '#c0584f',
-  info: '#5a85b0',
+// Texto e semânticas são idênticos nos 4 temas (marca fixa; só a família de
+// accent muda por tema, estilo VS Code).
+const TEXT = { text: '#F1F0F6', 'text-dim': '#A5A1BD' } as const
+const SEMANTIC = {
+  success: '#6FD695',
+  warning: '#FFB057',
+  danger: '#FF8D75',
+  info: '#7FA7E8',
+} as const
+
+const vacuo: ThemeTokens = {
+  bg: '#08080B',
+  surface: '#0F0E15',
+  'surface-2': '#16141F',
+  border: '#282534',
+  ...TEXT,
+  accent: '#9D8CFF',
+  'accent-dim': darken('#9D8CFF'),
+  accent2: '#7FD6F2',
+  ...SEMANTIC,
 }
 
-const slate: ThemeTokens = {
-  bg: '#0c0e12',
-  surface: '#151820',
-  'surface-2': '#1d2129',
-  border: '#2c313c',
-  text: '#e6e9f0',
-  'text-dim': '#969cab',
-  accent: '#7c93c0',
-  'accent-dim': '#5d709a',
-  success: '#5a9e6f',
-  warning: '#c79a4a',
-  danger: '#c0584f',
-  info: '#5a85b0',
+const sinal: ThemeTokens = {
+  bg: '#0B0D0C',
+  surface: '#121614',
+  'surface-2': '#182019',
+  border: '#232B26',
+  ...TEXT,
+  accent: '#35D07F',
+  'accent-dim': darken('#35D07F'),
+  accent2: '#7FE0A8',
+  ...SEMANTIC,
 }
 
-const ocean: ThemeTokens = {
-  bg: '#0a0e14',
-  surface: '#111722',
-  'surface-2': '#18202e',
-  border: '#283342',
-  text: '#e4ecf2',
-  'text-dim': '#8fa0b2',
-  accent: '#3ea6c9',
-  'accent-dim': '#2d7e9b',
-  success: '#5a9e6f',
-  warning: '#c79a4a',
-  danger: '#c0584f',
-  info: '#5a85b0',
+const gelo: ThemeTokens = {
+  bg: '#090D12',
+  surface: '#101722',
+  'surface-2': '#16202E',
+  border: '#22303F',
+  ...TEXT,
+  accent: '#5FC9EA',
+  'accent-dim': darken('#5FC9EA'),
+  accent2: '#8FECD2',
+  ...SEMANTIC,
 }
 
-const forest: ThemeTokens = {
-  bg: '#0a0f0c',
-  surface: '#121a14',
-  'surface-2': '#19241c',
-  border: '#293a2d',
-  text: '#e6efe8',
-  'text-dim': '#93a698',
-  accent: '#56b07a',
-  'accent-dim': '#3f8a5d',
-  success: '#5a9e6f',
-  warning: '#c79a4a',
-  danger: '#c0584f',
-  info: '#5a85b0',
+const papaia: ThemeTokens = {
+  bg: '#100D0A',
+  surface: '#181310',
+  'surface-2': '#201A14',
+  border: '#33291F',
+  ...TEXT,
+  accent: '#FF8A50',
+  'accent-dim': darken('#FF8A50'),
+  accent2: '#FFC46B',
+  ...SEMANTIC,
 }
 
 export const PRESETS: ThemePreset[] = [
-  { id: 'ember', label: 'Ember', tokens: ember },
-  { id: 'slate', label: 'Slate', tokens: slate },
-  { id: 'ocean', label: 'Ocean', tokens: ocean },
-  { id: 'forest', label: 'Forest', tokens: forest },
+  { id: 'slate', label: 'Vácuo', tokens: vacuo },
+  { id: 'forest', label: 'Sinal', tokens: sinal },
+  { id: 'ocean', label: 'Gelo', tokens: gelo },
+  { id: 'ember', label: 'Papaia', tokens: papaia },
 ]
 
 export function getPreset(id: string): ThemePreset {
@@ -112,9 +115,9 @@ export function darken(hex: string, amount = 0.22): string {
   return `#${out.toString(16).padStart(6, '0')}`
 }
 
-// Tema do xterm derivado dos tokens do app. Com o preset Ember reproduz
-// byte-a-byte o THEME que era hardcoded no Terminal (bg/text/accent/border/
-// surface/text-dim batem com os antigos background/foreground/cursor/...).
+// Tema do xterm derivado dos tokens do app: mapeia bg/text/accent/border/
+// surface/text-dim do tema ativo para os campos que o xterm entende, de modo
+// que o terminal herda o accent da marca (roxo no Vácuo) sem cor hardcoded.
 export function xtermTheme(tokens: ThemeTokens): {
   background: string
   foreground: string

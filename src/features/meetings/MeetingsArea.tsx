@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Mic, Square, Sparkles, AlertTriangle, Search, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Lock } from 'lucide-react'
+import { Button } from '@/features/brand'
 import { useMeetingsStore } from '@/store/meetingsStore'
 import { useMeetingPrefsStore } from '@/lib/meeting-prefs-store'
 import { objectivesApi, featuresApi, meetingsApi } from '@/lib/ipc'
@@ -208,15 +209,10 @@ export function MeetingsArea() {
       <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <span className="text-sm font-medium text-[var(--color-text)]">Reuniões</span>
-          <button
-            type="button"
-            onClick={() => void handleNew()}
-            title="Nova reunião"
-            className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90"
-          >
+          <Button variant="primary" size="sm" onClick={() => void handleNew()} title="Nova reunião">
             <Icon as={Plus} size={13} />
             Nova
-          </button>
+          </Button>
         </div>
         <div className="border-b border-[var(--color-border)] px-3 py-2.5">
           <div className="relative">
@@ -308,16 +304,13 @@ export function MeetingsArea() {
                   Modo privado (local)
                 </label>
                 {reviewForSelected ? (
-                  <button
-                    type="button"
-                    onClick={clearExtraction}
-                    className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
-                  >
+                  <Button variant="secondary" size="sm" onClick={clearExtraction}>
                     Voltar às notas
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => void handleEnrich(selected)}
                     disabled={
                       !ENRICHABLE.has(selected.status) ||
@@ -331,31 +324,32 @@ export function MeetingsArea() {
                           ? 'Sem transcript: grave ou importe áudio antes de enriquecer'
                           : 'Enriquecer notas e extrair itens'
                     }
-                    className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Icon as={Sparkles} size={12} />
                     {extractingId === selected.id ? 'Enriquecendo…' : 'Enriquecer'}
-                  </button>
+                  </Button>
                 )}
                 {LIVE.has(selected.status) ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="shrink-0"
                     onClick={() => void stopCapture(selected.id)}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--color-danger)] px-2.5 py-1 text-xs text-[var(--color-danger)] transition hover:bg-[var(--color-danger)]/10"
                   >
                     <Icon as={Square} size={12} />
                     Encerrar
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="shrink-0"
                     onClick={() => void startCapture(selected.id)}
                     disabled={selected.status !== 'idle'}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Icon as={Mic} size={12} />
                     Iniciar
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

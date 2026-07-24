@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Download, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Button } from '@/features/brand'
 import { meetingsApi } from '@/lib/ipc'
 
 // Botão "Instalar transcrição" + progresso ao vivo do setup-meeting-sidecar.sh.
@@ -57,14 +58,10 @@ export function SidecarInstaller({ onInstalled }: { onInstalled: () => void }) {
   return (
     <div className="mt-2">
       {phase === 'idle' && (
-        <button
-          type="button"
-          onClick={startInstall}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-2.5 py-1 text-xs text-[var(--color-bg)] transition hover:opacity-90"
-        >
+        <Button variant="primary" size="sm" onClick={startInstall}>
           <Icon as={Download} size={13} />
           Instalar transcrição
-        </button>
+        </Button>
       )}
 
       {phase === 'success' && (
@@ -80,13 +77,9 @@ export function SidecarInstaller({ onInstalled }: { onInstalled: () => void }) {
             <Icon as={XCircle} size={14} />
             {error}
           </div>
-          <button
-            type="button"
-            onClick={startInstall}
-            className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-dim)] transition hover:text-[var(--color-text)]"
-          >
+          <Button variant="secondary" size="sm" onClick={startInstall}>
             Tentar de novo
-          </button>
+          </Button>
         </div>
       )}
 

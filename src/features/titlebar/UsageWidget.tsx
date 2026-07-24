@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Clock } from 'lucide-react'
 import { usageApi } from '@/lib/ipc'
-import { Icon } from '@/components/ui/Icon'
+import { MeasureBlocks } from '@/features/brand'
 import type { UsageStatus, UsageWindow } from '../../../shared/types/ipc'
-
-function barColor(util: number): string {
-  if (util > 90) return 'var(--color-danger)'
-  if (util >= 70) return 'var(--color-warning)'
-  return 'var(--color-success)'
-}
 
 function formatCountdown(resetsAt: string): string {
   const ms = new Date(resetsAt).getTime() - Date.now()
@@ -34,34 +27,17 @@ function Indicator({
   const util = Math.max(0, Math.min(100, window.utilization))
   return (
     <div
-      className="flex items-center gap-1.5"
       style={{ opacity: stale ? 0.55 : 1 }}
       title={`${label}: ${util.toFixed(0)}% • reseta em ${formatCountdown(window.resetsAt)}${
         stale ? ' • desatualizado' : ''
       }`}
     >
-      <span className="text-[10px] font-medium" style={{ color: 'var(--color-text-dim)' }}>
-        {label}
-      </span>
-      <span className="text-[10px] tabular-nums" style={{ color: 'var(--color-text)' }}>
-        {util.toFixed(0)}%
-      </span>
-      <span
-        className="h-1 w-10 overflow-hidden rounded-full"
-        style={{ background: 'var(--color-surface-2)' }}
-      >
-        <span
-          className="block h-full rounded-full transition-all"
-          style={{ width: `${util}%`, background: barColor(util) }}
-        />
-      </span>
-      <span
-        className="flex items-center gap-0.5 text-[10px] tabular-nums"
-        style={{ color: 'var(--color-text-dim)' }}
-      >
-        <Icon as={Clock} size={10} />
-        {formatCountdown(window.resetsAt)}
-      </span>
+      <MeasureBlocks
+        className="text-[10px]"
+        percent={util}
+        label={label}
+        value={`${util.toFixed(0)}%`}
+      />
     </div>
   )
 }

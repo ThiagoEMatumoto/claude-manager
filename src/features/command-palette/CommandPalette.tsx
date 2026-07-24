@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Blocks, Folder, Rocket, Settings, SlashSquare, Sparkles, TerminalSquare, X } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { Icon } from '@/components/ui/Icon'
+import { GradientBorder } from '@/features/brand'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { projectsApi } from '@/lib/ipc'
 import { matchesQuery } from '@/lib/text-match'
@@ -364,12 +365,16 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 pt-[12vh]"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 pt-[12vh] backdrop-blur-[3px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="flex w-[36rem] max-w-[90vw] flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
+      <GradientBorder
+        radius={16}
+        className="w-[620px] max-w-[90vw] pw-rise shadow-2xl"
+        innerClassName="flex flex-col overflow-hidden"
+      >
         <div className="border-b border-[var(--color-border)] px-3">
           <input
             ref={inputRef}
@@ -396,7 +401,10 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
 
           {groups.map((g) => (
             <div key={g.group} className="py-1">
-              <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-dim)]">
+              <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-dim)]">
+                {g.group === LIVE_SESSIONS_GROUP && (
+                  <span className="pw-pulse h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
+                )}
                 {g.group}
               </div>
               {g.items.map(({ cmd, idx }) => (
@@ -425,12 +433,12 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
           ))}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-[var(--color-border)] px-3 py-2 text-[10px] text-[var(--color-text-dim)]">
+        <div className="flex items-center gap-4 border-t border-[var(--color-border)] px-4 py-2.5 font-mono text-[10px] text-[var(--color-text-dim)]">
           <span>↑↓ navegar</span>
-          <span>↵ selecionar</span>
+          <span>↵ abrir</span>
           <span>esc fechar</span>
         </div>
-      </div>
+      </GradientBorder>
     </div>
   )
 }

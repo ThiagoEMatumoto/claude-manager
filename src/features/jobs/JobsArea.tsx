@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarClock, Pause, Pencil, Play, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer'
+import { Button, activeMarker } from '@/features/brand'
 import { projectsApi } from '@/lib/ipc'
 import { useJobsStore } from '@/store/jobsStore'
 import type { JobRun, JobRunStatus, Repo, ScheduledJob } from '../../../shared/types/ipc'
@@ -33,9 +34,14 @@ function RunStatusBadge({ status }: { status: JobRunStatus }) {
   const color = RUN_STATUS_COLOR[status]
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
-      style={{ color, borderColor: color, background: `${color}1a` }}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        color,
+        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+      }}
     >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
       {RUN_STATUS_LABEL[status]}
     </span>
   )
@@ -148,15 +154,10 @@ export function JobsArea() {
       <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <span className="text-sm font-semibold text-[var(--color-text)]">Jobs agendados</span>
-          <button
-            type="button"
-            onClick={openCreate}
-            title="Novo job"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
-          >
+          <Button variant="secondary" size="sm" onClick={openCreate} title="Novo job">
             <Icon as={Plus} size={14} />
             Novo
-          </button>
+          </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -175,7 +176,7 @@ export function JobsArea() {
                       onClick={() => void selectJob(job.id)}
                       className={`flex w-full flex-col gap-1 border-b border-[var(--color-border)] px-4 py-3 text-left transition ${
                         active
-                          ? 'bg-[var(--color-surface-2)]'
+                          ? `bg-[var(--color-surface-2)] ${activeMarker}`
                           : 'hover:bg-[var(--color-surface-2)]/60'
                       }`}
                     >
@@ -192,7 +193,7 @@ export function JobsArea() {
                       <span className="truncate text-xs text-[var(--color-text-dim)]">
                         {repoLabel(job)} · {formatSchedule(job.schedule)}
                       </span>
-                      <span className="text-[11px] text-[var(--color-text-dim)]">
+                      <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
                         {job.enabled ? `Próximo: ${formatWhen(job.nextRunAt)}` : 'Sem agendamento'}
                       </span>
                     </button>
@@ -227,31 +228,27 @@ export function JobsArea() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={() => void handleRunNow(selectedJob.id)}
                   disabled={running}
-                  className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-[var(--color-bg)] transition hover:opacity-90 disabled:opacity-50"
                 >
                   <Icon as={Play} size={14} />
                   {running ? 'Iniciando…' : 'Run now'}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => void toggleEnabled(selectedJob.id, !selectedJob.enabled)}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
                 >
                   <Icon as={selectedJob.enabled ? Pause : Play} size={14} />
                   {selectedJob.enabled ? 'Pausar' : 'Ativar'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openEdit(selectedJob)}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)]"
-                >
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => openEdit(selectedJob)}>
                   <Icon as={Pencil} size={14} />
                   Editar
-                </button>
+                </Button>
               </div>
             </header>
 
@@ -283,7 +280,7 @@ export function JobsArea() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <RunStatusBadge status={run.status} />
-                              <span className="text-[11px] text-[var(--color-text-dim)]">
+                              <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
                                 {formatWhen(run.startedAt ?? run.createdAt)}
                               </span>
                             </div>
@@ -325,7 +322,7 @@ function RunDetail({ run }: { run: JobRun }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-dim)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs tabular-nums text-[var(--color-text-dim)]">
         <RunStatusBadge status={run.status} />
         <span>Início: {formatWhen(run.startedAt)}</span>
         <span>Fim: {formatWhen(run.finishedAt)}</span>

@@ -26,19 +26,63 @@
   font-display: block;
 }
 
+/* Schibsted Grotesk — fonte de UI/display da marca Pitwall. Bundlada (woff2,
+   pesos 400/500/600/700/800), nunca CDN: o app é desktop/offline. font-display:
+   block evita FOUT trocando a métrica da UI depois do primeiro paint.
+   Licença: SchibstedGrotesk-OFL.txt ao lado das woff2. */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("./assets/fonts/SchibstedGrotesk-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("./assets/fonts/SchibstedGrotesk-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("./assets/fonts/SchibstedGrotesk-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("./assets/fonts/SchibstedGrotesk-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("./assets/fonts/SchibstedGrotesk-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: block;
+}
+
+/* Tokens default = tema Vácuo (roxo → ciano). useTheme.applyTheme sobrescreve
+   estas vars no documentElement conforme a preferência do usuário; ficam aqui
+   para o primeiro paint (boot) já sair na marca certa. */
 @theme {
-  --color-bg: #0b0b0f;
-  --color-surface: #14141b;
-  --color-surface-2: #1c1c25;
-  --color-border: #2a2a35;
-  --color-text: #e8e8ef;
-  --color-text-dim: #9c9cae;
-  --color-accent: #ff7a45;
-  --color-accent-dim: #c95f33;
-  --color-success: #5a9e6f;
-  --color-warning: #c79a4a;
-  --color-danger: #c0584f;
-  --color-info: #5a85b0;
+  --color-bg: #08080b;
+  --color-surface: #0f0e15;
+  --color-surface-2: #16141f;
+  --color-border: #282534;
+  --color-text: #f1f0f6;
+  --color-text-dim: #a5a1bd;
+  --color-accent: #9d8cff;
+  --color-accent-dim: #7a6dc7;
+  --color-accent2: #7fd6f2;
+  --color-success: #6fd695;
+  --color-warning: #ffb057;
+  --color-danger: #ff8d75;
+  --color-info: #7fa7e8;
   --color-violet: #a855f7;
 }
 
@@ -47,9 +91,14 @@ html, body, #root {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Números tabulares: custos/tempos/tokens não devem "dançar" ao atualizar. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -94,6 +143,39 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .chat-welcome-rise,
   .chat-welcome-glow {
+    animation: none;
+  }
+}
+
+/* Grafismos da marca Pitwall ("O Ápice" e afins). Um pulso por vista — usar com
+   parcimônia. Todos são desligados em prefers-reduced-motion (bloco abaixo). */
+@keyframes pw-pulse {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+@keyframes pw-ring {
+  0% { opacity: 0.5; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.5); }
+}
+@keyframes pw-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pw-cursor {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.pw-pulse { animation: pw-pulse 2.4s ease-in-out infinite; }
+.pw-ring { animation: pw-ring 2.4s ease-out infinite; }
+.pw-rise { animation: pw-rise 0.4s ease-out both; }
+.pw-cursor { animation: pw-cursor 1s step-end infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-pulse,
+  .pw-ring,
+  .pw-rise,
+  .pw-cursor {
     animation: none;
   }
 }

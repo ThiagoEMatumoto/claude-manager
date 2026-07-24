@@ -21,8 +21,12 @@ export function TaskStatusBadge({ status }: { status: TaskStatus }) {
   const meta = TASK_STATUS_META[status]
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.color }} />
       {meta.label}
@@ -34,8 +38,12 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
   const meta = PRIORITY_META[priority]
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
-      style={{ color: meta.color, background: 'var(--color-bg)' }}
+      className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        color: meta.color,
+        borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+      }}
     >
       {meta.label}
     </span>
@@ -45,12 +53,14 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
 export function DueDateBadge({ task }: { task: Task }) {
   if (task.dueDate == null) return null
   const overdue = isOverdue(task)
+  const color = overdue ? 'var(--color-danger)' : 'var(--color-text-dim)'
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] tabular-nums"
+      className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 font-mono text-[10px] tabular-nums"
       style={{
-        color: overdue ? 'var(--color-danger)' : 'var(--color-text-dim)',
-        background: 'var(--color-bg)',
+        color,
+        borderColor: `color-mix(in srgb, ${color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
       }}
       title={overdue ? 'Vencida' : 'Prazo'}
     >

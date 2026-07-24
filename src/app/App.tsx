@@ -4,6 +4,7 @@ import { AppShell } from './AppShell'
 import { useProjects } from '@/features/projects/useProjects'
 import { WelcomeDialog } from '@/features/settings/WelcomeDialog'
 import { TitleBar } from '@/features/titlebar/TitleBar'
+import { BootSplashGate } from '@/features/splash'
 import { vaultApi } from '@/lib/ipc'
 import { useAppStore } from '@/store/appStore'
 import { loadAndApplyTheme } from './useTheme'
@@ -45,17 +46,19 @@ export default function App() {
   }, [projects, activeProjectId, restored, setActiveProject])
 
   return (
-    <div className="flex h-full flex-col">
-      <TitleBar />
-      <div className="min-h-0 flex-1">
-        <ErrorBoundary>
-          {vaultConfigured === false ? (
-            <WelcomeDialog onDone={() => setVaultConfigured(true)} />
-          ) : (
-            <AppShell />
-          )}
-        </ErrorBoundary>
+    <BootSplashGate>
+      <div className="flex h-full flex-col">
+        <TitleBar />
+        <div className="min-h-0 flex-1">
+          <ErrorBoundary>
+            {vaultConfigured === false ? (
+              <WelcomeDialog onDone={() => setVaultConfigured(true)} />
+            ) : (
+              <AppShell />
+            )}
+          </ErrorBoundary>
+        </div>
       </div>
-    </div>
+    </BootSplashGate>
   )
 }

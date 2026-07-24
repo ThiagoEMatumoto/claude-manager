@@ -28,6 +28,7 @@ import { EditProjectDialog } from './EditProjectDialog'
 import { ProjectRepos } from './ProjectRepos'
 import { Menu } from '@/components/ui/Menu'
 import { Icon } from '@/components/ui/Icon'
+import { Button, ControlPill } from '@/features/brand'
 import { renderProjectIcon } from '@/components/ui/projectIcon'
 import { useAppStore } from '@/store/appStore'
 import { repoApi } from '@/lib/ipc'
@@ -164,7 +165,7 @@ export function ProjectsSidebar() {
   }
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <aside className="flex h-full w-[264px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_55%,transparent)]">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="flex items-center gap-2">
           <button
@@ -178,22 +179,17 @@ export function ProjectsSidebar() {
           <div className="text-sm font-semibold tracking-tight">Projetos</div>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
+          <ControlPill
+            icon={RefreshCw}
+            label={pullingAll ? 'Sincronizando…' : 'Sync'}
             onClick={() => void pullAll()}
             disabled={pullingAll}
+            className="font-mono"
             title="git pull --ff-only em todos os repos (pula sujos/divergentes)"
-            className="rounded-md p-1 text-[var(--color-text-dim)] transition hover:text-[var(--color-text)] disabled:opacity-60"
-          >
-            <Icon as={RefreshCw} size={14} className={pullingAll ? 'animate-spin' : undefined} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs font-medium text-black transition hover:opacity-90"
-          >
+          />
+          <Button variant="primary" size="sm" onClick={() => setDialogOpen(true)}>
             + Novo
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -252,13 +248,9 @@ export function ProjectsSidebar() {
             <div className="text-xs text-[var(--color-text-dim)]">
               Crie um projeto pra agrupar seus repositórios e sessões.
             </div>
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              className="mt-1 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90"
-            >
+            <Button variant="primary" size="sm" className="mt-1" onClick={() => setDialogOpen(true)}>
               Criar projeto
-            </button>
+            </Button>
           </div>
         )}
 
@@ -339,13 +331,19 @@ function SortableProjectItem({
   return (
     <li ref={setNodeRef} style={style}>
       <div
-        className={`group flex items-center justify-between border-l-2 px-2 py-2 text-sm transition ${
+        className={`group flex items-center justify-between rounded-lg border-l-2 px-2 py-2 text-sm transition ${
           active || expanded
-            ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]'
+            ? 'text-[var(--color-text)]'
             : 'border-transparent text-[var(--color-text-dim)] hover:bg-[var(--color-surface-2)]/60 hover:text-[var(--color-text)]'
         }`}
         style={
-          active || expanded ? { borderLeftColor: project.color ?? 'var(--color-accent)' } : undefined
+          active || expanded
+            ? {
+                borderLeftColor: project.color ?? 'var(--color-accent)',
+                background:
+                  'linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent)',
+              }
+            : undefined
         }
       >
         <button

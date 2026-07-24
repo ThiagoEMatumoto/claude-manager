@@ -58,7 +58,7 @@ export function AboutTab({ open }: { open: boolean }) {
     <div className="space-y-6">
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4">
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold text-[var(--color-text)]">Claude Manager</span>
+          <span className="text-2xl font-semibold text-[var(--color-text)]">Pitwall</span>
           <span className="text-sm text-[var(--color-text-dim)]">
             v{info?.version ?? '…'}
           </span>

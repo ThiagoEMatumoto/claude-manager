@@ -29,7 +29,7 @@ export function TitleBar() {
           style={{ background: 'var(--color-accent)' }}
         />
         <span className="text-xs font-medium" style={{ color: 'var(--color-text-dim)' }}>
-          Claude Manager
+          Pitwall
         </span>
       </div>
 

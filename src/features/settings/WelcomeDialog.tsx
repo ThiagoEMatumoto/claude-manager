@@ -37,7 +37,7 @@ export function WelcomeDialog({ onDone }: Props) {
     <Dialog
       open
       onClose={() => {}}
-      title="Bem-vindo ao Claude Manager"
+      title="Bem-vindo ao Pitwall"
       footer={
         <Button onClick={handleStart} disabled={!root.trim()} loading={submitting}>
           Começar

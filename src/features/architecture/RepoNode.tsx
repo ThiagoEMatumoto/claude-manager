@@ -132,7 +132,7 @@ function RepoNodeImpl({ data, selected }: NodeProps) {
           title={`${handoffCount} handoff(s) — abrir inbox`}
           // nodrag/nopan + stopPropagation: o clique navega ao inbox sem
           // interferir no drag/seleção do react-flow.
-          className="nodrag nopan absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border px-1 text-[9px] font-semibold leading-none text-[var(--color-bg)] transition hover:brightness-110"
+          className="nodrag nopan absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border px-1 font-mono text-[9px] font-semibold leading-none tabular-nums text-[var(--color-bg)] transition hover:brightness-110"
           style={{ backgroundColor: badgeColor, borderColor: badgeColor }}
           onClick={(e) => {
             e.stopPropagation()

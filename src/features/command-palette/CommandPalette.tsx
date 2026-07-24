@@ -12,9 +12,11 @@ import { useEndedSessions, useVisibleLiveSessions } from '../session-switcher/us
 import { launcherCommandText, loadLauncherItems } from './launcher'
 import {
   capByGroup,
-  ENDED_SESSIONS_GROUP,
-  LIVE_SESSIONS_GROUP,
+  GARAGE_GROUP,
+  liveSessionGroup,
   SESSION_GROUP_CAPS,
+  WAITING_GROUP,
+  WORKING_GROUP,
 } from './session-results'
 import type { LauncherItem, LiveSessionInfo, Project, Repo } from '../../../shared/types/ipc'
 
@@ -210,7 +212,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
         searchText: sessionSearchText(s),
         icon: sessionIcon(s),
         hint: sessionHint(s),
-        group: LIVE_SESSIONS_GROUP,
+        group: liveSessionGroup(s.status),
         run: () => void focusOrOpenSession(s),
       })
     }
@@ -225,7 +227,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
         icon: sessionIcon(s),
         // listEndedGlobal já entrega status 'ended' — o hint mostra "encerrada".
         hint: sessionHint(s),
-        group: ENDED_SESSIONS_GROUP,
+        group: GARAGE_GROUP,
         run: () =>
           void resumeSession(s.repo, s.projectName, s.projectIcon, s.projectColor, s.ccSessionId),
       })
@@ -402,7 +404,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: Props) {
           {groups.map((g) => (
             <div key={g.group} className="py-1">
               <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-dim)]">
-                {g.group === LIVE_SESSIONS_GROUP && (
+                {(g.group === WAITING_GROUP || g.group === WORKING_GROUP) && (
                   <span className="pw-pulse h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
                 )}
                 {g.group}

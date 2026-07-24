@@ -93,8 +93,8 @@ export function SessionHeader({
   return (
     <div
       ref={ref}
-      className="group flex h-8 shrink-0 items-center justify-between gap-3 border-b border-l-2 border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-3 text-xs"
-      style={projectColor ? { borderLeftColor: projectColor } : undefined}
+      className="group flex h-[33px] shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] border-b-white/[0.06] bg-gradient-to-b from-[var(--color-surface-2)]/70 to-[var(--color-surface)]/50 px-3.5 text-xs"
+      style={{ boxShadow: `inset 2px 0 0 ${projectColor ?? 'var(--color-accent)'}` }}
     >
       <div className="flex min-w-0 items-center gap-2">
         {!exited && (

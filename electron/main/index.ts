@@ -51,6 +51,23 @@ import { setMainWindow, emitToast } from './services/notifications'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// Trava do diretório de dados. app.getPath('userData') resolve para
+// <appData>/<app.getName()>, e getName() lê productName do package.json. O app
+// se chama PITWALL para o usuário (productName no electron-builder.yml), mas o
+// banco, as features e o sync-config vivem em ~/.config/claude-manager desde
+// sempre. Sem esta linha, qualquer mudança futura que faça getName() retornar
+// outra coisa aponta o app para um diretório vazio — o usuário abre e não tem
+// mais projeto nenhum. Precisa vir ANTES do primeiro getPref/getDb abaixo, que
+// já abre o banco no top-level do módulo.
+//
+// O --user-data-dir explícito vence: é como o harness de e2e (drive-app) roda o
+// app contra uma CÓPIA dos dados reais. Sobrescrever o flag aqui apontaria os
+// testes de volta pro banco de verdade e destruiria a garantia de que dirigir o
+// app não toca no estado do usuário.
+if (!process.argv.some((a) => a.startsWith('--user-data-dir'))) {
+  app.setPath('userData', join(app.getPath('appData'), 'claude-manager'))
+}
+
 const isDev = !app.isPackaged
 
 // GPU: default agora é aceleração LIGADA em todas as plataformas (nitidez do

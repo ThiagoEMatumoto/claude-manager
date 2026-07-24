@@ -1,5 +1,5 @@
 appId: com.thiagomatumoto.claude-manager
-productName: Claude Manager
+productName: PITWALL
 directories:
   output: dist
   buildResources: build

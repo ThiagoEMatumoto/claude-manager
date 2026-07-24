@@ -28,8 +28,15 @@ export function TitleBar() {
           className="h-2.5 w-2.5 rounded-full"
           style={{ background: 'var(--color-accent)' }}
         />
-        <span className="text-xs font-medium" style={{ color: 'var(--color-text-dim)' }}>
-          Claude Manager
+        <span
+          className="text-[11px] font-bold"
+          style={{
+            color: 'var(--color-text-dim)',
+            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+            letterSpacing: '0.18em',
+          }}
+        >
+          PITWALL
         </span>
       </div>
 

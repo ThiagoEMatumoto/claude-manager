@@ -107,8 +107,8 @@ export function Splash({ onFinish, exiting }: Props) {
         <svg className="spl-svg" viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="spl-grad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#7fd6f2" />
-              <stop offset="1" stopColor="#9d8cff" />
+              <stop offset="0" stopColor="var(--color-accent2)" />
+              <stop offset="1" stopColor="var(--color-accent)" />
             </linearGradient>
             <filter id="spl-glow" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="4" result="b" />
@@ -125,7 +125,7 @@ export function Splash({ onFinish, exiting }: Props) {
             d={TRACK_PATH}
             pathLength={2600}
             fill="none"
-            stroke="#282534"
+            stroke="var(--color-border)"
             strokeWidth={2.5}
             strokeLinecap="round"
           />
@@ -165,7 +165,7 @@ export function Splash({ onFinish, exiting }: Props) {
                   fill="freeze"
                 />
               </circle>
-              <circle r={3} fill="#7fd6f2" opacity={0}>
+              <circle r={3} fill="var(--color-accent2)" opacity={0}>
                 <animate
                   attributeName="opacity"
                   from="0"

@@ -1,7 +1,15 @@
 import { useState } from 'react'
-import { AlertTriangle, ChevronRight, CornerDownRight, Wrench } from 'lucide-react'
+import { AlertTriangle, ChevronRight, CornerDownRight, Terminal, Wrench } from 'lucide-react'
+import type { LucideProps } from 'lucide-react'
+import type { ComponentType } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { CopyButton } from '@/components/ui/CopyButton'
+
+// Ícone da tool: terminal pras de shell (Bash), wrench pro resto. O transcript
+// (ChatMessage.tool_use) não expõe elapsed/duração, então não há "✓ Xs" a mostrar.
+function toolIcon(name: string): ComponentType<LucideProps> {
+  return /^(bash|shell|sh|zsh)$/i.test(name.trim()) ? Terminal : Wrench
+}
 
 // Resumo de uma linha do input/result quando o card está fechado.
 function summarize(value: unknown, max = 140): string {
@@ -39,7 +47,7 @@ export function ToolUseCard({ name, input }: { name: string; input: unknown }) {
         className="flex w-full items-center gap-2 px-1.5 py-1 text-left"
       >
         <Icon as={ChevronRight} size={11} className={`shrink-0 transition ${open ? 'rotate-90' : ''}`} />
-        <Icon as={Wrench} size={11} className="shrink-0 text-[var(--color-accent)]" />
+        <Icon as={toolIcon(name)} size={11} className="shrink-0 text-[var(--color-accent)]" />
         <span className="shrink-0 text-[var(--color-text)]">{name}</span>
         <span className="truncate text-[var(--color-text-dim)]">{summarize(input)}</span>
       </button>
